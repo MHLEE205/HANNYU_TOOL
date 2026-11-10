@@ -804,7 +804,16 @@ window.C01 = window.C01 || {};
       return { path: d.path, name: String(d.path).split('/').pop(), page: 1, ivdoc: true };
     });
   }
-  function curFileIdx(q) { var n = qFiles(q).length, i = +(S.qfile[q.queue_id] || 0); return n ? Math.min(Math.max(0, i), n - 1) : 0; }
+  /* 選んでいなければ 画面に出せるファイル (PDF · 画像) を先に — 名前に「搬入」があればそれ (Excel などが先頭だと「表示できません」になるため) */
+  function curFileIdx(q) {
+    var fs = qFiles(q), n = fs.length;
+    if (!n) return 0;
+    if (S.qfile[q.queue_id] !== undefined) return Math.min(Math.max(0, +S.qfile[q.queue_id] || 0), n - 1);
+    var showable = function (f) { return /\.(pdf|png|jpe?g|gif|svg|webp|bmp)$/i.test(f.path || ''); };
+    for (var k = 0; k < n; k++) if (showable(fs[k]) && /搬入/.test(fs[k].name || fs[k].path || '')) return k;
+    for (var j = 0; j < n; j++) if (showable(fs[j])) return j;
+    return 0;
+  }
   function renderInput() {
     var ov = overlay();
     var all0 = ((S.queue && S.queue.items) || []).filter(queuePortOk);
