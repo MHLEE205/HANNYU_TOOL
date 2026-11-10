@@ -204,8 +204,12 @@ def main():
         # v0.2.2 (#109 ②): 枠一覧 (エンジン data_json ivs[].slots と同じ形) — 行の枠 + メール未着の枠 + 空き枠
         sl_guids = [r["slot_guid"] for r in rows if r["slot_guid"]] + [m["slot_guid"] for m in mm]
         sl_guids += [sha16(iv + f"free{k}") + "-slot" for k in range(max(0, slots_n - len(sl_guids)))]
-        slots = [{"slot_guid": g, "packer": packer, "plant": plant, "item": item, "incoterms": "CIF" if cond == "港" else "FOB", "type": "40HC"}
-                 for g in sl_guids]
+        # v0.3.9 (R7E Part C): COMPASS 枠の順 seq — TST2611-04 は逆順 (行の並び ≠ 枠の並び の試験) · ほかは並びどおり
+        rev = iv == "TST2611-04"
+        slots = [{"slot_guid": g, "packer": packer, "plant": plant, "item": item, "incoterms": "CIF" if cond == "港" else "FOB", "type": "40HC",
+                  "seq": (len(sl_guids) - 1 - k) if rev else k} for k, g in enumerate(sl_guids)]
+        for m in mm:
+            m["seq"] = next(x["seq"] for x in slots if x["slot_guid"] == m["slot_guid"])
         jik_ivs.append({"iv_no": iv, "booking_guid": guid, "bkg_no": bkg, "cy_cut": d(cyd), "cy_open": d(cyd - 6), "pol": pol, "state": "有効", "slots": slots,
                         "item": item, "incoterms": "CIF" if cond == "港" else "FOB", "packer": packer, "plant": plant, "slots_n": slots_n,
                         "containers_n": len(rows), "compass_input": [], "reminders": [], "rows": rows, "mail_missing": mm})

@@ -289,6 +289,14 @@ window.C01 = window.C01 || {};
     }
     return { st: st, human: human };
   }
+  /* v0.3.9: 枠 GUID → 並び順 (COMPASS seq が全部あれば seq · 無ければ slots の並び) */
+  function slotSeq(iv) {
+    var m = {}, sl = iv.slots || [];
+    var allSeq = sl.length > 0 && sl.every(function (s) { return typeof s.seq === 'number'; });
+    sl.forEach(function (s, i) { if (s.slot_guid) m[s.slot_guid] = allSeq ? s.seq : i; });
+    (iv.mail_missing || []).forEach(function (mm, i) { if (mm.slot_guid && m[mm.slot_guid] === undefined) m[mm.slot_guid] = typeof mm.seq === 'number' ? mm.seq : 1e6 + i; });
+    return m;
+  }
   function buildGroups() {
     var ov = overlay();
     var out = [], cnt = { check: 0, compass: 0, remind: 0 }, no = 0;
@@ -328,9 +336,22 @@ window.C01 = window.C01 || {};
       if (S.filter === 'check' && !hasCheck) return;
       if (S.filter === 'compass' && !(allOk && !compassDone)) return;
       if (S.filter === 'remind' && !remind) return;
-      var list = rows.concat(S.showUnarrived ? unarr : []);
-      list.forEach(function (x) { no += 1; x.no = no; });
-      out.push({ iv: iv, rows: list, okN: okN, total: rows.length + unarr.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
+      /* v0.3.9 (R7E 形님 ②): 行の順 = COMPASS 枠の順 (slots[].seq · 無ければ slots の並び)。枠が決まった行はその枠の位置 · メール未着の枠も同じ位置 ·
+         枠のない行 (未割当) はそのブッキングの一番下。台数 = 枠の数 (未割当の行を別に数えない · 二重に数えない)。No = ブッキングごとに 1 から (D-42) */
+      var seqOf = slotSeq(iv);
+      var slotted = [], free = [];
+      rows.forEach(function (x) { (x.r.slot_guid && seqOf[x.r.slot_guid] !== undefined ? slotted : free).push(x); });
+      free.forEach(function (x) { x.unassigned = true; });
+      var shownUn = S.showUnarrived ? unarr : [];
+      var bySeq = slotted.concat(shownUn).map(function (x, i) { return { x: x, k: seqOf[x.kind === 'missing' ? x.m.slot_guid : x.r.slot_guid], i: i }; })
+        .sort(function (a, b) { var ka = a.k === undefined ? 1e9 : a.k, kb = b.k === undefined ? 1e9 : b.k; return ka - kb || a.i - b.i; })
+        .map(function (e) { return e.x; });
+      var list = bySeq.concat(free);
+      var ivNo = 0;
+      list.forEach(function (x) { ivNo += 1; x.no = ivNo; no += 1; });
+      var nSlots = (iv.slots && iv.slots.length) || iv.slots_n || 0;
+      var total = nSlots ? Math.max(nSlots, rows.length - Math.min(free.length, unarr.length) + unarr.length) : rows.length + unarr.length;
+      out.push({ iv: iv, rows: list, okN: okN, total: total, nFree: free.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
     });
     return { groups: out, cnt: cnt, ov: ov };
   }
@@ -438,8 +459,9 @@ window.C01 = window.C01 || {};
         var stCell = x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
           x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
             '<span class="st-wait">' + esc(x.wait) + '</span>';
+        if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '');
-        html += '<tr class="c01-row ' + cls + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
+        html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
           '</td><td>' + esc(md(v.work_date)) + '</td>' + cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
@@ -548,7 +570,8 @@ window.C01 = window.C01 || {};
   }
   /* ── v0.2.0 催促 プレビュー窓 (設計 §7 · 決定 #97) — 下書きだけ。送信は無効「下書きのみ」 ── */
   /* ── #109 行の情報表示 · スロット変更 (全職員 · 入れ替え確認 · _actions に 誰・いつ・前→後 · 元に戻す) ── */
-  var INFO_TEXT = { CT_CHECKDIGIT_OVERRIDE: 'チェックディジット不一致を確認して保存（確認済 · 自動OK にしない）' };
+  var INFO_TEXT = { CT_CHECKDIGIT_OVERRIDE: 'チェックディジット不一致を確認して保存（確認済 · 自動OK にしない）',
+    AI_GROUP_DIFF: 'AI 区分が異なる — 写真はフォルダ · ファイル名 · 業者ルールでまとめました（AI の写真の区分とは違います · 情報だけ）' };
   function canSlotChange() {
     var R = C01.RULES || {};
     if (R.slotChange === 'all') return true;
@@ -596,6 +619,10 @@ window.C01 = window.C01 || {};
     return String(f).indexOf('・') >= 0 ? { v: '—', t: '候補: ' + String(f).split('・').join(' / ') } : { v: f, t: f };
   }
   var ACT_MARK = '<!--c01-acts-->';
+  function qAiDiff(q, iv) {
+    var row = iv && q.container_id ? (iv.rows || []).filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+    return !!(row && (row.info || []).indexOf('AI_GROUP_DIFF') >= 0);
+  }
   function qPackerPlant(q, iv) {
     var row = q.container_id ? (iv.rows || []).filter(function (r) { return r.container_id === q.container_id; })[0] : null;
     return rowVal(iv, row, 'packer').v + ' ' + rowVal(iv, row, 'plant').v;
@@ -610,6 +637,8 @@ window.C01 = window.C01 || {};
     }
     var ovr = (r.info || []).indexOf('CT_CHECKDIGIT_OVERRIDE') >= 0 || Object.keys(x.human || {}).some(function (f) { return (x.human[f].override || []).indexOf('CT_CHECKDIGIT_OVERRIDE') >= 0; });
     if (ovr) out += ' <span class="c01-ibadge" data-info="CT_CHECKDIGIT_OVERRIDE" title="' + esc(INFO_TEXT.CT_CHECKDIGIT_OVERRIDE) + '">CD</span>';
+    if ((r.info || []).indexOf('AI_GROUP_DIFF') >= 0)        /* v0.3.8 (R7D Part A · 決定 #139 ①): 構造 (フォルダ · ファイル名 · 業者ルール) でまとめた写真 — AI の写真区分とは違う (情報だけ) */
+      out += ' <span class="c01-ibadge" data-info="AI_GROUP_DIFF" title="' + esc(INFO_TEXT.AI_GROUP_DIFF) + '">AI区分</span>';
     var si = slotInfo(iv, r, ov);
     if (si) out += ' <span class="c01-ibadge" data-info="slot_change" title="' + esc(slotInfoText(iv, si)) + '">⇄ 枠変更</span>';
     return out;
@@ -953,6 +982,7 @@ window.C01 = window.C01 || {};
       var KC = KIND[q.kind];
       html += '<div class="c01-form-h"><span class="k" style="color:' + KC.color + '">' + esc(kindLabel(q.kind)) + '</span><span class="mono big">' +
         esc(q.kind === '写真のCT' ? 'CT 不明の写真 ' + (q.files || []).length + '枚' : q.kind === '未分類FAX' ? ((q.files || [])[0] || {}).name || '' : (q.ct || '（CT 不明）')) + '</span>' +
+        (qAiDiff(q, iv) ? '<span class="c01-ibadge" data-info="AI_GROUP_DIFF" title="' + esc(INFO_TEXT.AI_GROUP_DIFF) + '">AI 区分が異なる</span>' : '') +
         '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 ' + (q.issuer || '不明') + (q.received_at ? ' · 受信 ' + md(String(q.received_at).slice(0, 10)) : '') : (q.iv_no || '') + ' · ' + (iv ? qPackerPlant(q, iv) : '') + ' · CY ' + (md(q.cy_cut) || '—')) + '</span></div>';
       html += ACT_MARK + '<div class="c01-form-b">';
       if (st.done) html += '<p class="' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? 'c01-lost' : 'c01-okmsg') + '">' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? '他の人が先に確認しました' : '完了しました') + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';

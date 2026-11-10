@@ -219,6 +219,7 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 
 /* 写真枚数の色 (旧 実況表と同じ基準: 5枚以下 または 15枚以上 · 0枚を含む · phase4_report.py) */
 .c01-ph-alert { background: var(--ph-alert) !important; font-weight: 700; }
+.c01-unassigned { display: inline-block; padding: 0 4px; margin-right: 2px; border: 1px dashed currentColor; border-radius: 3px; font-size: 11px; opacity: .85; }
 .c01-phcount { display: inline-block; padding: 0 6px; border-radius: 4px; font-weight: 600; }
 
 /* v0.3.2 (R7B): PDF (pdf.js · canvas) */

@@ -77,6 +77,7 @@ def main():
     two["plant"] = "テスト一工場・テスト二工場"
     for r in two["rows"]:
         r["plant"] = None
+    two["rows"][0]["info"] = ["AI_GROUP_DIFF"]          # v0.3.8 (R7D Part A): 구조 우선 묶음 줄 = 「AI区分」 정보
     jp.write_text(json.dumps(jj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     port = free_port()
     srv = subprocess.Popen([sys.executable, str(TOOL / "tools" / "serve_local.py"), "--root", str(root), "--port", str(port), "--today", "2026-11-08"],
@@ -128,9 +129,15 @@ def main():
                     pl = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-02'] tr.c01-row")].map(tr => {
                       const td = tr.children[12]; return { slot: tr.classList.contains('missing') ? 'm' : '', t: td.textContent, title: (td.querySelector('[title]') || td).title }; })""")
                     slots2 = [(r.get("slot_guid") or "") for r in next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-02")["rows"]]
+                    slots2 = [g for g in slots2 if g] + [g for g in slots2 if not g]      # v0.3.9: 칸 배정 줄 (seq 순) 다음 未割当 줄
                     real = [x for x in pl if x["slot"] != "m"]
                     ok("U-1 칸 배정 줄 Plant 에 「・」 0 (배정 칸 1개)", all("・" not in x["t"] for x in real) and
                        [x["t"] for x, g in zip(real, slots2) if g] == ["テスト一工場", "テスト二工場"], pl)
+                    dots = page.evaluate("""() => [...document.querySelectorAll("#jikkyou-table tr.c01-row:not(.missing):not(.unassigned)")].map(tr =>
+                      [3, 10, 11, 12].map(i => tr.children[i].textContent))""")
+                    ok("D-42 칸 배정 줄 品目 · 条件 · 圧縮業者 · Plant 에 「・」 0", len(dots) > 0 and all("・" not in t for row in dots for t in row), dots[:3])
+                    ai = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-02'] [data-info='AI_GROUP_DIFF']")].map(e => e.title)""")
+                    ok("R7D A: AI 区分が異なる 정보 = 그 줄 1개 (title 설명)", len(ai) == 1 and "AI 区分が異なる" in ai[0], ai)
                     ok("U-1 미배정 줄 = 「—」 · 마우스 = 후보", all(x["t"] == "—" for x, g in zip(real, slots2) if not g) and any(not g for g in slots2) and
                        all(x["title"] == "候補: テスト一工場 / テスト二工場" for x, g in zip(real, slots2) if not g), pl)
                 page.context.close()

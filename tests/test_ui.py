@@ -105,11 +105,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.7", page.title() == "LEENAI C-01 搬入票 v0.3.7", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.9", page.title() == "LEENAI C-01 搬入票 v0.3.9", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.7" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.9" in page.locator(".ln-hdr-ver").inner_text())
             ok("기본 테마 DARK", page.evaluate("document.documentElement.getAttribute('data-theme')") == "dark")
             ths = page.locator("#jikkyou-table thead th").all_inner_texts()
             ok("実況表 열 15 · 순서", ths == ["No", "CYカット", "Invoice番号", "品目", "CT番号", "シール番号", "正味重量", "風袋重量", "ベール数", "作業日", "条件", "圧縮業者",
@@ -128,6 +128,24 @@ def main():
             sts = set(page.eval_on_selector_all("tr.c01-row", "els => els.map(e => e.getAttribute('data-status') || 'メール未着')"))
             ok("줄 색 4종 (自動OK·確認済 초록 / 再確認 주황 / 受信中·メール未着 회색)", kinds == {"ok", "check", "wait"} and {"自動OK", "確認済", "再確認", "受信中", "メール未着"} <= sts, sorted(sts))
             ok("メール未着 줄", page.locator("tr.missing").count() == 3, page.locator("tr.missing").count())
+            # v0.3.9 (R7E Part C · D-42): No = 부킹마다 1 부터 · 줄 순서 = COMPASS 칸 seq · 칸 없는 줄 = 맨 아래 「未割当」 · 台数 = 칸 수 (이중 셈 0)
+            nos = page.evaluate("""() => [...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
+                [...tb.querySelectorAll('tr.c01-row td.c-no')].map(td => +td.textContent)])""")
+            ok("D-42 No = 부킹마다 1, 2, 3 …", all(v == list(range(1, len(v) + 1)) for _, v in nos) and len(nos) == 5, nos)
+            iv4 = next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-04")
+            sq4 = {sl["slot_guid"]: sl["seq"] for sl in iv4["slots"]}
+            want4 = [r["ct"] for r in sorted([r for r in iv4["rows"] if r.get("slot_guid")], key=lambda r: sq4[r["slot_guid"]])] +                     [r["ct"] for r in iv4["rows"] if not r.get("slot_guid")]
+            got4 = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-04'] tr.c01-row")].map(tr => tr.children[4].textContent.trim())""")
+            ok("C 줄 순서 = COMPASS 칸 seq (TST2611-04 칸 역순) · 未割当 맨 아래", got4 == want4 and want4 != [r["ct"] for r in iv4["rows"]], [got4, want4])
+            un4 = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-04'] tr.c01-row")].map(tr => tr.classList.contains('unassigned') && !!tr.querySelector('.c01-unassigned'))""")
+            ok("C 칸 없는 줄 = 「未割当」 표시 (TST2611-04 2줄 · 맨 아래)", un4 == [False, False, True, True], un4)
+            tot = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
+                (tb.querySelector('.c01-ivhead').textContent.match(/([0-9]+)[/]([0-9]+)台/) || [])[2]]))""")
+            want_tot = {iv["iv_no"]: str(max(len(iv["slots"]), len(iv["rows"]) - min(sum(1 for r in iv["rows"] if not r.get("slot_guid")), len(iv["mail_missing"])) + len(iv["mail_missing"])))
+                        for iv in jj["ivs"]}
+            ok("C 台数 = 칸 수 기준 (未割当 · メール未着 이중 셈 0)", tot == want_tot and all(int(v) <= len(iv["slots"]) for iv in jj["ivs"] for k, v in tot.items() if k == iv["iv_no"]), [tot, want_tot])
+            ms = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-03'] tr.c01-row")].map(tr => tr.classList.contains('missing') ? 'm' : (tr.classList.contains('unassigned') ? 'u' : 's'))""")
+            ok("C メール未着 칸 줄 = 칸 자리 · 未割当 줄은 그 아래", ms == ["m", "u", "u"], ms)
             page.uncheck("#show-unarrived")
             ok("メール未着も表示 끄기 → 줄 없음", page.locator("tr.missing").count() == 0)
             page.check("#show-unarrived")
@@ -189,7 +207,7 @@ def main():
             ok("마스터에 없는 港 = * 줄 (STAFF_C = KOBE + * → HAKATA)", sorted(ivs) == ["TST2611-04", "TST2611-05"], ivs)
             page.click("[data-port='all']")
             ok("全港 전환", page.locator("tbody[data-iv]").count() == 5)
-            # v0.3.7 (R7D Part U-2): 担当港 복수 선택 · 기억
+            # v0.3.8 (R7D Part U-2): 担当港 복수 선택 · 기억
             ivs_of = lambda: sorted(page.eval_on_selector_all("tbody[data-iv]", "els => els.map(e => e.getAttribute('data-iv'))"))
             page.click("[data-port='TOKYO']")
             page.click("[data-port='KOBE']")
@@ -270,7 +288,7 @@ def main():
             kinds_txt = page.locator(".c01-kinds .c01-chip").all_inner_texts()
             ok("確認・入力 4종 + すべて", [k.split(" ")[0] for k in kinds_txt] == ["すべて", "値の違い", "手入力", "写真の", "未分類"] or len(kinds_txt) == 5, kinds_txt)
             page.screenshot(path=str(shots / "input_dark.png"), full_page=True)
-            # v0.3.7 (R7D Part U-3): 판단 버튼 = 오른쪽 패널 맨 위 (항목 제목 바로 아래) · 모든 종류 같은 위치
+            # v0.3.8 (R7D Part U-3): 판단 버튼 = 오른쪽 패널 맨 위 (항목 제목 바로 아래) · 모든 종류 같은 위치
             pos_ok = []
             for kd in ["値の違い", "手入力", "写真のCT", "未分類FAX"]:
                 page.click(f".c01-kinds [data-kind='{kd}']")
