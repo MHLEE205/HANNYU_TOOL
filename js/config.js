@@ -7,9 +7,9 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.0',
+  version: '0.3.1',
   date: '2026-11-10',
-  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (DRY) · 催促プレビュー（ローカルプレビュー版 — データは選んだフォルダから読みます）'
+  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (DRY) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
 
 /* D-6 → 決定 #109 (R6.8) で決まった規則。ここだけ変える (エンジン engine/actions/apply.py ACTION_RULES と同じ規則) */
@@ -24,11 +24,12 @@ C01.RULES = {
   ctCheckDigitWrong: 'warn'
 };
 
-/* データの読み先: 'local' (今 — 127.0.0.1 サーバー or フォルダ選択) / 'graph' (R7 — SharePoint PHOTO_V2、今は使わない) */
+/* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */
 C01.SOURCE = {
-  mode: 'local',
+  mode: 'graph',
   pollMs: 30000,          /* 他の人の確認を 30 秒ごとに読む (決定 #100) */
-  graphEnabled: false     /* R7 まで false — graph への呼び出し 0 */
+  graphEnabled: true,     /* R7A (決定 #132 · #137): ログインボタン有効 — false に戻すとログインボタン無効 · graph 呼び出し 0 */
+  spRoot: 'HANNYU_TOOL'   /* ドキュメント ライブラリ直下のフォルダ (PHOTO_V2) — _data · 写真 · 搬入票 · _actions */
 };
 
 /* v0.2.0 (R6): Compass入力 · 催促 は下書き・比較表だけ。送信ボタンは常に無効 (R7 以降 · 決定のあと) */

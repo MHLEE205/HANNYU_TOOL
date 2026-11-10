@@ -1,7 +1,7 @@
 /* ✦ Powered by LEENAI Automation System — 起動 (LEENAI_COMMON を読むだけ・変更しない)
    - LEENAI.init にバージョン (C01.TOOL_INFO) を渡す = 表示はこの 1 か所から
    - local モード: Pages アドレスがなくログイン (PKCE) できないので、ログインカードに「ローカルプレビューで開く」を足す
-     (127.0.0.1 サーバー or フォルダ選択)。graph モード (R7) は LEENAI の onReady から始める (今は無効) */
+     (127.0.0.1 サーバー or フォルダ選択)。graph モード (R7A) は LEENAI の onReady (ログイン後) から始める (C01.SOURCE.graphEnabled) */
 'use strict';
 (function () {
   var I = C01.TOOL_INFO;
@@ -60,7 +60,7 @@
     box.innerHTML = '<div class="c01-local-title">ローカルプレビュー（ログインなし · データは選んだフォルダから）</div>' +
       (server ? '<button class="ln-login-btn c01-local-btn" id="c01-open-server">ローカルプレビューで開く</button>' : '') +
       '<button class="ln-btn-ghost c01-local-btn2" id="c01-open-folder">フォルダを選んで開く（_data があるフォルダ）</button>' +
-      '<div class="ln-login-note">Microsoft 365 ログイン (SharePoint PHOTO_V2) は R7 で有効になります</div>';
+      '<div class="ln-login-note">' + (C01.SOURCE.graphEnabled ? '本番データは上の「Microsoft 365 でログイン」から (SharePoint ' + C01.SOURCE.spRoot + ')' : 'Microsoft 365 ログイン (SharePoint) は無効です') + '</div>';
     card.insertBefore(box, card.querySelector('.ln-splash-theme'));
     var bs = document.getElementById('c01-open-server');
     if (bs) bs.onclick = function () { openApp(new C01.sources.LocalServer()); };
@@ -68,7 +68,7 @@
       C01.sources.Folder.pick().then(openApp).catch(function (e) { alert(e.message); });
     };
     var lb = document.getElementById('ln-login-btn');
-    if (lb && !C01.SOURCE.graphEnabled) { lb.disabled = true; lb.title = 'R7 で有効'; lb.classList.add('c01-disabled'); }
+    if (lb && !C01.SOURCE.graphEnabled) { lb.disabled = true; lb.title = '無効 (C01.SOURCE.graphEnabled)'; lb.classList.add('c01-disabled'); }
   }
 
   function fallbackSplash(msg) {
@@ -93,8 +93,8 @@
       sys: I.sys, name: I.name, version: I.version, date: I.date, desc: I.desc,
       needGraph: true,
       onReady: function () {
-        /* graph モード (R7) — 今は呼ばれない (ログインボタン無効) */
-        if (C01.SOURCE.graphEnabled) { buildHeader(); C01.app.start(new C01.sources.Graph()); }
+        /* graph モード (R7A): ログイン後 SharePoint HANNYU_TOOL から読む (ヘッダーは LEENAI_COMMON) */
+        if (C01.SOURCE.graphEnabled) { var b = document.getElementById('c01-local-box'); if (b) b.style.display = 'none'; C01.app.start(new C01.sources.Graph()); }
       }
     });
     addLocalButtons();

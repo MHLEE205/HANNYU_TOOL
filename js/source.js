@@ -112,21 +112,121 @@ C01.sources = (function () {
     return this._file('_masters/pol_staff.json').then(function (f) { return f.text(); }).then(JSON.parse);
   };
 
-  /* ── graph (R7): SharePoint PHOTO_V2 を職員トークンで読む・書く — 枠だけ。C01.SOURCE.graphEnabled=false の間は呼び出し 0 ── */
-  function Graph() {}
-  function off() { return Promise.reject(new Error('graph モードは R7 で有効になります')); }
+  /* ── graph (R7A): SharePoint ドキュメント / HANNYU_TOOL (PHOTO_V2) を職員のログイン (LEENAI_COMMON の Graph トークン) で読む・書く ──
+     読む: _data/*.json · 写真・原本 (blob URL) · _actions/{日付}/ (一覧 + 中身、eTag が同じなら読み直さない)
+     書く: _actions/{日付}/{action_id}.json だけ (同じ名前があれば書かない = conflictBehavior fail)。ほかの場所への書き込みコード無し */
+  var GRAPH = 'https://graph.microsoft.com/v1.0/';
+  function Graph() { this.urls = {}; this.acts = {}; }
+  function off() { return Promise.reject(new Error('graph モードは無効です (C01.SOURCE.graphEnabled)')); }
+  Graph.prototype._item = function (rel) {
+    return GRAPH + 'drives/' + LEENAI.SP.DRIVE_ID + '/root:/' + enc(C01.SOURCE.spRoot + '/' + rel) + ':';
+  };
+  Graph.prototype._fetch = function (url, opt, retried) {
+    var self = this;
+    return LEENAI.auth.token('graph').then(function (tok) {
+      if (!tok) throw new Error('Graph トークンがありません (再ログインしてください)');
+      var o = Object.assign({ cache: 'no-store' }, opt || {});
+      o.headers = Object.assign({ Authorization: 'Bearer ' + tok }, (opt && opt.headers) || {});
+      return fetch(url, o);
+    }).then(function (r) {
+      if (r.status === 401 && !retried) return self._fetch(url, opt, true);
+      return r;
+    });
+  };
+  Graph.prototype._json = function (rel) {
+    return this._fetch(this._item(rel) + '/content').then(function (r) {
+      if (r.status === 403) throw new Error('SharePoint (HANNYU_TOOL) を読む権限がありません (403)');
+      if (!r.ok) throw new Error(rel + ' → ' + r.status);
+      return r.json();
+    });
+  };
   Graph.prototype.init = function () {
     if (!C01.SOURCE.graphEnabled) return off();
-    /* R7: LEENAI.auth.token('graph') → PHOTO_V2 drive の _data を読む */
-    return off();
+    if (!(window.LEENAI && LEENAI.auth && LEENAI.SP && LEENAI.SP.DRIVE_ID)) return Promise.reject(new Error('共通ファイル (LEENAI_COMMON) がありません'));
+    var st = LEENAI.auth.status || {};
+    if (st.graph !== 'ok') return Promise.reject(new Error('Microsoft 365 (Graph) に接続できませんでした: ' + (st.graphError || st.graph)));
+    return this._json('_data/meta.json').then(function (m) {
+      return { mode: 'graph', today: m.today, label: 'SharePoint ' + C01.SOURCE.spRoot, files: String(st.graphError || '').indexOf('files:') === 0 ? 'narrow' : 'ok' };
+    });
   };
-  Graph.prototype.getJson = off;
-  Graph.prototype.fileUrl = function () { return ''; };
-  Graph.prototype.listActions = off;
-  Graph.prototype.writeAction = off;
+  Graph.prototype.getJson = function (rel) { return this._json('_data/' + rel); };
+  Graph.prototype.fileUrl = function (rel) { return this.urls[rel] || ''; };
+  Graph.prototype.resolveUrl = function (rel) {
+    var self = this;
+    if (!rel) return Promise.resolve('');
+    if (self.urls[rel]) return Promise.resolve(self.urls[rel]);
+    return this._fetch(this._item(rel) + '/content').then(function (r) {
+      if (!r.ok) return '';
+      return r.blob().then(function (b) {
+        if (/\.pdf$/i.test(rel) && b.type !== 'application/pdf') b = new Blob([b], { type: 'application/pdf' });
+        self.urls[rel] = URL.createObjectURL(b);
+        return self.urls[rel];
+      });
+    }).catch(function () { return ''; });
+  };
+  Graph.prototype._children = function (rel) {
+    var self = this;
+    var out = [];
+    function page(url) {
+      return self._fetch(url).then(function (r) {
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('一覧 ' + r.status);
+        return r.json().then(function (j) {
+          (j.value || []).forEach(function (x) { out.push({ name: x.name, eTag: x.eTag, folder: !!x.folder }); });
+          return j['@odata.nextLink'] ? page(j['@odata.nextLink']) : out;
+        });
+      });
+    }
+    return page(this._item(rel) + '/children?$select=name,eTag,folder&$top=500');
+  };
+  Graph.prototype.listActions = function (days) {
+    var self = this;
+    var out = [];
+    return Promise.all((days || []).map(function (day) {
+      return self._children('_actions/' + day).then(function (items) {
+        if (!items) return;
+        var names = items.map(function (x) { return x.name; });
+        return Promise.all(items.filter(function (x) { return !x.folder && /\.json$/.test(x.name); }).map(function (x) {
+          var key = day + '/' + x.name;
+          var c = self.acts[key];
+          var p = (c && c.eTag === x.eTag) ? Promise.resolve(c.action) : self._json('_actions/' + key).then(function (a) {
+            self.acts[key] = { eTag: x.eTag, action: a };
+            return a;
+          });
+          return p.then(function (a) { out.push({ file: key, done: names.indexOf(x.name + '.done') >= 0, action: a }); }).catch(function () {});
+        }));
+      }).catch(function () {});
+    })).then(function () {
+      out.sort(function (a, b) { return a.file < b.file ? -1 : a.file > b.file ? 1 : 0; });
+      return out;
+    });
+  };
+  Graph.prototype.writeAction = function (a) {
+    var day = String(a.at).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[A-Za-z0-9_-]+$/.test(String(a.action_id))) return Promise.reject(new Error('action の日付・id が不正'));
+    var rel = '_actions/' + day + '/' + a.action_id + '.json';
+    return this._fetch(this._item(rel) + '/content?@microsoft.graph.conflictBehavior=fail',
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a, null, 1) + '\n' }).then(function (r) {
+      if (r.status === 403) throw new Error('SharePoint (HANNYU_TOOL) に書く権限がありません (403)');
+      if (r.status === 409) throw new Error('同じ記録がすでにあります (409)');
+      if (!r.ok) throw new Error('書き込み失敗 (' + r.status + ')');
+      return { file: day + '/' + a.action_id + '.json' };
+    });
+  };
   Graph.prototype.getStaff = function () {
-    /* R7: LEENAI.master.get('pol_staff') */
-    return off();
+    /* 担当港 = 共通マスター pol_staff (SharePoint) · 職員一覧 = LEENAI.STAFF (code = staffCode) */
+    if (!(LEENAI.master && LEENAI.master.get)) return Promise.reject(new Error('マスターなし'));
+    return LEENAI.master.get('pol_staff').then(function (items) {
+      var staff = (LEENAI.STAFF || []).map(function (s) { return { code: s.staffCode, name: s.name, email: s.email }; });
+      return { staff: staff, items: items || [] };
+    });
+  };
+  Graph.prototype.me = function (staff) {
+    var u = LEENAI.user || {};
+    var em = String(u.email || '').toLowerCase();
+    var s = ((staff && staff.staff) || []).filter(function (x) { return em && String(x.email || '').toLowerCase() === em; })[0];
+    if (s) return { code: s.code, name: s.name || s.code, email: s.email };
+    return u.email ? { code: u.staffCode || u.email, name: u.name || u.email, email: u.email } : null;
   };
 
   return { LocalServer: LocalServer, Folder: Folder, Graph: Graph };

@@ -2,6 +2,15 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.1 (2026-11-10) — Microsoft 365 로그인 켬 (graph 모드 · SharePoint HANNYU_TOOL · R7A · 결정 #132 · #137) · 「写真不足」 옆 창 · 確認する (R6M13)
+- **graph 모드 켬 (`js/config.js` `C01.SOURCE` 한 곳 · `graphEnabled: true` · `spRoot: 'HANNYU_TOOL'`):** 로그인 버튼 활성 → LEENAI_COMMON 로그인 (Graph 위임 토큰 · 새 권한 요청 없음) 뒤
+  SharePoint ドキュメント / HANNYU_TOOL 에서 `_data/*.json` · 사진 · 원본 (blob) · `_actions/{날짜}/` (목록 + 내용 · eTag 같으면 다시 안 읽음 · `.done` = 처리됨) 을 읽음.
+  쓰기 = `_actions/{날짜}/{action_id}.json` 하나뿐 (`conflictBehavior=fail` = 같은 이름 덮어쓰기 0 · 날짜 · id 형식 검사 뒤). 403 이면 「権限がありません」 안내.
+  担当者 = 로그인한 사람 (`LEENAI.user` 메일 = `LEENAI.STAFF`) · 担当 港 = 공통 마스터 `pol_staff`. 상단 「SharePoint · HANNYU_TOOL」. 로컬 미리보기 (서버 · 폴더 선택) 는 그대로.
+- 화면 시험 `tests/test_graph.py` (새 · 가짜 Graph · 가명 · 16) · `test_ui.py` 로그인 버튼 「활성」 으로
+- 「写真不足」 queue 항목 옆 창 · 確認・入力 「確認する」 켜짐 → `confirm_value` (ct 값 그대로 · 写真) · 칩은 엔진 kinds 에 있을 때만 · 화면 시험 `tests/test_photoset.py` 16
+- 버전 0.3.1 (`js/config.js` 한 곳)
+
 ## 0.3.0 (2026-11-10) — 첫 공개 (`MHLEE205/HANNYU_TOOL`) · 결정 #120 · #129 · #131 (R6T1)
 - 합침: `prep-a` (#120) · `r619-reason` (R6M7) · `r620-photocount` (R6M8 · #129) · `r623-photokind` (R6M11 · #129 · #131 · #118). 충돌 1곳 = `js/app.js` `REASON_SHORT` (27·28 과 29·30 둘 다 넣음)
 - #120 가명 시험 데이터를 레포에서 뺌: `fixtures/_data/` (14 파일) · `tests/compass_cases.json` (146KB) = `.gitignore` · 추적 해제. 시험 전 `tools/make_test_data.py` (새) 로 다시 만듦 —

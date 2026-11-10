@@ -20,8 +20,13 @@ window.C01 = window.C01 || {};
     '値の違い': { key: 'diff', color: 'var(--c-diff)' },
     '手入力': { key: 'manual', color: 'var(--c-manual)' },
     '写真のCT': { key: 'photo', color: 'var(--c-photo)', label: '写真の CT' },
-    '未分類FAX': { key: 'fax', color: 'var(--c-fax)', label: '未分類 FAX' }
+    '未分類FAX': { key: 'fax', color: 'var(--c-fax)', label: '未分類 FAX' },
+    '写真不足': { key: 'photo', color: 'var(--c-photo)' }     /* R6M13 (エンジン out_queue_photo_set): 理由 29 の行 — 写真を見て 確認する */
   };
+  var PHOTO_SET = '写真不足';
+  function photoSetAction(q, ct) {     /* R6M13: 値はそのまま (CT を確認) — エンジンが「写真不足 OK」実績を記録 (#131 ③) */
+    return mkAction('confirm_value', { iv: q.iv_no, ct: ct, field: 'ct', value: ct, source: '写真', queue_id: q.queue_id });
+  }
   var VALUE_FIELDS = ['seal', 'n_w', 't_w', 'bales'];
 
   var S = {
@@ -46,7 +51,8 @@ window.C01 = window.C01 || {};
   function actionId() { return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
   function rowKey(iv, r) { return iv.iv_no + '|' + (r.ct || r.container_id) + '|' + (r.packer || iv.packer || ''); }
   function addDays(iso, n) { var d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
-  function isFolder() { return S.src instanceof C01.sources.Folder; }
+  /* 写真・原本を非同期で読む読み先 (local フォルダ選択 · graph) は data-rel + resolveUrl で表示 */
+  function isFolder() { return !!(S.src && typeof S.src.resolveUrl === 'function'); }
   function imgTag(rel, cls, alt) {
     if (!rel) return '';
     if (isFolder()) return '<img class="' + cls + '" data-rel="' + esc(rel) + '" alt="' + esc(alt || '') + '">';
@@ -212,11 +218,14 @@ window.C01 = window.C01 || {};
       '</nav>' +
       '<span class="c01-sub">' + esc(t) + ' 時点 · 最終更新 ' + upd + '（自動更新）</span>' +
       '<span class="c01-flex"></span>' +
-      '<span class="c01-local" title="データは選んだフォルダから読んでいます (SharePoint には接続しません)">ローカルプレビュー · ' + esc(S.info ? S.info.label : '') + '</span>' +
-      '<label class="c01-me">担当者 <select id="me-select" aria-label="担当者">' + staffOpts + '</select></label>';
+      (graphMode()
+        ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spRoot) + '</span>' +
+          '<span class="c01-me" id="me-name">担当者 ' + esc(S.me ? S.me.name : '?') + '</span>'
+        : '<span class="c01-local" title="データは選んだフォルダから読んでいます (SharePoint には接続しません)">ローカルプレビュー · ' + esc(S.info ? S.info.label : '') + '</span>' +
+          '<label class="c01-me">担当者 <select id="me-select" aria-label="担当者">' + staffOpts + '</select></label>');
     $('tab-main').onclick = function () { S.view = 'main'; render(); };
     $('tab-input').onclick = function () { S.view = 'input'; if (!S.qsel) { var f = openQueue()[0]; S.qsel = f ? f.queue_id : null; } render(); };
-    $('me-select').onchange = function (e) {
+    if ($('me-select')) $('me-select').onchange = function (e) {
       var s = staffList().filter(function (x) { return x.code === e.target.value; })[0] || null;
       S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
       try { localStorage.setItem('c01_local_me', S.me ? S.me.code : ''); } catch (er) { /* なし */ }
@@ -225,7 +234,9 @@ window.C01 = window.C01 || {};
       render();
     };
   }
+  function graphMode() { return !!(S.info && S.info.mode === 'graph'); }
   function updateUserChip() {
+    if (graphMode()) return;                                         /* graph: ヘッダーは LEENAI_COMMON (ログインした人) */
     var un = $('ln-username'), av = $('ln-avatar');
     if (un) un.textContent = S.me ? S.me.name : '（担当者未選択）';
     if (av) av.textContent = S.me ? S.me.code.slice(0, 2) : '--';
@@ -541,7 +552,8 @@ window.C01 = window.C01 || {};
       return '<div class="c01-pf"><span class="c01-pl">' + FIELD_LABEL[fd] + '</span><div class="c01-same"><span class="mono">' + num(v) + '</span><span class="ok">' + esc(note) + '</span></div></div>';
     }).join('');
     var needPick = Object.keys(diffQ).filter(function (fd) { return diffQ[fd].kind === '値の違い' && !queueState(diffQ[fd], ov).done; });
-    var ready = needPick.length > 0 && (needPick.every(function (fd) { return S.picks[fd]; }) || (needPick.length === 1 && S.panelInput.trim()));
+    var psQ = qs.filter(function (q) { return q.kind === PHOTO_SET && !queueState(q, ov).done && r.ct; })[0] || null;
+    var ready = needPick.length > 0 ? (needPick.every(function (fd) { return S.picks[fd]; }) || (needPick.length === 1 && S.panelInput.trim())) : !!psQ;
     var lostMsg = qs.some(function (q) { var s = queueState(q, ov); return s.mineLost; }) ? '<p class="c01-lost">他の人が先に確認しました</p>' : '';
     el.hidden = false;
     el.innerHTML = '<div class="c01-overlay" id="panel-bg"></div><aside class="c01-side" role="dialog" aria-label="要確認の詳細">' +
@@ -554,7 +566,7 @@ window.C01 = window.C01 || {};
       '<button id="panel-photo" class="c01-thumb"' + (firstPhoto ? '' : ' disabled') + '>' + (firstPhoto ? imgTag(firstPhoto.path, 'c01-thimg', '写真') : '') + '<span>' + (firstPhoto ? esc('写真 ' + (firstPhoto.label || '')) : '写真なし') + '</span></button></div>' +
       fields +
       (needPick.length === 1 ? '<label class="c01-direct">どちらも違う場合は直接入力<input id="panel-input" type="text" placeholder="正しい値" value="' + esc(S.panelInput) + '"></label>' : '') +
-      (needPick.length ? '' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
+      (needPick.length || psQ ? '' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
       '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
       '<button id="panel-later" class="c01-btn-ghost2">あとで</button></div>' +
       '<p class="c01-foot">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</p>' +
@@ -586,6 +598,7 @@ window.C01 = window.C01 || {};
         if (!v.ok) { toast(FIELD_LABEL[fd] + ': ' + v.error, 'error'); return; }
         acts.push(mkAction('confirm_value', { iv: iv.iv_no, ct: r.ct, field: fd, value: v.value, source: src, queue_id: q.queue_id }));
       }
+      if (psQ) acts.push(photoSetAction(psQ, r.ct));
       Promise.all(acts.map(writeAction)).then(function () { S.sel = null; S.picks = {}; S.panelInput = ''; render(); toast('確認しました', 'success'); });
     };
   }
@@ -662,7 +675,7 @@ window.C01 = window.C01 || {};
     var iv = q && q.iv_no ? ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0] : null;
     var html = '<div class="c01-input">';
     html += '<aside class="c01-list" aria-label="作業リスト"><div class="c01-kinds">' +
-      [['all', 'すべて']].concat(Object.keys(KIND).map(function (k) { return [k, kindLabel(k)]; })).map(function (k) {
+      [['all', 'すべて']].concat(Object.keys(KIND).filter(function (k) { return k !== PHOTO_SET || ((S.queue && S.queue.kinds) || []).indexOf(k) >= 0; }).map(function (k) { return [k, kindLabel(k)]; })).map(function (k) {
         return '<button class="c01-chip' + (S.qkind === k[0] ? ' on' : '') + '" data-kind="' + esc(k[0]) + '">' + esc(k[1]) + ' ' + (counts[k[0]] || 0) + '</button>';
       }).join('') + '</div>' +
       '<div class="c01-prog"><div class="bar"><div style="width:' + (all.length ? Math.round(doneN / all.length * 100) : 0) + '%"></div></div><span>' + doneN + ' / ' + all.length + ' 完了</span></div>' +
@@ -679,7 +692,7 @@ window.C01 = window.C01 || {};
     if (q) {
       var files = q.files || [];
       var f = files[0] || {};
-      var isPhotos = q.kind === '写真のCT';
+      var isPhotos = q.kind === '写真のCT' || q.kind === PHOTO_SET;
       var qrow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
       var qph = qrow ? (qrow.photos || 0) : null;
       html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
@@ -819,6 +832,7 @@ window.C01 = window.C01 || {};
     var v = S.qvals[q.queue_id] || {};
     if (q.kind === '値の違い' || q.kind === '手入力') return !!String(v[q.field] || '').trim();
     if (q.kind === '写真のCT') return S.qchoice[q.queue_id] !== undefined || !!String(v.ct || '').trim();
+    if (q.kind === PHOTO_SET) return !!q.ct;
     if (q.kind === '未分類FAX') return S.qchoice[q.queue_id] !== undefined || !!String(v.iv || '').trim();
     return false;
   }
@@ -826,6 +840,7 @@ window.C01 = window.C01 || {};
     if (q.kind === '値の違い') return FIELD_LABEL[q.field] + ' が出典によって違います。原本を見て、正しい方を選ぶか入力してください。';
     if (q.kind === '手入力') return FIELD_LABEL[q.field] + ' が読めませんでした。原本を見て入力してください。';
     if (q.kind === '写真のCT') return '写真から CT 番号が読めませんでした。写真を見て、どのコンテナか選んでください。';
+    if (q.kind === PHOTO_SET) return q.reason_text || '通関用写真が不足しています';     /* エンジンの既存理由文 (reason_text) をそのまま */
     return 'どのインボイスの搬入票か判定できませんでした。';
   }
   function hintOf(fd) {
@@ -861,6 +876,9 @@ window.C01 = window.C01 || {};
         ct = vc.value;
       }
       a = mkAction('assign_photos', { iv: q.iv_no, ct: ct, field: null, value: { paths: (q.files || []).map(function (f) { return f.path; }) }, source: null, queue_id: q.queue_id });
+    } else if (q.kind === PHOTO_SET) {
+      if (!q.ct) return;
+      a = photoSetAction(q, q.ct);
     } else if (q.kind === '未分類FAX') {
       var typed = String((S.qvals[q.queue_id] || {}).iv || '').trim().toUpperCase();
       var iv = typed || (q.candidates || [])[S.qchoice[q.queue_id]];
@@ -940,6 +958,7 @@ window.C01 = window.C01 || {};
       try { saved = localStorage.getItem('c01_local_me'); } catch (e) { /* なし */ }
       var s = staffList().filter(function (x) { return x.code === saved; })[0];
       S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
+      if (typeof src.me === 'function') S.me = src.me(S.staff);          /* graph: ログインした人 (選ばない) */
       S.port = S.me ? 'mine' : 'all';
       updateUserChip();
       return loadAll();
