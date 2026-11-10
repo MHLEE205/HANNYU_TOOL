@@ -2,7 +2,7 @@
 
 ✦ Powered by LEENAI Automation System
 
-- 버전: **0.3.2** (2026-11-10) — 표기는 `js/config.js` `C01.TOOL_INFO` 한 곳 (LEENAI.init 이 탭 제목·헤더·로그인 카드에 표시)
+- 버전: **0.3.3** (2026-11-10) — 표기는 `js/config.js` `C01.TOOL_INFO` 한 곳 (LEENAI.init 이 탭 제목·헤더·로그인 카드에 표시)
 - 화면: 実況表 · 確認・入力 · 사진 보기 (시안 `relay\design\시안_実況表_Main.dc.html` · `시안_確認入力_Input.dc.html` 기준)
 - 공통: LEENAI_COMMON v1 (`https://mhlee205.github.io/LEENAI_COMMON/v1/`) — **읽기만**, 기본 DARK · 4테마 · 하단 표기
 - **이 레포 = 화면 코드만.** 실제 데이터·번호·메일은 레포에 없음 — 직원이 로그인한 뒤 SharePoint (PHOTO_V2 `_data`) 에서 읽음 (R7 · 그 전에는 로컬 미리보기 = 고른 폴더에서 읽음)
@@ -38,6 +38,6 @@ python C:\LEENAI_C01_V2\tool\tools\serve_local.py --root C:\LEENAI_C01_V2\tool\f
 - `python tests/e2e_local.py --db <사본 DB> --root <사본 photo_v2_local> --data <사본 C01_DATA> --out <폴더>` — 끝-끝 (사본만)
 - `python tests/render_mockup.py --out <폴더>` — 시안 대조 캡처
 
-공개 레포 `MHLEE205/HANNYU_TOOL` (결정 #110 · #120) — v0.3.0 첫 공개 (2026-11-10) · v0.3.1 graph 모드 (R7A) · v0.3.2 実況表 한 화면 · PDF 화면 표시 (R7B). GitHub Pages 켜기 · Azure 리디렉트 URI · 직원 공개는 형님 작업.
+공개 레포 `MHLEE205/HANNYU_TOOL` (결정 #110 · #120) — v0.3.0 첫 공개 (2026-11-10) · v0.3.1 graph 모드 (R7A) · v0.3.2 実況表 한 화면 · PDF 화면 표시 (R7B) · v0.3.3 파일 열기 점검 (R7C). GitHub Pages 켜기 · Azure 리디렉트 URI · 직원 공개는 형님 작업.
 - `python tests/test_graph.py` — graph 모드 시험 (가짜 Graph · 가명 · 실제 SharePoint 호출 0)
 - `python tests/test_layout.py --shots <폴더>` — 実況表 한 화면 시험 (1366 · 1600 · 1920 폭 · 가로 스크롤 0 · 상자 아래 끝 ≤ 창 · 머리글 고정 · R7B)

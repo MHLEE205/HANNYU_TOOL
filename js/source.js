@@ -151,17 +151,32 @@ C01.sources = (function () {
   };
   Graph.prototype.getJson = function (rel) { return this._json('_data/' + rel); };
   Graph.prototype.fileUrl = function (rel) { return this.urls[rel] || ''; };
+  /* v0.3.3 (R7C): 読めなかった理由を残す (画面に「SharePoint にまだありません」などを出すため) — fileError(rel) */
+  Graph.prototype.fileError = function (rel) { return (this.errs || {})[rel] || ''; };
   Graph.prototype.resolveUrl = function (rel) {
     var self = this;
     if (!rel) return Promise.resolve('');
     if (self.urls[rel]) return Promise.resolve(self.urls[rel]);
+    self.errs = self.errs || {};
     return this._fetch(this._item(rel) + '/content').then(function (r) {
-      if (!r.ok) return '';
+      if (!r.ok) { self.errs[rel] = r.status === 404 ? 'notfound' : r.status === 403 ? 'forbidden' : 'http' + r.status; return ''; }
       return r.blob().then(function (b) {
         if (/\.pdf$/i.test(rel) && b.type !== 'application/pdf') b = new Blob([b], { type: 'application/pdf' });
         self.urls[rel] = URL.createObjectURL(b);
+        delete self.errs[rel];
         return self.urls[rel];
       });
+    }).catch(function () { self.errs[rel] = 'network'; return ''; });
+  };
+  /* v0.3.3 (R7C): 「別タブで開く」 = SharePoint の表示画面 (webUrl)。PC のブラウザ設定 (PDF を外部アプリで開く) でも開ける · GET だけ */
+  Graph.prototype.webUrl = function (rel) {
+    var self = this;
+    if (!rel) return Promise.resolve('');
+    self.web = self.web || {};
+    if (self.web[rel]) return Promise.resolve(self.web[rel]);
+    return this._fetch(this._item(rel) + '?$select=webUrl').then(function (r) {
+      if (!r.ok) { self.errs = self.errs || {}; self.errs[rel] = r.status === 404 ? 'notfound' : r.status === 403 ? 'forbidden' : 'http' + r.status; return ''; }
+      return r.json().then(function (j) { var u = String(j.webUrl || ''); if (/^https:\/\//.test(u)) self.web[rel] = u; return self.web[rel] || ''; });
     }).catch(function () { return ''; });
   };
   Graph.prototype._children = function (rel) {

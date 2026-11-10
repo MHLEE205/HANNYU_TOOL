@@ -3,6 +3,7 @@
 https://graph.microsoft.com/ 요청은 page.route 로 가로채 가명 fixtures 폴더 (임시 사본 = HANNYU_TOOL 흉내) 에서 돌려준다.
 확인: 로그인 버튼 활성 · graph 로 実況表 · 사진 blob 표시 · 로그인한 사람 = 担当者 · _actions 쓰기 = HANNYU_TOOL/_actions/{날짜}/ 만 ·
       같은 id 다시 쓰기 거부 (409) · 처리 표시 (.done) 읽기 · Graph 주소는 모두 drives/{드라이브}/root:/HANNYU_TOOL/ 아래 · 콘솔 오류 0.
+      v0.3.3 (R7C): 別タブで開く = webUrl 새 탭 · 없는 파일 이유 표시 · 파일 칩 · 파일 지정 없는 항목 = IV 서류.
       v0.3.2 (R7B): PDF (搬入票 · 未分類 FAX) = pdf.js 로 canvas 에 그림 (빈 화면 아님) · 페이지 넘김 · 회전 · 확대 · 別タブで開く ·
       pdf.js 를 못 읽으면 iframe 로 물러남 · 오래된 未分類 FAX 숨김 + 「古い未分類 FAX も表示」.
 사용: python tests/test_graph.py [--shots 폴더]"""
@@ -61,7 +62,7 @@ INK = """(sel) => { const c = document.querySelector(sel); if (!c) return null; 
   return { L, R, w: c.width, h: c.height, cssw: c.style.width }; }"""
 
 
-def make_handler(root):
+def make_handler(root, web="https://sp.example.invalid/view?spview=1"):
     pre = f"/v1.0/drives/{DRIVE}/root:/HANNYU_TOOL/"
 
     def handle(route, request):
@@ -79,6 +80,10 @@ def make_handler(root):
                 return route.fulfill(status=404, body="{}")
             ct = "application/json" if p.suffix == ".json" else ("image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "application/octet-stream")
             return route.fulfill(status=200, body=p.read_bytes(), headers={"Content-Type": ct})
+        if request.method == "GET" and tail == "":                 # v0.3.3: 아이템 정보 (webUrl · 「別タブで開く」)
+            if not p.exists():
+                return route.fulfill(status=404, body="{}")
+            return route.fulfill(status=200, body=json.dumps({"webUrl": web + "&f=" + p.name}), headers={"Content-Type": "application/json"})
         if request.method == "GET" and tail == "/children":
             if not p.is_dir():
                 return route.fulfill(status=404, body="{}")
@@ -127,6 +132,10 @@ def main():
     fax_q = next(x for x in qj["items"] if x["kind"] == "未分類FAX")
     fax_q["files"][0]["path"] = "_fax_unmatched/2026-11-08/FAX_0001_test.pdf"
     fax_q["received_at"] = "2026-11-07T09:00:00+09:00"
+    # v0.3.3 (R7C): 値の違い = 파일 2개 (2번째는 SharePoint 에 없음) · 手入力 1건 = 파일 지정 없음 (→ IV 서류)
+    diff_q["files"].append({"path": "TST2611-02/搬入票/no_such_r7c.pdf", "name": "no_such_r7c.pdf", "page": 1, "bbox": None, "sha16": "0" * 16})
+    man_q = next(x for x in qj["items"] if x["kind"] == "手入力")
+    man_q["files"] = []
     old_q = json.loads(json.dumps(fax_q))
     old_q["queue_id"] = "f0ldfax000000001"
     old_q["received_at"] = "2026-10-20T09:00:00+09:00"
@@ -147,11 +156,13 @@ def main():
             page = br.new_context(viewport={"width": 1440, "height": 1000}).new_page()
             page.on("console", lambda m: RES["console_errors"].append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: RES["console_errors"].append(f"pageerror {e}"))
-            page.route("https://graph.microsoft.com/**", make_handler(root))
+            web = "https://sp.example.invalid/view?spview=1"            # SharePoint 화면 흉내 (https 만 허용 · 가짜 응답)
+            page.context.route("https://sp.example.invalid/**", lambda r: r.fulfill(status=200, body="<title>SP</title>sp", headers={"Content-Type": "text/html"}))
+            page.route("https://graph.microsoft.com/**", make_handler(root, web))
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.2", page.title() == "LEENAI C-01 搬入票 v0.3.2", page.title())
+            ok("탭 제목 v0.3.3", page.title() == "LEENAI C-01 搬入票 v0.3.3", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -218,6 +229,37 @@ def main():
             page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
             ok("확대 120% → canvas 768px", page.evaluate("document.querySelector('.c01-orig [data-pdf] canvas').style.width") == "768px")
             page.screenshot(path=str(shots / "graph_pdf.png"))
+            # ── v0.3.3 (R7C) 파일 열기 ──
+            with page.context.expect_page(timeout=15000) as pinfo:
+                page.click("#pdf-open")
+            tab = pinfo.value
+            tab.wait_for_url("**spview=1**", timeout=15000)
+            ok("別タブで開く = SharePoint 화면 (webUrl) 새 탭 (팝업 막힘 없음)", "spview=1" in tab.url and "f=" in tab.url, tab.url)
+            tab.close()
+            ok("파일 2개 = 칩 2개", page.locator(".c01-qfiles [data-qf]").count() == 2)
+            page.click('.c01-qfiles [data-qf="1"]')
+            page.wait_for_selector(".c01-orig [data-missing='1']", timeout=15000)
+            t_miss = page.locator(".c01-orig").inner_text()
+            ok("없는 파일 = 「SharePoint にまだありません」 (흰 화면 · 빈 iframe 아님)", "SharePoint にまだありません" in t_miss and page.locator(".c01-orig iframe").count() == 0, t_miss[:120])
+            with page.context.expect_page(timeout=15000) as pinfo2:
+                page.click("#pdf-open")
+            tab2 = pinfo2.value
+            page.wait_for_timeout(1500)
+            ok("없는 파일 「別タブで開く」 = 탭 닫힘 + 이유", tab2.is_closed(), tab2.url if not tab2.is_closed() else "")
+            page.click('.c01-qfiles [data-qf="0"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn]", timeout=15000)
+            page.click("#tab-main")
+            page.wait_for_timeout(300)
+            page.click('[data-port="all"]')                          # 担当港 필터 해제 (手入力 가명 IV = 다른 港)
+            page.click("#tab-input")
+            page.wait_for_timeout(300)
+            page.click(f'[data-q="{man_q["queue_id"]}"]')
+            page.wait_for_timeout(800)
+            t_man = page.locator(".c01-orig").inner_text()
+            ok("手入力 (파일 지정 없음) = IV 서류 표시 · 칩", "IV の書類を表示" in t_man and page.locator(".c01-qfiles [data-qf]").count() >= 2
+               and page.locator(".c01-orig img.c01-docimg[src^='blob:']").count() == 1, t_man[:120])
+            ok("手入力 「原本ファイルがありません」 없음", "原本ファイルがありません" not in t_man)
+            page.screenshot(path=str(shots / "graph_r7c_ivdocs.png"))
             # 未分類 FAX: 새 것만 기본 목록 · 오래된 것은 숨김 + 「古い未分類 FAX も表示」
             lab = page.locator("#fax-old-lab").inner_text() if page.locator("#fax-old-lab").count() else ""
             ok("오래된 未分類 FAX = 기본 목록에서 숨김 (1건)", page.locator('[data-q="f0ldfax000000001"]').count() == 0 and "1件" in lab, lab)

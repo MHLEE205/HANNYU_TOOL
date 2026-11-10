@@ -34,7 +34,7 @@ window.C01 = window.C01 || {};
     view: 'main', port: 'mine', filter: 'all', showUnarrived: true,
     sel: null, picks: {}, panelInput: '', lb: null,
     actions: [], mine: [], lastPoll: null, lastLoad: null,
-    qkind: 'all', qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false,
+    qkind: 'all', qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false, qfile: {},
     timer: null, remind: null, modal: null
   };
   C01.state = S;
@@ -58,12 +58,28 @@ window.C01 = window.C01 || {};
     if (isFolder()) return '<img class="' + cls + '" data-rel="' + esc(rel) + '" alt="' + esc(alt || '') + '">';
     return '<img class="' + cls + '" src="' + esc(S.src.fileUrl(rel)) + '" alt="' + esc(alt || '') + '">';
   }
+  /* v0.3.3 (R7C): 読めなかった理由 (graph) → 画面の文 (空白のままにしない) */
+  function fileErrText(rel) {
+    var e = S.src && typeof S.src.fileError === 'function' ? S.src.fileError(rel) : '';
+    if (e === 'notfound') return 'SharePoint にまだありません';
+    if (e === 'forbidden') return '見る権限がありません (403)';
+    if (e === 'network') return '通信できませんでした';
+    return '読めませんでした' + (e ? ' (' + e.replace('http', '') + ')' : '');
+  }
   function hydrate(root) {
     (root || document).querySelectorAll('[data-pdf]').forEach(drawPdf);
     if (!isFolder()) return;
     (root || document).querySelectorAll('[data-rel]').forEach(function (el) {
       var rel = el.getAttribute('data-rel');
-      S.src.resolveUrl(rel).then(function (u) { if (u) el.src = u; });
+      S.src.resolveUrl(rel).then(function (u) {
+        if (u) { el.src = u; return; }
+        el.setAttribute('data-missing', '1');                       /* 画像の代わりに理由を出す */
+        var sp = document.createElement('span');
+        sp.className = 'c01-filemiss';
+        sp.textContent = fileErrText(rel);
+        if (el.parentNode) el.parentNode.insertBefore(sp, el);
+        el.style.display = 'none';
+      });
     });
   }
 
@@ -88,6 +104,20 @@ window.C01 = window.C01 || {};
     return PDF.lib;
   }
   function pdfUrl(rel) { return isFolder() ? S.src.resolveUrl(rel) : Promise.resolve(S.src.fileUrl(rel)); }
+  /* v0.3.3 (R7C): 「別タブで開く」 — クリックの中で先に空のタブを開く (ポップアップブロック対策 · 旧版は読み込み後に window.open で止められていた)
+     graph = SharePoint の表示画面 (webUrl) · ローカル = ファイル URL。開けない時はタブを閉じて理由を出す */
+  function openTab(rel) {
+    if (!rel) return;
+    var w = window.open('about:blank', '_blank');
+    if (!w) { toast('ブラウザがポップアップを止めました — このサイトのポップアップを許可してください', 'warn'); return; }
+    try { w.opener = null; w.document.title = '開いています…'; w.document.body.textContent = '開いています…'; } catch (e) { /* 別オリジンなら何もしない */ }
+    var p = (S.src && typeof S.src.webUrl === 'function') ? S.src.webUrl(rel) : pdfUrl(rel);
+    p.then(function (u) {
+      if (u) { w.location.href = u; return; }
+      try { w.close(); } catch (e) { /* なし */ }
+      toast('開けませんでした: ' + fileErrText(rel), 'error');
+    });
+  }
   function pdfDoc(rel) {
     if (PDF.docs[rel]) return PDF.docs[rel];
     var p = Promise.all([loadPdfJs(), pdfUrl(rel)]).then(function (x) {
@@ -125,11 +155,16 @@ window.C01 = window.C01 || {};
         });
       });
     }).catch(function () {
-      /* pdf.js が使えない → 従来の iframe (ブラウザの PDF ビューアー) */
-      if (thumb) { el.innerHTML = '<span class="c01-pdfmsg">PDF</span>'; return; }
+      /* pdf.js が使えない → 従来の iframe (ブラウザの PDF ビューアー)。v0.3.3: ファイル自体が読めない時は iframe にせず理由を出す */
       pdfUrl(rel).then(function (u) {
+        if (!u) {
+          el.setAttribute('data-missing', '1');
+          el.innerHTML = thumb ? '<span class="c01-pdfmsg">PDF ' + esc(fileErrText(rel)) + '</span>' : '<p class="c01-filemiss big">原本: ' + esc(fileErrText(rel)) + '</p>';
+          return;
+        }
+        if (thumb) { el.innerHTML = '<span class="c01-pdfmsg">PDF</span>'; return; }
         el.setAttribute('data-fallback', '1');
-        el.innerHTML = u ? '<iframe class="c01-docpdf" src="' + esc(u) + (want > 1 ? '#page=' + want : '') + '" title="原本"></iframe>' : '<p class="c01-note2">原本を読めませんでした</p>';
+        el.innerHTML = '<iframe class="c01-docpdf" src="' + esc(u) + (want > 1 ? '#page=' + want : '') + '" title="原本"></iframe>';
       });
     });
   }
@@ -705,7 +740,7 @@ window.C01 = window.C01 || {};
     var el = $('c01-lb');
     if (!S.lb) { el.hidden = true; el.innerHTML = ''; return; }
     var d = S.lb.list ? { title: S.lb.title, list: S.lb.list } : photosOf(S.lb.key);
-    if (!d || !d.list.length) { S.lb = null; el.hidden = true; return; }
+    if (!d || !d.list.length) { S.lb = null; el.hidden = true; el.innerHTML = ''; toast('このコンテナの写真はまだありません', 'warn'); return; }  /* v0.3.3: 何も起きないのをやめる */
     var n = d.list.length, i = ((S.lb.idx % n) + n) % n;
     S.lb.idx = i;
     var p = d.list[i];
@@ -755,6 +790,21 @@ window.C01 = window.C01 || {};
   /* 写真枚数の色: 旧 実況表 (phase4_report.py · photo_count < 6 or >= 15) と同じ基準 */
   function photoAlert(n) { n = +n || 0; return n <= 5 || n >= 15; }
   function kindLabel(k) { return (KIND[k] && KIND[k].label) || k; }
+  /* v0.3.3 (R7C): 確認・入力 の原本 — 項目のファイル (複数なら切り替え)。ファイルの指定が無い項目 (手入力 など) は その IV の書類 (photos/{IV}.json docs) を出す */
+  function qFiles(q) {
+    var fs = (q.files || []).filter(function (f) { return f && f.path; });
+    if (fs.length || q.kind === '写真のCT' || q.kind === PHOTO_SET || q.kind === '未分類FAX' || !q.iv_no) return fs;
+    var ph = S.photos[q.iv_no];
+    if (!ph) {
+      if (!S.qload) S.qload = {};
+      if (!S.qload[q.iv_no]) { S.qload[q.iv_no] = 1; loadPhotos(q.iv_no).then(function () { render(); }); }
+      return [];
+    }
+    return (ph.docs || []).filter(function (d) { return d && d.path; }).map(function (d) {
+      return { path: d.path, name: String(d.path).split('/').pop(), page: 1, ivdoc: true };
+    });
+  }
+  function curFileIdx(q) { var n = qFiles(q).length, i = +(S.qfile[q.queue_id] || 0); return n ? Math.min(Math.max(0, i), n - 1) : 0; }
   function renderInput() {
     var ov = overlay();
     var all0 = ((S.queue && S.queue.items) || []).filter(queuePortOk);
@@ -786,9 +836,10 @@ window.C01 = window.C01 || {};
     /* 原本 */
     html += '<section class="c01-orig" aria-label="原本">';
     if (q) {
-      var files = q.files || [];
-      var f = files[0] || {};
       var isPhotos = q.kind === '写真のCT' || q.kind === PHOTO_SET;
+      var files = isPhotos ? (q.files || []) : qFiles(q);
+      var fIdx = isPhotos ? 0 : curFileIdx(q);
+      var f = files[fIdx] || {};
       var qrow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
       var qph = qrow ? (qrow.photos || 0) : null;
       var isPdfF = !isPhotos && /\.pdf$/i.test(f.path || '');
@@ -798,7 +849,15 @@ window.C01 = window.C01 || {};
         (!isPhotos ? '<button class="c01-tool" id="z-out" aria-label="縮小">−</button><span class="z">' + S.zoom + '%</span><button class="c01-tool" id="z-in" aria-label="拡大">+</button>' +
           '<button class="c01-tool" id="rot" aria-label="回転">⟳</button>' +
           (isPdfF ? '<button class="c01-tool" id="pdf-prev" aria-label="前のページ">‹</button><span class="t2" id="pdf-pg">p.' + pdfPg + '</span><button class="c01-tool" id="pdf-next" aria-label="次のページ">›</button>' +
-            '<button class="c01-btn-sub" id="pdf-open" title="ブラウザの PDF 表示で開く（別タブ）">別タブで開く</button>' : '<span class="t2">' + (f.page ? 'p.' + f.page : '') + '</span>') : '') + '</div>';
+            '' : '<span class="t2">' + (f.page ? 'p.' + f.page : '') + '</span>') : '') +
+        (!isPhotos && f.path ? '<button class="c01-btn-sub" id="pdf-open" title="SharePoint で開く（別タブ）">別タブで開く</button>' : '') + '</div>';
+      if (!isPhotos && files.length > 1) {
+        html += '<div class="c01-qfiles" role="tablist" aria-label="原本ファイル">' + (f.ivdoc ? '<span class="t2">この項目の原本の指定がないため IV の書類を表示:</span>' : '') + files.map(function (x, k) {
+          return '<button class="c01-chip' + (k === fIdx ? ' on' : '') + '" data-qf="' + k + '" title="' + esc(x.name || '') + '">' + (k + 1) + '. ' + esc(String(x.name || '').slice(0, 28)) + '</button>';
+        }).join('') + '</div>';
+      } else if (!isPhotos && f.ivdoc) {
+        html += '<div class="c01-qfiles"><span class="t2">この項目の原本の指定がないため IV の書類を表示</span></div>';
+      }
       html += '<div class="c01-orig-b">';
       if (isPhotos) {
         html += '<div class="c01-grid">' + files.map(function (pf, k) { return '<button class="c01-gph" data-gph="' + k + '">' + imgTag(pf.path, 'c01-gimg', pf.name) + '<span>' + esc(pf.name || '') + '</span></button>'; }).join('') + '</div>';
@@ -897,8 +956,9 @@ window.C01 = window.C01 || {};
       };
       if ($('pdf-prev')) $('pdf-prev').onclick = function () { turn(-1); };
       if ($('pdf-next')) $('pdf-next').onclick = function () { turn(1); };
-      if ($('pdf-open')) $('pdf-open').onclick = function () { pdfUrl(prel).then(function (u) { if (u) window.open(u, '_blank', 'noopener'); }); };
     }
+    if ($('pdf-open')) $('pdf-open').onclick = function () { openTab((qFiles(q)[curFileIdx(q)] || {}).path || ''); };
+    root.querySelectorAll('[data-qf]').forEach(function (el) { el.onclick = function () { S.qfile[q.queue_id] = +el.getAttribute('data-qf'); S.zoom = 100; S.rot = 0; render(); }; });
     root.querySelectorAll('[data-gph]').forEach(function (el) {
       el.onclick = function () { openLightboxList('CT 不明の写真', (q.files || []).map(function (pf) { return { path: pf.path, label: pf.name }; }), +el.getAttribute('data-gph')); };
     });

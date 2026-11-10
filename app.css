@@ -225,5 +225,8 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-pdf canvas { display: block; background: #fff; border: 1px solid #D9D8D1; box-shadow: 0 2px 10px rgba(0, 0, 0, .06); }
 .c01-pdf.thumb { min-width: 0; min-height: 0; max-height: 92px; overflow: hidden; }
 .c01-pdf.thumb canvas { max-height: 92px; width: auto !important; height: auto !important; max-width: 100%; }
+.c01-filemiss { display: inline-block; color: var(--warn, #b45309); font-size: 12px; padding: 4px 6px; }
+.c01-filemiss.big { font-size: 14px; padding: 24px; }
+.c01-qfiles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; }
 .c01-pdfmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 12px; }
 .c01-pdf[data-fallback] { display: block; width: 640px; }
