@@ -31,7 +31,7 @@ window.C01 = window.C01 || {};
 
   var S = {
     src: null, info: null, jik: null, queue: null, photos: {}, staff: null, me: null,
-    view: 'main', port: 'mine', filter: 'all', showUnarrived: true,
+    view: 'main', port: 'mine', ports: [], filter: 'all', showUnarrived: true,
     sel: null, picks: {}, panelInput: '', lb: null,
     actions: [], mine: [], lastPoll: null, lastLoad: null,
     qkind: 'all', qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false, qfile: {},
@@ -190,8 +190,37 @@ window.C01 = window.C01 || {};
     });
     return { ports: mine, star: star, known: items.map(function (it) { return it.pol; }).filter(function (p) { return p !== '*'; }) };
   }
+  /* v0.3.7 (R7D Part U-2): 担当港 = 複数選択 (港ボタンをトグル) · 「全港」 = 全部 · 「自分の担当」 = マスター 担当・補助 ·
+     選んだ組み合わせはブラウザに記憶 (localStorage c01_ports · 使えない環境では記憶しないだけ) */
+  var PORT_KEY = 'c01_ports';
+  function savePorts() {
+    try { localStorage.setItem(PORT_KEY, JSON.stringify({ port: S.port, ports: S.ports || [] })); } catch (e) { /* なし */ }
+  }
+  function loadPorts() {
+    var j = null;
+    try { j = JSON.parse(localStorage.getItem(PORT_KEY) || 'null'); } catch (e) { j = null; }
+    if (!j || ['mine', 'all', 'set'].indexOf(j.port) < 0) return false;
+    if (j.port === 'mine' && !S.me) return false;
+    S.port = j.port;
+    S.ports = Array.isArray(j.ports) ? j.ports.filter(function (x) { return typeof x === 'string'; }) : [];
+    if (S.port === 'set' && !S.ports.length) S.port = 'all';
+    return true;
+  }
+  function pickPort(p) {
+    if (p === 'all' || p === 'mine') { S.port = p; S.ports = []; }
+    else {
+      var cur = S.port === 'set' ? (S.ports || []).slice() : [];
+      var i = cur.indexOf(p);
+      if (i >= 0) cur.splice(i, 1); else cur.push(p);
+      S.ports = cur;
+      S.port = cur.length ? 'set' : 'all';
+    }
+    savePorts();
+  }
+  function portOn(p) { return p === 'all' || p === 'mine' ? S.port === p : (S.port === 'set' && (S.ports || []).indexOf(p) >= 0); }
   function portOk(pol) {
     if (S.port === 'all') return true;
+    if (S.port === 'set') return (S.ports || []).indexOf(pol) >= 0;
     if (S.port === 'mine') {
       var mp = myPorts();
       if (!mp) return true;
@@ -333,6 +362,8 @@ window.C01 = window.C01 || {};
       S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
       try { localStorage.setItem('c01_local_me', S.me ? S.me.code : ''); } catch (er) { /* なし */ }
       S.port = S.me ? 'mine' : 'all';
+      S.ports = [];
+      savePorts();
       updateUserChip();
       render();
     };
@@ -361,8 +392,8 @@ window.C01 = window.C01 || {};
     }).forEach(function (p) { ports.push([p, p]); });
     var html = '<div class="c01-bar">' +
       '<span class="c01-lab">担当港</span>' +
-      ports.map(function (p) { return '<button class="c01-chip' + (S.port === p[0] ? ' on' : '') + '" data-port="' + esc(p[0]) + '">' + esc(p[1]) + '</button>'; }).join('') +
-      '<span class="c01-hint">（⚙ マスター「POL 担当」の 担当・補助 から自動）</span>' +
+      ports.map(function (p) { return '<button class="c01-chip' + (portOn(p[0]) ? ' on' : '') + '" data-port="' + esc(p[0]) + '" aria-pressed="' + (portOn(p[0]) ? 'true' : 'false') + '">' + esc(p[1]) + '</button>'; }).join('') +
+      '<span class="c01-hint">（港は複数選べます · 自分の担当 = ⚙ マスター「POL 担当」の 担当・補助 · 選んだ組み合わせは記憶）</span>' +
       '<span class="c01-flex"></span>' +
       '<div class="c01-filters">' +
       '<button class="c01-f c01-f-check' + (S.filter === 'check' ? ' on' : '') + '" data-filter="check">要確認 ' + b.cnt.check + '台</button>' +
@@ -396,8 +427,8 @@ window.C01 = window.C01 || {};
         if (S.sel === x.key) cls += ' sel';
         if (x.kind === 'missing') {
           html += '<tr class="c01-row wait missing" data-key="' + esc(x.key) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') + '</td>' + c1(iv.iv_no, 'mono') +
-            c2(iv.item) + '<td></td><td></td><td></td><td></td><td></td><td>' + esc(md(x.m.work_date)) + '</td>' + c1(iv.incoterms) +
-            c2(x.m.packer || iv.packer) + c2(x.m.plant || iv.plant) + '<td></td><td class="c-st"><span class="st-wait">メール未着</span></td></tr>';
+            cv(rowVal(iv, x.m, 'item')) + '<td></td><td></td><td></td><td></td><td></td><td>' + esc(md(x.m.work_date)) + '</td>' + cv(rowVal(iv, x.m, 'incoterms'), true) +
+            cv(rowVal(iv, x.m, 'packer')) + cv(rowVal(iv, x.m, 'plant')) + '<td></td><td class="c-st"><span class="st-wait">メール未着</span></td></tr>';
           return;
         }
         var r = x.r, v = x.vals;
@@ -409,9 +440,9 @@ window.C01 = window.C01 || {};
             '<span class="st-wait">' + esc(x.wait) + '</span>';
         stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '');
         html += '<tr class="c01-row ' + cls + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
-          '</td>' + c1(iv.iv_no, 'mono') + c2(r.item || iv.item) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
+          '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
-          '</td><td>' + esc(md(v.work_date)) + '</td>' + c1(iv.incoterms) + c2(r.packer || iv.packer) + c2(r.plant || iv.plant) + '<td' +
+          '</td><td>' + esc(md(v.work_date)) + '</td>' + cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
           (photoAlert(photos) ? ' class="c01-ph-alert" title="写真 ' + photos + '枚（5枚以下・15枚以上）"' : '') + '>' +
           (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '">📷 ' + photos + '枚</button>' : '0枚') + '</td><td class="c-st">' + stCell + '</td></tr>';
       });
@@ -423,7 +454,7 @@ window.C01 = window.C01 || {};
       '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
     $('c01-main').innerHTML = html;
     var root = $('c01-main');
-    root.querySelectorAll('[data-port]').forEach(function (el) { el.onclick = function () { S.port = el.getAttribute('data-port'); render(); }; });
+    root.querySelectorAll('[data-port]').forEach(function (el) { el.onclick = function () { pickPort(el.getAttribute('data-port')); render(); }; });
     root.querySelectorAll('[data-filter]').forEach(function (el) { el.onclick = function () { var f = el.getAttribute('data-filter'); S.filter = S.filter === f ? 'all' : f; render(); }; });
     $('show-unarrived').onchange = function () { S.showUnarrived = !S.showUnarrived; render(); };
     root.querySelectorAll('[data-photos]').forEach(function (el) { el.onclick = function () { openLightbox(el.getAttribute('data-photos'), 0); }; });
@@ -541,8 +572,35 @@ window.C01 = window.C01 || {};
     return 'スロット変更 · ' + staffName(si.by) + ' · ' + String(si.at || '').slice(0, 16).replace('T', ' ') + ' · ' + slotLabel(iv, si.before) + ' → ' + slotLabel(iv, si.after) +
       (si.swap_ct ? ' · 入れ替え ' + si.swap_ct : '');
   }
-  function c2(v) { return '<td class="c-wrap"><span class="c01-clamp" title="' + esc(v || '') + '">' + esc(v || '') + '</span></td>'; }
-  function c1(v, cls) { return '<td class="c-cut' + (cls ? ' ' + cls : '') + '" title="' + esc(v || '') + '">' + esc(v || '') + '</td>'; }
+  function c2(v, t) { return '<td class="c-wrap"><span class="c01-clamp" title="' + esc(t !== undefined ? t : (v || '')) + '">' + esc(v || '') + '</span></td>'; }
+  function c1(v, cls, t) { return '<td class="c-cut' + (cls ? ' ' + cls : '') + '" title="' + esc(t !== undefined ? t : (v || '')) + '">' + esc(v || '') + '</td>'; }
+  /* v0.3.7 (R7D Part U-1): 行の 品目 · 条件 · 圧縮業者 · Plant — IV の候補枠を「・」で全部つなげない。
+     枠に割り当て済み = その枠 (slot_guid) の値 1 つ · 未割り当て = コンテナの値 → 候補枠の値が 1 種類ならそれ → それ以外「—」(マウスで候補一覧) */
+  function slotOfRow(iv, r) {
+    var ss = (iv && iv.slots) || [], g = r && r.slot_guid;
+    if (!g) return null;
+    for (var i = 0; i < ss.length; i++) if (ss[i].slot_guid === g) return ss[i];
+    return null;
+  }
+  function rowVal(iv, r, key) {
+    var s = slotOfRow(iv, r);
+    var own = r ? r[key] : null;
+    if (key === 'packer' && own) return { v: own, t: own };              /* 圧縮業者 = エンジンのコンテナ値が先 (rowKey と同じ) */
+    if (s && s[key]) return { v: s[key], t: s[key] };
+    if (own) return { v: own, t: own };
+    var u = [];
+    ((iv && iv.slots) || []).forEach(function (x) { if (x[key] && u.indexOf(x[key]) < 0) u.push(x[key]); });
+    if (u.length === 1) return { v: u[0], t: u[0] };
+    if (u.length > 1) return { v: '—', t: '候補: ' + u.join(' / ') };
+    var f = (iv && iv[key]) || '';
+    return String(f).indexOf('・') >= 0 ? { v: '—', t: '候補: ' + String(f).split('・').join(' / ') } : { v: f, t: f };
+  }
+  var ACT_MARK = '<!--c01-acts-->';
+  function qPackerPlant(q, iv) {
+    var row = q.container_id ? (iv.rows || []).filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+    return rowVal(iv, row, 'packer').v + ' ' + rowVal(iv, row, 'plant').v;
+  }
+  function cv(o, one, cls) { return one ? c1(o.v, cls, o.t) : c2(o.v, o.t); }
   function rowInfo(iv, r, x, ov) {
     var out = '';
     var diffs = (r.info || []).filter(function (s) { return /^human_vs_engine_diff\(/.test(s); });
@@ -677,7 +735,7 @@ window.C01 = window.C01 || {};
     el.hidden = false;
     el.innerHTML = '<div class="c01-overlay" id="panel-bg"></div><aside class="c01-side" role="dialog" aria-label="要確認の詳細">' +
       '<div class="c01-side-h"><div><div class="k">要確認</div><div class="mono big">' + esc(r.ct || '（CT 不明）') + '</div><div class="t2">' +
-      esc(iv.iv_no + ' · ' + (iv.pol || '') + ' · ' + (r.packer || iv.packer) + ' ' + (r.plant || iv.plant)) + '</div></div>' +
+      esc(iv.iv_no + ' · ' + (iv.pol || '') + ' · ' + rowVal(iv, r, 'packer').v + ' ' + rowVal(iv, r, 'plant').v) + '</div></div>' +
       '<button class="c01-x" id="panel-close" aria-label="閉じる">✕</button></div>' +
       '<div class="c01-side-b">' + lostMsg +
       '<p class="c01-reason">' + esc(reasonTexts(r).join(' / ') || (r.reasons || []).join(' / ')) + '</p>' +
@@ -895,8 +953,8 @@ window.C01 = window.C01 || {};
       var KC = KIND[q.kind];
       html += '<div class="c01-form-h"><span class="k" style="color:' + KC.color + '">' + esc(kindLabel(q.kind)) + '</span><span class="mono big">' +
         esc(q.kind === '写真のCT' ? 'CT 不明の写真 ' + (q.files || []).length + '枚' : q.kind === '未分類FAX' ? ((q.files || [])[0] || {}).name || '' : (q.ct || '（CT 不明）')) + '</span>' +
-        '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 ' + (q.issuer || '不明') + (q.received_at ? ' · 受信 ' + md(String(q.received_at).slice(0, 10)) : '') : (q.iv_no || '') + ' · ' + (iv ? (iv.packer + ' ' + iv.plant) : '') + ' · CY ' + (md(q.cy_cut) || '—')) + '</span></div>';
-      html += '<div class="c01-form-b">';
+        '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 ' + (q.issuer || '不明') + (q.received_at ? ' · 受信 ' + md(String(q.received_at).slice(0, 10)) : '') : (q.iv_no || '') + ' · ' + (iv ? qPackerPlant(q, iv) : '') + ' · CY ' + (md(q.cy_cut) || '—')) + '</span></div>';
+      html += ACT_MARK + '<div class="c01-form-b">';
       if (st.done) html += '<p class="' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? 'c01-lost' : 'c01-okmsg') + '">' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? '他の人が先に確認しました' : '完了しました') + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
       html += '<p class="c01-qnote k-' + KC.key + '">' + esc(noteOf(q)) + '</p>';
       var msg = S.qmsg[q.queue_id];
@@ -935,12 +993,14 @@ window.C01 = window.C01 || {};
         }).join('') + '<label class="c01-direct">IV 番号を入力して指定<input id="q-iv" placeholder="IV 番号" value="' + esc((S.qvals[q.queue_id] || {}).iv || '') + '"></label></fieldset>';
       }
       html += '</div>';
+      html += '<div class="c01-form-f"><span class="c01-foot">確認した内容は実況表にすぐ反映 · 記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</span></div>';
+      /* v0.3.7 (R7D Part U-3): 判断ボタン (確認して次へ / 選んでください · スキップ · 当社案件ではない) = 右パネルの一番上 (項目タイトルのすぐ下) · 全種類同じ位置 */
       var ready = readyOf(q);
-      html += '<div class="c01-form-f"><button id="q-submit" class="c01-btn-big' + (ready || st.done ? ' ready' : '') + '"' + (ready || st.done ? '' : ' disabled') + '>' +
+      var acts = '<div class="c01-form-a"><button id="q-submit" class="c01-btn-big' + (ready || st.done ? ' ready' : '') + '"' + (ready || st.done ? '' : ' disabled') + '>' +
         (st.done ? '完了しました — 次へ' : ready ? '確認して次へ' : (q.kind === '値の違い' || q.kind === '手入力' ? '未入力の項目があります' : '選んでください')) + '</button>' +
         '<div class="row"><button id="q-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
-        (q.kind === '未分類FAX' ? '<button id="q-notours" class="c01-btn-ghost2 danger"' + (st.done ? ' disabled' : '') + '>当社案件ではない</button>' : '') + '</div>' +
-        '<span class="c01-foot">確認した内容は実況表にすぐ反映 · 記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</span></div>';
+        (q.kind === '未分類FAX' ? '<button id="q-notours" class="c01-btn-ghost2 danger"' + (st.done ? ' disabled' : '') + '>当社案件ではない</button>' : '') + '</div></div>';
+      html = html.replace(ACT_MARK, acts);
     } else {
       html += '<p class="c01-empty">作業はありません</p>';
     }
@@ -1141,6 +1201,8 @@ window.C01 = window.C01 || {};
       S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
       if (typeof src.me === 'function') S.me = src.me(S.staff);          /* graph: ログインした人 (選ばない) */
       S.port = S.me ? 'mine' : 'all';
+      S.ports = [];
+      loadPorts();                                                        /* v0.3.7: 記憶した 担当港 の組み合わせ (なければ既定) */
       updateUserChip();
       return loadAll();
     }).then(poll).then(function () {

@@ -105,11 +105,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.6", page.title() == "LEENAI C-01 搬入票 v0.3.6", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.7", page.title() == "LEENAI C-01 搬入票 v0.3.7", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.6" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.7" in page.locator(".ln-hdr-ver").inner_text())
             ok("기본 테마 DARK", page.evaluate("document.documentElement.getAttribute('data-theme')") == "dark")
             ths = page.locator("#jikkyou-table thead th").all_inner_texts()
             ok("実況表 열 15 · 순서", ths == ["No", "CYカット", "Invoice番号", "品目", "CT番号", "シール番号", "正味重量", "風袋重量", "ベール数", "作業日", "条件", "圧縮業者",
@@ -189,6 +189,27 @@ def main():
             ok("마스터에 없는 港 = * 줄 (STAFF_C = KOBE + * → HAKATA)", sorted(ivs) == ["TST2611-04", "TST2611-05"], ivs)
             page.click("[data-port='all']")
             ok("全港 전환", page.locator("tbody[data-iv]").count() == 5)
+            # v0.3.7 (R7D Part U-2): 担当港 복수 선택 · 기억
+            ivs_of = lambda: sorted(page.eval_on_selector_all("tbody[data-iv]", "els => els.map(e => e.getAttribute('data-iv'))"))
+            page.click("[data-port='TOKYO']")
+            page.click("[data-port='KOBE']")
+            ok("U-2 港 2개 토글 = 두 港 IV (TOKYO 2 · KOBE 1)", ivs_of() == ["TST2611-01", "TST2611-03", "TST2611-04"], ivs_of())
+            on = sorted(page.eval_on_selector_all("[data-port][aria-pressed='true']", "els => els.map(e => e.getAttribute('data-port'))"))
+            ok("U-2 고른 港 버튼 2개 켜짐 (全港 · 自分の担当 꺼짐)", on == ["KOBE", "TOKYO"], on)
+            saved = json.loads(page.evaluate("localStorage.getItem('c01_ports')") or "null")
+            ok("U-2 브라우저 기억 (localStorage c01_ports)", saved == {"port": "set", "ports": ["TOKYO", "KOBE"]}, saved)
+            page.click("[data-port='KOBE']")
+            ok("U-2 다시 누르면 빠짐 (TOKYO 만)", ivs_of() == ["TST2611-01", "TST2611-03"], ivs_of())
+            page.reload()
+            page.wait_for_selector("#c01-open-server", timeout=20000)
+            page.click("#c01-open-server")
+            page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
+            ok("U-2 다시 열어도 기억한 조합 (TOKYO)", ivs_of() == ["TST2611-01", "TST2611-03"], ivs_of())
+            page.click("[data-port='TOKYO']")
+            ok("U-2 모두 빼면 全港", page.locator("tbody[data-iv]").count() == 5 and page.locator("[data-port='all'][aria-pressed='true']").count() == 1)
+            page.click("[data-port='mine']")
+            ok("U-2 自分の担当 = 마스터 担当·補助 (STAFF_C = KOBE + *)", ivs_of() == ["TST2611-04", "TST2611-05"], ivs_of())
+            page.click("[data-port='all']")
             page.select_option("#me-select", "STAFF_A")
             page.wait_for_timeout(200)
             # #112 催促 서명 = 누른 직원 주소 (초안 자리표시자 → 로그인 직원)
@@ -249,6 +270,19 @@ def main():
             kinds_txt = page.locator(".c01-kinds .c01-chip").all_inner_texts()
             ok("確認・入力 4종 + すべて", [k.split(" ")[0] for k in kinds_txt] == ["すべて", "値の違い", "手入力", "写真の", "未分類"] or len(kinds_txt) == 5, kinds_txt)
             page.screenshot(path=str(shots / "input_dark.png"), full_page=True)
+            # v0.3.7 (R7D Part U-3): 판단 버튼 = 오른쪽 패널 맨 위 (항목 제목 바로 아래) · 모든 종류 같은 위치
+            pos_ok = []
+            for kd in ["値の違い", "手入力", "写真のCT", "未分類FAX"]:
+                page.click(f".c01-kinds [data-kind='{kd}']")
+                if page.locator(".c01-item").count():
+                    page.locator(".c01-item").first.click()
+                    pos_ok.append((kd, page.evaluate("""() => { const h = document.querySelector('.c01-form .c01-form-h'); const a = h && h.nextElementSibling;
+                      return !!(a && a.classList.contains('c01-form-a') && a.querySelector('#q-submit') && a.querySelector('#q-skip')
+                        && a.getBoundingClientRect().top < document.querySelector('.c01-form .c01-form-b').getBoundingClientRect().top); }""")))
+            ok("U-3 판단 버튼 위치 = 제목 바로 아래 (STAFF_A 담당 港 3종 · 手入力 은 아래 全港 에서)", len(pos_ok) == 3 and all(v for _, v in pos_ok), pos_ok)
+            page.click(".c01-kinds [data-kind='未分類FAX']")
+            ok("U-3 当社案件ではない 도 위 (未分類FAX)", page.locator(".c01-form-a #q-notours").count() == 1)
+            page.click(".c01-kinds [data-kind='all']")
             page.click(".c01-kinds [data-kind='値の違い']")
             items = page.locator(".c01-item")
             for i in range(items.count()):
@@ -263,6 +297,8 @@ def main():
             page.click("[data-port='all']")
             page.click("#tab-input")
             page.click(".c01-kinds [data-kind='手入力']")
+            ok("U-3 판단 버튼 위치 = 제목 바로 아래 (手入力)", page.evaluate("""() => { const h = document.querySelector('.c01-form .c01-form-h'); const a = h && h.nextElementSibling;
+              return !!(a && a.classList.contains('c01-form-a') && a.querySelector('#q-submit') && a.querySelector('#q-skip')); }"""))
             items = page.locator(".c01-item")
             target = None
             for i in range(items.count()):

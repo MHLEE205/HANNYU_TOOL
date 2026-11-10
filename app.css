@@ -168,6 +168,8 @@
 .c01-choice { text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--read); cursor: pointer; display: flex; flex-direction: column; gap: 2px; color: var(--text); font-family: inherit; }
 .c01-choice.on { border-color: var(--accent); background: var(--surface2); } .c01-choice .s { font-size: 12px; color: var(--text2); }
 .c01-form-f { padding: 14px 18px 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; } .c01-form-f .row { display: flex; gap: 8px; }
+/* v0.3.7 (R7D U-3): 判断ボタン = 右パネル上 (タイトルのすぐ下) */
+.c01-form-a { padding: 12px 18px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; } .c01-form-a .row { display: flex; gap: 8px; }
 .c01-powered { margin: 0 0 16px; font-size: 11px; color: var(--text3); text-align: center; }
 .c01-fatal { padding: 24px; border: 1px solid var(--danger); border-radius: 10px; color: var(--text); }
 

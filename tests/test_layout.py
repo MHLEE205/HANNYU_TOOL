@@ -67,6 +67,16 @@ def main():
         r["plant"] = LONG_PLANT
         r["packer"] = LONG_PACKER
         r["item"] = LONG_ITEM
+    for sl in first["slots"]:                 # v0.3.7: 칸 배정 줄 = 배정 칸의 값 (긴 이름 시험은 칸에도)
+        sl["plant"] = LONG_PLANT
+        sl["item"] = LONG_ITEM
+    # v0.3.7 (R7D Part U-1): 営業所 다른 칸 2개 IV — 칸 배정 줄 = 그 칸 plant 1개 (「・」 없음) · 미배정 줄 = 「—」 + 마우스 후보
+    two = next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-02")
+    for i, sl in enumerate(two["slots"]):
+        sl["plant"] = "テスト一工場" if i % 2 == 0 else "テスト二工場"
+    two["plant"] = "テスト一工場・テスト二工場"
+    for r in two["rows"]:
+        r["plant"] = None
     jp.write_text(json.dumps(jj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     port = free_port()
     srv = subprocess.Popen([sys.executable, str(TOOL / "tools" / "serve_local.py"), "--root", str(root), "--port", str(port), "--today", "2026-11-08"],
@@ -114,6 +124,15 @@ def main():
                 lc = page.evaluate("""(v) => { const s = [...document.querySelectorAll('.c01-clamp')].filter(x => x.textContent === v)[0];
                   if (!s) return null; const lh = parseFloat(getComputedStyle(s).lineHeight); return { t: s.title, h: s.getBoundingClientRect().height, lh }; }""", LONG_PLANT)
                 ok(f"{tag} 긴 Plant = 2줄 이하 + title 전체", lc and lc["t"] == LONG_PLANT and lc["h"] <= lc["lh"] * 2 + 1, lc)
+                if w == 1366:
+                    pl = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-02'] tr.c01-row")].map(tr => {
+                      const td = tr.children[12]; return { slot: tr.classList.contains('missing') ? 'm' : '', t: td.textContent, title: (td.querySelector('[title]') || td).title }; })""")
+                    slots2 = [(r.get("slot_guid") or "") for r in next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-02")["rows"]]
+                    real = [x for x in pl if x["slot"] != "m"]
+                    ok("U-1 칸 배정 줄 Plant 에 「・」 0 (배정 칸 1개)", all("・" not in x["t"] for x in real) and
+                       [x["t"] for x, g in zip(real, slots2) if g] == ["テスト一工場", "テスト二工場"], pl)
+                    ok("U-1 미배정 줄 = 「—」 · 마우스 = 후보", all(x["t"] == "—" for x, g in zip(real, slots2) if not g) and any(not g for g in slots2) and
+                       all(x["title"] == "候補: テスト一工場 / テスト二工場" for x, g in zip(real, slots2) if not g), pl)
                 page.context.close()
             br.close()
     finally:
