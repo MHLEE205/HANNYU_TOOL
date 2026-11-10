@@ -2,6 +2,10 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.6 (2026-11-10) — 「別タブで開く」 = SharePoint 보기 화면 (R7C · 형님 확인 「파일이 다운로드가 됨」)
+- Graph `webUrl` 은 파일 자체 주소라 열면 내려받기가 됨 (Chrome 은 빈 탭을 닫음) → `?web=1` 을 붙여 SharePoint 보기 화면 (PDF 보기 · Excel Online) 으로 엶.
+- 버전 0.3.6 (`js/config.js` 한 곳)
+
 ## 0.3.5 (2026-11-10) — 確認・入力: Excel 원본 안내 · Thumbs.db 제외 (R7C)
 - 화면에 못 그리는 파일 (Excel 등) = 「上の「別タブで開く」で SharePoint で開けます」 안내 (실제: 手入力 16건은 원본이 Excel 뿐인 IV).
 - IV 서류 목록에서 `.db` (메일 첨부 Thumbs.db 꼴) 제외.

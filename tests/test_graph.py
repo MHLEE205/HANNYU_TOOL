@@ -162,7 +162,7 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.5", page.title() == "LEENAI C-01 搬入票 v0.3.5", page.title())
+            ok("탭 제목 v0.3.6", page.title() == "LEENAI C-01 搬入票 v0.3.6", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -234,7 +234,7 @@ def main():
                 page.click("#pdf-open")
             tab = pinfo.value
             tab.wait_for_url("**spview=1**", timeout=15000)
-            ok("別タブで開く = SharePoint 화면 (webUrl) 새 탭 (팝업 막힘 없음)", "spview=1" in tab.url and "f=" in tab.url, tab.url)
+            ok("別タブで開く = SharePoint 화면 (webUrl + web=1) 새 탭 (팝업 막힘 없음)", "spview=1" in tab.url and "f=" in tab.url and tab.url.endswith("web=1"), tab.url)
             tab.close()
             ok("파일 2개 = 칩 2개", page.locator(".c01-qfiles [data-qf]").count() == 2)
             page.click('.c01-qfiles [data-qf="1"]')

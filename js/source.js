@@ -176,7 +176,8 @@ C01.sources = (function () {
     if (self.web[rel]) return Promise.resolve(self.web[rel]);
     return this._fetch(this._item(rel) + '?$select=webUrl').then(function (r) {
       if (!r.ok) { self.errs = self.errs || {}; self.errs[rel] = r.status === 404 ? 'notfound' : r.status === 403 ? 'forbidden' : 'http' + r.status; return ''; }
-      return r.json().then(function (j) { var u = String(j.webUrl || ''); if (/^https:\/\//.test(u)) self.web[rel] = u; return self.web[rel] || ''; });
+      /* v0.3.6: webUrl はファイルそのもの (開くとダウンロード) → ?web=1 で SharePoint の表示画面 (PDF ビューアー · Excel Online) */
+      return r.json().then(function (j) { var u = String(j.webUrl || ''); if (/^https:\/\//.test(u)) self.web[rel] = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'web=1'; return self.web[rel] || ''; });
     }).catch(function () { return ''; });
   };
   Graph.prototype._children = function (rel) {
