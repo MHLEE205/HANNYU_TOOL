@@ -2,6 +2,18 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.2 (2026-11-10) — 実況表 한 화면 · PDF 화면 안 표시 · 오래된 未分類 FAX 숨김 (R7B · 형님 지적 2건)
+- **実況表 가로 스크롤 0:** `table-layout: fixed` + `colgroup` (숫자 칸 좁게 · 品目 · 圧縮業者 · Plant = 2줄까지 + 마우스 올리면 전체 (title)) · 글자 13px 그대로 ·
+  칸 순서 · 이름 그대로. 화면 폭 상한 1500 → 1840px. 세로 = 창 높이에 맞춘 한 상자 (`fitTable` · 머리글 고정 · 상자 아래 끝이 창 밖으로 안 나감 · 창 크기 바꾸면 다시 맞춤)
+- **PDF (搬入票 · 未分類 FAX) = pdf.js 로 화면 안에 그림** (`C01.PDF` · cdnjs 3.11.174 고정 · LEENAI 다른 TOOL 과 같은 판):
+  브라우저 내장 PDF 보기가 꺼진 PC (Chrome/Edge `always_open_pdf_externally`) 에서 iframe 이 「PDF 아이콘 + GUID + 開く」 만 보이던 문제.
+  확대 · 축소 · 회전 (pdf.js 그리기 · CSS 회전 없음) · 페이지 넘김 (‹ p.N / M ›) · 엔진 `page` 가 있으면 그 쪽부터 · 「別タブで開く」 보조 · pdf.js 를 못 읽으면 예전 iframe ·
+  옆 창 원본 썸네일도 PDF 1쪽을 그림. 사진 (jpg) 은 그대로
+- **未分類 FAX:** 받은 지 `C01.QUEUE.faxHideAfterDays` (7) 일 지난 것은 기본 목록에서 숨김 (지우기 0 · 「古い未分類 FAX も表示」 로 모두) — 받은 날 = 엔진 queue `received_at`
+  (없는 항목은 숨기지 않음 · 지금 엔진 출력에는 없음). 보낸 곳 = `issuer` 가 있으면 표시 (없으면 「送信元 不明」) · 받은 날 표시
+- 시험: `tests/test_layout.py` (새 · 1366 · 1600 · 1920 · 28) · `tests/test_graph.py` PDF 표시 11 추가 (가명 2쪽 PDF · canvas 그려짐 · 넘김 · 회전 · 확대 · 물러남 · FAX 숨김) = 27
+- 버전 0.3.2 (`js/config.js` 한 곳)
+
 ## 0.3.1 (2026-11-10) — Microsoft 365 로그인 켬 (graph 모드 · SharePoint HANNYU_TOOL · R7A · 결정 #132 · #137) · 「写真不足」 옆 창 · 確認する (R6M13)
 - **graph 모드 켬 (`js/config.js` `C01.SOURCE` 한 곳 · `graphEnabled: true` · `spRoot: 'HANNYU_TOOL'`):** 로그인 버튼 활성 → LEENAI_COMMON 로그인 (Graph 위임 토큰 · 새 권한 요청 없음) 뒤
   SharePoint ドキュメント / HANNYU_TOOL 에서 `_data/*.json` · 사진 · 원본 (blob) · `_actions/{날짜}/` (목록 + 내용 · eTag 같으면 다시 안 읽음 · `.done` = 처리됨) 을 읽음.

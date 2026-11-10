@@ -3,6 +3,8 @@
 https://graph.microsoft.com/ 요청은 page.route 로 가로채 가명 fixtures 폴더 (임시 사본 = HANNYU_TOOL 흉내) 에서 돌려준다.
 확인: 로그인 버튼 활성 · graph 로 実況表 · 사진 blob 표시 · 로그인한 사람 = 担当者 · _actions 쓰기 = HANNYU_TOOL/_actions/{날짜}/ 만 ·
       같은 id 다시 쓰기 거부 (409) · 처리 표시 (.done) 읽기 · Graph 주소는 모두 drives/{드라이브}/root:/HANNYU_TOOL/ 아래 · 콘솔 오류 0.
+      v0.3.2 (R7B): PDF (搬入票 · 未分類 FAX) = pdf.js 로 canvas 에 그림 (빈 화면 아님) · 페이지 넘김 · 회전 · 확대 · 別タブで開く ·
+      pdf.js 를 못 읽으면 iframe 로 물러남 · 오래된 未分類 FAX 숨김 + 「古い未分類 FAX も表示」.
 사용: python tests/test_graph.py [--shots 폴더]"""
 import argparse
 import json
@@ -33,6 +35,30 @@ def free_port():
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+def make_pdf(path):
+    """가명 2쪽 PDF (글자 없음): 1쪽 = 왼쪽 절반 검은 사각형 · 2쪽 = 오른쪽 절반."""
+    pages = [b"0 0 0 rg 40 40 220 760 re f", b"0 0 0 rg 335 40 220 760 re f"]
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>"]
+    for i, c in enumerate(pages):
+        objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents %d 0 R >>" % (4 + 2 * i))
+        objs.append(b"<< /Length %d >>\nstream\n" % len(c) + c + b"\nendstream")
+    out = bytearray(b"%PDF-1.4\n")
+    offs = []
+    for i, o in enumerate(objs):
+        offs.append(len(out))
+        out += b"%d 0 obj\n" % (i + 1) + o + b"\nendobj\n"
+    x = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % v for v in offs)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, x)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(out))
+
+
+INK = """(sel) => { const c = document.querySelector(sel); if (!c) return null; const g = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let L = 0, R = 0; for (let y = 0; y < c.height; y += 4) for (let x = 0; x < c.width; x += 4) { const i = (y * c.width + x) * 4; if (g[i] < 80 && g[i + 3] > 0) { if (x < c.width / 2) L++; else R++; } }
+  return { L, R, w: c.width, h: c.height, cssw: c.style.width }; }"""
 
 
 def make_handler(root):
@@ -90,6 +116,22 @@ def main():
     root = tmp / "HANNYU_TOOL"
     shutil.copytree(TOOL / "fixtures", root)
     staff = json.loads((root / "_masters" / "pol_staff.json").read_text(encoding="utf-8"))
+    # v0.3.2 (R7B): 가명 PDF 2개 (搬入票 · FAX) 를 사본에 넣고 queue 의 値の違い 1 · 未分類FAX 1 이 PDF 를 가리키게 · 오래된 FAX 1 (受信 10/20) 추가
+    make_pdf(root / "TST2611-02" / "搬入票" / "搬入票_02_test.pdf")
+    make_pdf(root / "_fax_unmatched" / "2026-11-08" / "FAX_0001_test.pdf")
+    qp = root / "_data" / "queue.json"
+    qj = json.loads(qp.read_text(encoding="utf-8"))
+    diff_q = next(x for x in qj["items"] if x["kind"] == "値の違い" and x["files"] and x["files"][0]["path"].startswith("TST2611-02/"))
+    diff_q["files"][0]["path"] = "TST2611-02/搬入票/搬入票_02_test.pdf"
+    diff_q["files"][0]["page"] = 1
+    fax_q = next(x for x in qj["items"] if x["kind"] == "未分類FAX")
+    fax_q["files"][0]["path"] = "_fax_unmatched/2026-11-08/FAX_0001_test.pdf"
+    fax_q["received_at"] = "2026-11-07T09:00:00+09:00"
+    old_q = json.loads(json.dumps(fax_q))
+    old_q["queue_id"] = "f0ldfax000000001"
+    old_q["received_at"] = "2026-10-20T09:00:00+09:00"
+    qj["items"].append(old_q)
+    qp.write_text(json.dumps(qj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     port = free_port()
     srv = subprocess.Popen([sys.executable, str(TOOL / "tools" / "serve_local.py"), "--root", str(TOOL / "fixtures"), "--actions", str(tmp / "local_actions"),
                             "--port", str(port), "--today", "2026-11-08"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -109,7 +151,7 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.1", page.title() == "LEENAI C-01 搬入票 v0.3.1", page.title())
+            ok("탭 제목 v0.3.2", page.title() == "LEENAI C-01 搬入票 v0.3.2", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -148,7 +190,61 @@ def main():
             ok("쓰기 (PUT) = _actions 만", puts and all("/_actions/" in unquote(u) for u in puts), puts)
             nf = [x for x in RES.get("not_found", []) if x != "NO_SUCH/x.jpg"]
             ok("없는 파일 요청 = 선택 파일만 (compass_now · remind)", all(x.startswith(("_data/compass_now/", "_data/remind.json")) for x in nf), nf[:5])
-            errs = [e for e in RES["console_errors"] if not ("Failed to load resource" in e and ("404" in e or "409" in e))]
+            # ── v0.3.2 (R7B) PDF 표시 ──
+            page.click("#tab-input")
+            page.wait_for_timeout(300)
+            page.click(f'[data-q="{diff_q["queue_id"]}"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=30000)
+            ink = page.evaluate(INK, ".c01-orig [data-pdf] canvas")
+            ok("PDF 搬入票 = canvas 에 그림 (빈 화면 아님 · 1쪽 = 왼쪽)", ink and ink["L"] > 50 and ink["R"] < ink["L"] / 10, ink)
+            ok("PDF 쪽 표시 p.1 / 2 · iframe 없음", page.locator("#pdf-pg").inner_text() == "p.1 / 2" and page.locator(".c01-orig iframe").count() == 0, page.locator("#pdf-pg").inner_text())
+            ok("別タブで開く (보조) 있음", page.locator("#pdf-open").count() == 1)
+            page.click("#pdf-next")
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='2:0']", timeout=15000)
+            ink2 = page.evaluate(INK, ".c01-orig [data-pdf] canvas")
+            ok("페이지 넘김 → 2쪽 (오른쪽) · p.2 / 2", ink2["R"] > 50 and ink2["L"] < ink2["R"] / 10 and page.locator("#pdf-pg").inner_text() == "p.2 / 2", ink2)
+            page.click("#pdf-prev")
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
+            ok("앞 페이지 → 1쪽", page.locator("#pdf-pg").inner_text() == "p.1 / 2")
+            page.click("#rot")
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:90']", timeout=15000)
+            ink3 = page.evaluate(INK, ".c01-orig [data-pdf] canvas")
+            ok("회전 90° → 가로로 긴 canvas", ink3["w"] > ink3["h"], ink3)
+            for _ in range(3):
+                page.click("#rot")
+                page.wait_for_timeout(150)
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
+            page.click("#z-in")
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
+            ok("확대 120% → canvas 768px", page.evaluate("document.querySelector('.c01-orig [data-pdf] canvas').style.width") == "768px")
+            page.screenshot(path=str(shots / "graph_pdf.png"))
+            # 未分類 FAX: 새 것만 기본 목록 · 오래된 것은 숨김 + 「古い未分類 FAX も表示」
+            lab = page.locator("#fax-old-lab").inner_text() if page.locator("#fax-old-lab").count() else ""
+            ok("오래된 未分類 FAX = 기본 목록에서 숨김 (1건)", page.locator('[data-q="f0ldfax000000001"]').count() == 0 and "1件" in lab, lab)
+            page.check("#fax-old")
+            page.wait_for_timeout(200)
+            ok("「古い未分類 FAX も表示」 → 보임 (지우지 않음)", page.locator('[data-q="f0ldfax000000001"]').count() == 1)
+            page.click(f'[data-q="{fax_q["queue_id"]}"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn]", timeout=30000)
+            ink4 = page.evaluate(INK, ".c01-orig [data-pdf] canvas")
+            ok("未分類 FAX PDF = canvas 에 그림 · 受信 날짜 표시", ink4 and ink4["L"] > 50 and "受信 11/07" in page.locator(".c01-form-h").inner_text(), ink4)
+            page.screenshot(path=str(shots / "graph_fax.png"))
+            # pdf.js 를 못 읽으면 iframe 로 물러남 (새 창 · cdnjs 막음)
+            p2 = page.context.new_page()
+            p2.route("https://graph.microsoft.com/**", make_handler(root))
+            p2.route("https://cdnjs.cloudflare.com/**", lambda r: r.abort())
+            p2.goto(f"http://127.0.0.1:{port}/")
+            p2.wait_for_selector("#ln-splash", timeout=20000)
+            p2.evaluate(STUB, staff)
+            p2.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; C01.app.start(new C01.sources.Graph())")
+            p2.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
+            p2.click("#tab-input")
+            p2.wait_for_timeout(200)
+            p2.click(f'[data-q="{diff_q["queue_id"]}"]')
+            p2.wait_for_selector(".c01-orig [data-pdf][data-fallback] iframe", timeout=15000)
+            ok("pdf.js 없음 → iframe (blob) 로 물러남", (p2.locator(".c01-orig iframe").get_attribute("src") or "").startswith("blob:"))
+            p2.close()
+            errs = [e for e in RES["console_errors"] if not ("Failed to load resource" in e and ("404" in e or "409" in e or "ERR_FAILED" in e))]
             ok("콘솔 오류 0 (예상한 404 · 409 제외)", not errs, errs[:5])
             br.close()
     finally:

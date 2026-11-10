@@ -24,7 +24,7 @@
 .t2 { color: var(--text2); }
 
 /* ナビ (実況表 / 確認・入力) */
-.c01-navbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 24px; min-height: 48px; background: var(--frame); border-bottom: 1px solid var(--border); max-width: 1500px; margin: 0 auto; box-sizing: border-box; }
+.c01-navbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 24px; min-height: 48px; background: var(--frame); border-bottom: 1px solid var(--border); max-width: 1840px; margin: 0 auto; box-sizing: border-box; }
 .c01-tabs { display: flex; align-self: stretch; gap: 4px; }
 .c01-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text2); font-weight: 600; font-size: 14px; padding: 0 12px; cursor: pointer; font-family: inherit; }
 .c01-tab.on { color: var(--text); font-weight: 700; border-bottom-color: var(--text); }
@@ -34,7 +34,7 @@
 .c01-me { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 6px; }
 .c01-me select { background: var(--read); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font-family: inherit; }
 
-.c01-wrap { max-width: 1500px; margin: 0 auto; padding: 16px 24px 40px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
+.c01-wrap { max-width: 1840px; margin: 0 auto; padding: 16px 24px 16px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
 .c01-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .c01-lab { font-size: 12px; color: var(--text2); margin-right: 2px; }
 .c01-hint { font-size: 11px; color: var(--text3); }
@@ -47,9 +47,18 @@
 .c01-chk { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text2); }
 
 /* 実況表 */
-.c01-tablewrap { background: var(--read); border: 1px solid var(--border); border-radius: 10px; overflow: auto; max-height: 78vh; }
-.c01-table { width: 100%; min-width: 1360px; border-collapse: collapse; }
-.c01-table th, .c01-table td { border-bottom: 1px solid var(--border); padding: 7px 10px; text-align: left; white-space: nowrap; }
+/* v0.3.2 (R7B): 横スクロール 0 — table-layout: fixed + colgroup · 縦は箱の中 (見出し固定 · 箱の高さは fitTable) */
+.c01-tablewrap { background: var(--read); border: 1px solid var(--border); border-radius: 10px; overflow-x: hidden; overflow-y: auto; max-height: 78vh; }
+.c01-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.c01-table th, .c01-table td { border-bottom: 1px solid var(--border); padding: 6px 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.c01-table col.w-no { width: 34px; } .c01-table col.w-cy { width: 88px; } .c01-table col.w-iv { width: 104px; } .c01-table col.w-item { width: 8%; }
+.c01-table col.w-ct { width: 118px; } .c01-table col.w-seal { width: 108px; } .c01-table col.w-nw { width: 74px; } .c01-table col.w-tw { width: 70px; }
+.c01-table col.w-bl { width: 62px; } .c01-table col.w-wd { width: 54px; } .c01-table col.w-inc { width: 52px; } .c01-table col.w-pk { width: 8%; }
+.c01-table col.w-pl { width: 10%; } .c01-table col.w-ph { width: 76px; } .c01-table col.w-st { width: 17%; }
+.c01-table td.c-wrap { white-space: normal; }
+.c01-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; line-height: 1.3; }
+.c01-table td.c-st { white-space: normal; }
+.c01-table td.c-st .c01-checkbtn { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
 .c01-table th { font-size: 11px; font-weight: 700; color: var(--text); background: var(--frame); position: sticky; top: 0; z-index: 2; }
 .c01-table .r { text-align: right; } .c01-table .num { font-variant-numeric: tabular-nums; }
 .c01-table .c-no { width: 28px; font-size: 11px; color: var(--text3); text-align: center; }
@@ -209,3 +218,12 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 /* 写真枚数の色 (旧 実況表と同じ基準: 5枚以下 または 15枚以上 · 0枚を含む · phase4_report.py) */
 .c01-ph-alert { background: var(--ph-alert) !important; font-weight: 700; }
 .c01-phcount { display: inline-block; padding: 0 6px; border-radius: 4px; font-weight: 600; }
+
+/* v0.3.2 (R7B): PDF (pdf.js · canvas) */
+.c01-doc.pdf { background: transparent; border: none; box-shadow: none; }
+.c01-pdf { position: relative; display: inline-block; min-width: 200px; min-height: 120px; }
+.c01-pdf canvas { display: block; background: #fff; border: 1px solid #D9D8D1; box-shadow: 0 2px 10px rgba(0, 0, 0, .06); }
+.c01-pdf.thumb { min-width: 0; min-height: 0; max-height: 92px; overflow: hidden; }
+.c01-pdf.thumb canvas { max-height: 92px; width: auto !important; height: auto !important; max-width: 100%; }
+.c01-pdfmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 12px; }
+.c01-pdf[data-fallback] { display: block; width: 640px; }

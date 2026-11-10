@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.1',
+  version: '0.3.2',
   date: '2026-11-10',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (DRY) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
@@ -42,4 +42,16 @@ C01.SEND = {
    follow_same_cond_slot: true = 入れる CT が同じブッキングの同一条件の別の枠に既にあれば、その枠で比較・入力 (D-11 (가)) / false = 今のまま (既定) */
 C01.COMPASS = {
   follow_same_cond_slot: false
+};
+
+/* v0.3.2 (R7B): PDF を画面の中に描く pdf.js (cdnjs · 版固定 · LEENAI の他 TOOL と同じ版) */
+C01.PDF = {
+  lib: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  worker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+};
+
+/* v0.3.2 (R7B): 確認・入力 の 未分類 FAX — 受信から faxHideAfterDays 日を過ぎたものは既定の一覧で隠す (隠すだけ · 消さない · 「古い未分類 FAX も表示」で全部)
+   受信日 = エンジン queue 項目の received_at (無い項目は隠さない) · 0 = 隠さない */
+C01.QUEUE = {
+  faxHideAfterDays: 7
 };

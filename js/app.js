@@ -34,7 +34,7 @@ window.C01 = window.C01 || {};
     view: 'main', port: 'mine', filter: 'all', showUnarrived: true,
     sel: null, picks: {}, panelInput: '', lb: null,
     actions: [], mine: [], lastPoll: null, lastLoad: null,
-    qkind: 'all', qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {},
+    qkind: 'all', qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false,
     timer: null, remind: null, modal: null
   };
   C01.state = S;
@@ -59,10 +59,78 @@ window.C01 = window.C01 || {};
     return '<img class="' + cls + '" src="' + esc(S.src.fileUrl(rel)) + '" alt="' + esc(alt || '') + '">';
   }
   function hydrate(root) {
+    (root || document).querySelectorAll('[data-pdf]').forEach(drawPdf);
     if (!isFolder()) return;
     (root || document).querySelectorAll('[data-rel]').forEach(function (el) {
       var rel = el.getAttribute('data-rel');
       S.src.resolveUrl(rel).then(function (u) { if (u) el.src = u; });
+    });
+  }
+
+  /* ── v0.3.2 (R7B): PDF は pdf.js で画面の中に描く (ブラウザの PDF ビューアーが無効でも見える) ──
+     読み先 = graph / フォルダ選択 は blob URL · ローカルサーバーは URL。pdf.js が読めない時は従来の iframe に戻る。 */
+  var PDF = { lib: null, docs: {} };
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (PDF.lib) return PDF.lib;
+    PDF.lib = new Promise(function (res, rej) {
+      var sc = document.createElement('script');
+      sc.src = C01.PDF.lib;
+      sc.onload = function () {
+        if (!window.pdfjsLib) return rej(new Error('pdf.js なし'));
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = C01.PDF.worker;
+        res(window.pdfjsLib);
+      };
+      sc.onerror = function () { rej(new Error('pdf.js を読めませんでした')); };
+      document.head.appendChild(sc);
+    });
+    PDF.lib.catch(function () { PDF.lib = null; });
+    return PDF.lib;
+  }
+  function pdfUrl(rel) { return isFolder() ? S.src.resolveUrl(rel) : Promise.resolve(S.src.fileUrl(rel)); }
+  function pdfDoc(rel) {
+    if (PDF.docs[rel]) return PDF.docs[rel];
+    var p = Promise.all([loadPdfJs(), pdfUrl(rel)]).then(function (x) {
+      if (!x[1]) throw new Error('原本を読めませんでした');
+      return x[0].getDocument({ url: x[1] }).promise;
+    });
+    PDF.docs[rel] = p;
+    p.catch(function () { delete PDF.docs[rel]; });
+    return p;
+  }
+  function pdfTag(rel, page, thumb) {
+    return '<div class="c01-pdf' + (thumb ? ' thumb' : '') + '" data-pdf="' + esc(rel) + '" data-page="' + (+page || 1) + '"' + (thumb ? ' data-thumb="1"' : '') +
+      '><canvas></canvas><span class="c01-pdfmsg">' + (thumb ? '' : '読み込み中…') + '</span></div>';
+  }
+  function drawPdf(el) {
+    var rel = el.getAttribute('data-pdf'), thumb = el.getAttribute('data-thumb') === '1';
+    var want = +el.getAttribute('data-page') || 1;
+    pdfDoc(rel).then(function (doc) {
+      var n = doc.numPages, pg = Math.min(Math.max(1, want), n);
+      el.setAttribute('data-pages', n);
+      if (!thumb) { S.pdfPage[rel] = pg; var lab = $('pdf-pg'); if (lab) lab.textContent = 'p.' + pg + ' / ' + n; }
+      return doc.getPage(pg).then(function (page) {
+        var rot = thumb ? 0 : S.rot;
+        var r = (page.rotate + rot) % 360;
+        var v1 = page.getViewport({ scale: 1, rotation: r });
+        var cssW = thumb ? 150 : Math.round(640 * S.zoom / 100);
+        var dpr = window.devicePixelRatio || 1;
+        var vp = page.getViewport({ scale: cssW / v1.width * dpr, rotation: r });
+        var cv = el.querySelector('canvas');
+        cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        cv.style.width = cssW + 'px'; cv.style.height = Math.round(vp.height / dpr) + 'px';
+        return page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise.then(function () {
+          el.setAttribute('data-drawn', pg + ':' + rot);
+          var m = el.querySelector('.c01-pdfmsg'); if (m) m.remove();
+        });
+      });
+    }).catch(function () {
+      /* pdf.js が使えない → 従来の iframe (ブラウザの PDF ビューアー) */
+      if (thumb) { el.innerHTML = '<span class="c01-pdfmsg">PDF</span>'; return; }
+      pdfUrl(rel).then(function (u) {
+        el.setAttribute('data-fallback', '1');
+        el.innerHTML = u ? '<iframe class="c01-docpdf" src="' + esc(u) + (want > 1 ? '#page=' + want : '') + '" title="原本"></iframe>' : '<p class="c01-note2">原本を読めませんでした</p>';
+      });
     });
   }
   function toast(msg, type) {
@@ -267,7 +335,10 @@ window.C01 = window.C01 || {};
       '<button class="c01-f c01-f-remind' + (S.filter === 'remind' ? ' on' : '') + '" data-filter="remind">催促候補 ' + b.cnt.remind + '件</button>' +
       '<label class="c01-chk"><input type="checkbox" id="show-unarrived"' + (S.showUnarrived ? ' checked' : '') + '>メール未着も表示</label>' +
       '</div></div>';
-    html += '<div class="c01-tablewrap"><table class="c01-table" id="jikkyou-table"><thead><tr>' +
+    /* v0.3.2 (R7B): 横スクロール 0 — 列幅は colgroup (table-layout: fixed) · 長い列 (品目・圧縮業者・Plant) は 2 行まで + title で全文 */
+    html += '<div class="c01-tablewrap" id="jikkyou-wrap"><table class="c01-table" id="jikkyou-table"><colgroup>' +
+      '<col class="w-no"><col class="w-cy"><col class="w-iv"><col class="w-item"><col class="w-ct"><col class="w-seal"><col class="w-nw"><col class="w-tw"><col class="w-bl">' +
+      '<col class="w-wd"><col class="w-inc"><col class="w-pk"><col class="w-pl"><col class="w-ph"><col class="w-st"></colgroup><thead><tr>' +
       '<th class="c-no">No</th><th>CYカット</th><th>Invoice番号</th><th>品目</th><th>CT番号</th><th>シール番号</th>' +
       '<th class="r">正味重量</th><th class="r">風袋重量</th><th class="r">ベール数</th><th>作業日</th><th>条件</th><th>圧縮業者</th><th>Plant</th><th>写真</th><th>状況</th>' +
       '</tr></thead>';
@@ -289,9 +360,9 @@ window.C01 = window.C01 || {};
         var cls = x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';
         if (S.sel === x.key) cls += ' sel';
         if (x.kind === 'missing') {
-          html += '<tr class="c01-row wait missing" data-key="' + esc(x.key) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') + '</td><td class="mono">' + esc(iv.iv_no) +
-            '</td><td>' + esc(iv.item) + '</td><td></td><td></td><td></td><td></td><td></td><td>' + esc(md(x.m.work_date)) + '</td><td>' + esc(iv.incoterms) + '</td><td>' +
-            esc(x.m.packer || iv.packer) + '</td><td>' + esc(x.m.plant || iv.plant) + '</td><td></td><td><span class="st-wait">メール未着</span></td></tr>';
+          html += '<tr class="c01-row wait missing" data-key="' + esc(x.key) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') + '</td>' + c1(iv.iv_no, 'mono') +
+            c2(iv.item) + '<td></td><td></td><td></td><td></td><td></td><td>' + esc(md(x.m.work_date)) + '</td>' + c1(iv.incoterms) +
+            c2(x.m.packer || iv.packer) + c2(x.m.plant || iv.plant) + '<td></td><td class="c-st"><span class="st-wait">メール未着</span></td></tr>';
           return;
         }
         var r = x.r, v = x.vals;
@@ -303,11 +374,11 @@ window.C01 = window.C01 || {};
             '<span class="st-wait">' + esc(x.wait) + '</span>';
         stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '');
         html += '<tr class="c01-row ' + cls + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
-          '</td><td class="mono">' + esc(iv.iv_no) + '</td><td>' + esc(r.item || iv.item) + '</td><td>' + ctCell + '</td><td class="mono">' + esc(v.seal || '') + hmark('seal') +
+          '</td>' + c1(iv.iv_no, 'mono') + c2(r.item || iv.item) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
-          '</td><td>' + esc(md(v.work_date)) + '</td><td>' + esc(iv.incoterms) + '</td><td>' + esc(r.packer || iv.packer) + '</td><td>' + esc(r.plant || iv.plant) + '</td><td' +
+          '</td><td>' + esc(md(v.work_date)) + '</td>' + c1(iv.incoterms) + c2(r.packer || iv.packer) + c2(r.plant || iv.plant) + '<td' +
           (photoAlert(photos) ? ' class="c01-ph-alert" title="写真 ' + photos + '枚（5枚以下・15枚以上）"' : '') + '>' +
-          (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '">📷 ' + photos + '枚</button>' : '0枚') + '</td><td>' + stCell + '</td></tr>';
+          (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '">📷 ' + photos + '枚</button>' : '0枚') + '</td><td class="c-st">' + stCell + '</td></tr>';
       });
       html += '</tbody>';
     });
@@ -326,7 +397,18 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-sel]').forEach(function (el) { el.onclick = function () { S.sel = el.getAttribute('data-sel'); S.picks = {}; S.panelInput = ''; render(); }; });
     root.querySelectorAll('[data-slot]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openSlot(el.getAttribute('data-slot')); }; });
     renderPanel(b);
+    fitTable();
   }
+  /* v0.3.2 (R7B): 実況表の箱 = 窓の高さに合わせる (見出し固定 · 箱の下端が窓の外に出ない) */
+  function fitTable() {
+    var w = $('jikkyou-wrap');
+    if (!w) return;
+    var lg = w.nextElementSibling;
+    var top = w.getBoundingClientRect().top + (window.scrollY || 0);
+    var below = (lg ? lg.getBoundingClientRect().height + 12 : 0) + 16;
+    w.style.maxHeight = Math.max(240, Math.floor(window.innerHeight - top - below)) + 'px';
+  }
+  window.addEventListener('resize', function () { if (S.view === 'main') fitTable(); });
 
   /* ── v0.2.0 Compass入力 DRY 窓 (設計 §6 · 決定 #1~#3 · #91) — 比較表だけ。送信は無効「DRY — 送信しません」 ── */
   var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）' };
@@ -424,6 +506,8 @@ window.C01 = window.C01 || {};
     return 'スロット変更 · ' + staffName(si.by) + ' · ' + String(si.at || '').slice(0, 16).replace('T', ' ') + ' · ' + slotLabel(iv, si.before) + ' → ' + slotLabel(iv, si.after) +
       (si.swap_ct ? ' · 入れ替え ' + si.swap_ct : '');
   }
+  function c2(v) { return '<td class="c-wrap"><span class="c01-clamp" title="' + esc(v || '') + '">' + esc(v || '') + '</span></td>'; }
+  function c1(v, cls) { return '<td class="c-cut' + (cls ? ' ' + cls : '') + '" title="' + esc(v || '') + '">' + esc(v || '') + '</td>'; }
   function rowInfo(iv, r, x, ov) {
     var out = '';
     var diffs = (r.info || []).filter(function (s) { return /^human_vs_engine_diff\(/.test(s); });
@@ -562,7 +646,7 @@ window.C01 = window.C01 || {};
       '<button class="c01-x" id="panel-close" aria-label="閉じる">✕</button></div>' +
       '<div class="c01-side-b">' + lostMsg +
       '<p class="c01-reason">' + esc(reasonTexts(r).join(' / ') || (r.reasons || []).join(' / ')) + '</p>' +
-      '<div class="c01-thumbs"><button id="panel-doc" class="c01-thumb"' + (doc ? '' : ' disabled') + '>' + (doc ? imgTag(doc.path, 'c01-thimg', '原本') : '') + '<span>' + (doc ? esc('原本 ' + (doc.name || '') + (doc.page ? ' p' + doc.page : '')) : '原本なし') + '</span></button>' +
+      '<div class="c01-thumbs"><button id="panel-doc" class="c01-thumb"' + (doc ? '' : ' disabled') + '>' + (doc ? (/\.pdf$/i.test(doc.path || '') ? pdfTag(doc.path, doc.page, true) : imgTag(doc.path, 'c01-thimg', '原本')) : '') + '<span>' + (doc ? esc('原本 ' + (doc.name || '') + (doc.page ? ' p' + doc.page : '')) : '原本なし') + '</span></button>' +
       '<button id="panel-photo" class="c01-thumb"' + (firstPhoto ? '' : ' disabled') + '>' + (firstPhoto ? imgTag(firstPhoto.path, 'c01-thimg', '写真') : '') + '<span>' + (firstPhoto ? esc('写真 ' + (firstPhoto.label || '')) : '写真なし') + '</span></button></div>' +
       fields +
       (needPick.length === 1 ? '<label class="c01-direct">どちらも違う場合は直接入力<input id="panel-input" type="text" placeholder="正しい値" value="' + esc(S.panelInput) + '"></label>' : '') +
@@ -653,8 +737,16 @@ window.C01 = window.C01 || {};
   /* ── 確認・入力 ── */
   function openQueue() {
     var ov = overlay();
-    return ((S.queue && S.queue.items) || []).filter(function (q) { return !queueState(q, ov).done && queuePortOk(q); });
+    return ((S.queue && S.queue.items) || []).filter(function (q) { return !queueState(q, ov).done && queuePortOk(q) && !faxHidden(q); });
   }
+  /* v0.3.2 (R7B): 未分類 FAX — 受信から C01.QUEUE.faxHideAfterDays 日を過ぎたものは既定で隠す (隠すだけ · 消さない) */
+  function faxOld(q) {
+    var n = (C01.QUEUE && +C01.QUEUE.faxHideAfterDays) || 0;
+    var today = (S.info && S.info.today) || (S.jik && S.jik.today);
+    if (!n || q.kind !== '未分類FAX' || !q.received_at || !today) return false;
+    return addDays(String(q.received_at).slice(0, 10), n) < today;
+  }
+  function faxHidden(q) { return !S.showOldFax && faxOld(q); }
   function queuePortOk(q) {
     if (!q.iv_no) return true;
     var iv = ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0];
@@ -665,7 +757,9 @@ window.C01 = window.C01 || {};
   function kindLabel(k) { return (KIND[k] && KIND[k].label) || k; }
   function renderInput() {
     var ov = overlay();
-    var all = ((S.queue && S.queue.items) || []).filter(queuePortOk);
+    var all0 = ((S.queue && S.queue.items) || []).filter(queuePortOk);
+    var oldFaxN = all0.filter(faxOld).length;
+    var all = all0.filter(function (q) { return !faxHidden(q); });
     var doneN = all.filter(function (q) { return queueState(q, ov).done; }).length;
     var counts = { all: all.length - doneN };
     Object.keys(KIND).forEach(function (k) { counts[k] = all.filter(function (q) { return q.kind === k && !queueState(q, ov).done; }).length; });
@@ -678,13 +772,15 @@ window.C01 = window.C01 || {};
       [['all', 'すべて']].concat(Object.keys(KIND).filter(function (k) { return k !== PHOTO_SET || ((S.queue && S.queue.kinds) || []).indexOf(k) >= 0; }).map(function (k) { return [k, kindLabel(k)]; })).map(function (k) {
         return '<button class="c01-chip' + (S.qkind === k[0] ? ' on' : '') + '" data-kind="' + esc(k[0]) + '">' + esc(k[1]) + ' ' + (counts[k[0]] || 0) + '</button>';
       }).join('') + '</div>' +
+      (oldFaxN ? '<label class="c01-chk" id="fax-old-lab"><input type="checkbox" id="fax-old"' + (S.showOldFax ? ' checked' : '') + '>古い未分類 FAX も表示（受信 ' +
+        C01.QUEUE.faxHideAfterDays + '日超 · ' + oldFaxN + '件）</label>' : '') +
       '<div class="c01-prog"><div class="bar"><div style="width:' + (all.length ? Math.round(doneN / all.length * 100) : 0) + '%"></div></div><span>' + doneN + ' / ' + all.length + ' 完了</span></div>' +
       '<div class="c01-items">' + vis.map(function (x) {
         var st = queueState(x, ov);
         return '<button class="c01-item' + (x.queue_id === S.qsel ? ' on' : '') + (st.done ? ' done' : '') + '" data-q="' + esc(x.queue_id) + '">' +
           '<span class="r1"><span class="k" style="color:' + KIND[x.kind].color + '">' + esc(kindLabel(x.kind)) + '</span><span class="c01-flex"></span><span class="cy">CY ' + esc(md(x.cy_cut) || '—') + '</span></span>' +
           '<span class="mono t">' + esc(x.kind === '写真のCT' ? 'CT 不明の写真 ' + (x.files || []).length + '枚' : x.kind === '未分類FAX' ? ((x.files || [])[0] || {}).name || 'FAX' : (x.ct || '（CT 不明）')) + '</span>' +
-          '<span class="s">' + esc((x.iv_no ? x.iv_no + ' · ' : '') + (x.field ? FIELD_LABEL[x.field] : '') + (x.issuer ? ' · ' + x.issuer : '')) + '</span>' +
+          '<span class="s">' + esc((x.iv_no ? x.iv_no + ' · ' : '') + (x.field ? FIELD_LABEL[x.field] : '') + (x.issuer ? ' · ' + x.issuer : '') + (x.kind === '未分類FAX' && x.received_at ? '受信 ' + md(String(x.received_at).slice(0, 10)) : '')) + '</span>' +
           (st.done ? '<span class="d">' + (st.mineLost ? '他の人が先に確認しました' : '完了' + (st.by ? ' · ' + esc(st.by) : '')) + '</span>' : '') + '</button>';
       }).join('') + (vis.length ? '' : '<p class="c01-empty">作業はありません</p>') + '</div></aside>';
     /* 原本 */
@@ -695,19 +791,23 @@ window.C01 = window.C01 || {};
       var isPhotos = q.kind === '写真のCT' || q.kind === PHOTO_SET;
       var qrow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
       var qph = qrow ? (qrow.photos || 0) : null;
+      var isPdfF = !isPhotos && /\.pdf$/i.test(f.path || '');
+      var pdfPg = isPdfF ? (S.pdfPage[f.path] || f.page || 1) : 0;
       html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
         (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph) ? ' c01-ph-alert' : '') + '" title="このコンテナの写真枚数（5枚以下・15枚以上は色付き）">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
         (!isPhotos ? '<button class="c01-tool" id="z-out" aria-label="縮小">−</button><span class="z">' + S.zoom + '%</span><button class="c01-tool" id="z-in" aria-label="拡大">+</button>' +
-          '<button class="c01-tool" id="rot" aria-label="回転">⟳</button><span class="t2">' + (f.page ? 'p.' + f.page : '') + '</span>' : '') + '</div>';
+          '<button class="c01-tool" id="rot" aria-label="回転">⟳</button>' +
+          (isPdfF ? '<button class="c01-tool" id="pdf-prev" aria-label="前のページ">‹</button><span class="t2" id="pdf-pg">p.' + pdfPg + '</span><button class="c01-tool" id="pdf-next" aria-label="次のページ">›</button>' +
+            '<button class="c01-btn-sub" id="pdf-open" title="ブラウザの PDF 表示で開く（別タブ）">別タブで開く</button>' : '<span class="t2">' + (f.page ? 'p.' + f.page : '') + '</span>') : '') + '</div>';
       html += '<div class="c01-orig-b">';
       if (isPhotos) {
         html += '<div class="c01-grid">' + files.map(function (pf, k) { return '<button class="c01-gph" data-gph="' + k + '">' + imgTag(pf.path, 'c01-gimg', pf.name) + '<span>' + esc(pf.name || '') + '</span></button>'; }).join('') + '</div>';
       } else if (f.path) {
         var isPdf = /\.pdf$/i.test(f.path), isImg = /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(f.path);
         var w = Math.round(640 * S.zoom / 100);
-        html += '<div class="c01-doc" style="width:' + w + 'px;transform:rotate(' + S.rot + 'deg)">';
+        html += isPdf ? '<div class="c01-doc pdf">' : '<div class="c01-doc" style="width:' + w + 'px;transform:rotate(' + S.rot + 'deg)">';
         if (isImg) html += imgTag(f.path, 'c01-docimg', f.name);
-        else if (isPdf) html += isFolder() ? '<iframe class="c01-docpdf" data-rel="' + esc(f.path) + '" title="原本"></iframe>' : '<iframe class="c01-docpdf" src="' + esc(S.src.fileUrl(f.path)) + (f.page ? '#page=' + f.page : '') + '" title="原本"></iframe>';
+        else if (isPdf) html += pdfTag(f.path, pdfPg);                 /* v0.3.2: 回転・拡大は pdf.js の描画で (CSS 回転なし) */
         else html += '<p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）</p>';
         if (f.bbox && f.bbox.length === 4 && isImg) {
           var bb = f.bbox;
@@ -727,7 +827,7 @@ window.C01 = window.C01 || {};
       var KC = KIND[q.kind];
       html += '<div class="c01-form-h"><span class="k" style="color:' + KC.color + '">' + esc(kindLabel(q.kind)) + '</span><span class="mono big">' +
         esc(q.kind === '写真のCT' ? 'CT 不明の写真 ' + (q.files || []).length + '枚' : q.kind === '未分類FAX' ? ((q.files || [])[0] || {}).name || '' : (q.ct || '（CT 不明）')) + '</span>' +
-        '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 不明' : (q.iv_no || '') + ' · ' + (iv ? (iv.packer + ' ' + iv.plant) : '') + ' · CY ' + (md(q.cy_cut) || '—')) + '</span></div>';
+        '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 ' + (q.issuer || '不明') + (q.received_at ? ' · 受信 ' + md(String(q.received_at).slice(0, 10)) : '') : (q.iv_no || '') + ' · ' + (iv ? (iv.packer + ' ' + iv.plant) : '') + ' · CY ' + (md(q.cy_cut) || '—')) + '</span></div>';
       html += '<div class="c01-form-b">';
       if (st.done) html += '<p class="' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? 'c01-lost' : 'c01-okmsg') + '">' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? '他の人が先に確認しました' : '完了しました') + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
       html += '<p class="c01-qnote k-' + KC.key + '">' + esc(noteOf(q)) + '</p>';
@@ -780,6 +880,7 @@ window.C01 = window.C01 || {};
     $('c01-main').innerHTML = html;
     hydrate($('c01-main'));
     var root = $('c01-main');
+    if ($('fax-old')) $('fax-old').onchange = function () { S.showOldFax = !S.showOldFax; render(); };
     root.querySelectorAll('[data-kind]').forEach(function (el) { el.onclick = function () { S.qkind = el.getAttribute('data-kind'); S.qsel = null; render(); }; });
     root.querySelectorAll('[data-q]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-q'); S.zoom = 100; S.rot = 0; render(); }; });
     if (!q) return;
@@ -787,6 +888,17 @@ window.C01 = window.C01 || {};
     if (zi) zi.onclick = function () { S.zoom = Math.min(200, S.zoom + 20); render(); };
     if (zo) zo.onclick = function () { S.zoom = Math.max(60, S.zoom - 20); render(); };
     if (ro) ro.onclick = function () { S.rot = (S.rot + 90) % 360; render(); };
+    var pel = root.querySelector('.c01-orig [data-pdf]');
+    if (pel) {
+      var prel = pel.getAttribute('data-pdf');
+      var turn = function (d) {
+        var n = +pel.getAttribute('data-pages') || 1, cur = S.pdfPage[prel] || +pel.getAttribute('data-page') || 1, nx = Math.min(Math.max(1, cur + d), n);
+        if (nx !== cur) { S.pdfPage[prel] = nx; render(); }
+      };
+      if ($('pdf-prev')) $('pdf-prev').onclick = function () { turn(-1); };
+      if ($('pdf-next')) $('pdf-next').onclick = function () { turn(1); };
+      if ($('pdf-open')) $('pdf-open').onclick = function () { pdfUrl(prel).then(function (u) { if (u) window.open(u, '_blank', 'noopener'); }); };
+    }
     root.querySelectorAll('[data-gph]').forEach(function (el) {
       el.onclick = function () { openLightboxList('CT 不明の写真', (q.files || []).map(function (pf) { return { path: pf.path, label: pf.name }; }), +el.getAttribute('data-gph')); };
     });
@@ -848,7 +960,7 @@ window.C01 = window.C01 || {};
   }
   function nextQueueId(q) {
     var ov = overlay();
-    var all = ((S.queue && S.queue.items) || []).filter(queuePortOk);
+    var all = ((S.queue && S.queue.items) || []).filter(function (x) { return queuePortOk(x) && !faxHidden(x); });
     var ids = all.map(function (x) { return x.queue_id; });
     var i = ids.indexOf(q.queue_id);
     var after = all.slice(i + 1).concat(all.slice(0, i));
