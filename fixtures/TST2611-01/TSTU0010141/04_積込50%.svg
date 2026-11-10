@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+<rect width="1200" height="900" fill="#3b5a55"/>
+<rect x="160" y="150" width="880" height="600" rx="18" fill="none" stroke="#d8d8d0" stroke-width="10" stroke-dasharray="30 18"/>
+<text x="600" y="430" font-size="72" text-anchor="middle" fill="#f2f2ee" font-family="sans-serif">積込 50%</text>
+<text x="600" y="520" font-size="36" text-anchor="middle" fill="#cfcfc7" font-family="monospace">TST2611-01 / TSTU0010141</text>
+<text x="600" y="840" font-size="26" text-anchor="middle" fill="#a9a9a1" font-family="sans-serif">FIXTURE · 가명 데이터</text>
+</svg>

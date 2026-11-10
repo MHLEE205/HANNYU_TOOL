@@ -1,0 +1,5 @@
+tests/_shots/
+__pycache__/
+# 가명 시험 데이터 — 레포에 넣지 않음 · 시험 전에 python tools/make_test_data.py 로 다시 만듦 (R6.9 Part C 안 a)
+fixtures/_data/
+tests/compass_cases.json

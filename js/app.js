@@ -1,0 +1,955 @@
+/* ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL 本体 (実況表 · 確認・入力 · 写真)
+   画面の基準 = 試案 (relay\design\試案_実況表_Main / 試案_確認入力_Input)。データは C01.sources から読む (HTML・JS にデータなし)。 */
+'use strict';
+window.C01 = window.C01 || {};
+
+(function () {
+  var FIELD_LABEL = { ct: 'CT番号', seal: 'シール番号', n_w: '正味重量', t_w: '風袋重量', bales: 'ベール数', work_date: '作業日' };
+  var FIELD_SHORT = { ct: 'CT', seal: 'シール', n_w: '正味', t_w: '風袋', bales: 'ベール', work_date: '作業日' };
+  var REASON_SHORT = { SOURCE_MISMATCH: '値の違い', RANGE: '範囲外', MISSING_FIELD: '未読', NO_SLOT: 'スロット', SLOT_VANISHED: 'スロット',
+    SLOT_CANDIDATES: 'スロット', UNIT_PRICE_DIFF: '単価', AUTO_CORRECTED: '補正', GROUP_HOLD: '写真', CT_INVALID: 'CT', SEAL_FORMAT: 'シール',
+    WORK_DATE: '作業日', MIN_SOURCES: '出典', SAME_CT_TWO_CONTAINERS: '重複',
+    CONTRACT_MONTH_CONFLICT: '契約月', NW_OVER_LIMIT: '重量',   // R6M7: 사유 코드 27 (#115) · 28 (#125) — 문장은 엔진 reason_text
+    PHOTO_SET_INCOMPLETE: '写真不足', PACKER_AUTOSTOP: '停止中' };   // R6M11: 사유 코드 29 (#129·#131) · 30 (#118) — 문장은 엔진 reason_text
+  // R6M11 (#129 「実況表 줄に足りない写真の種類」): 사유 29 줄의 빠진 종류 (엔진 row.photo_missing) — 문장의 {없는 종류} 를 바꿈
+  function reasonTexts(r) {
+    var miss = r.photo_missing || '';
+    return (r.reason_text || []).map(function (t) { return String(t).split('{없는 종류}').join(miss || '—'); });
+  }
+  var KIND = {
+    '値の違い': { key: 'diff', color: 'var(--c-diff)' },
+    '手入力': { key: 'manual', color: 'var(--c-manual)' },
+    '写真のCT': { key: 'photo', color: 'var(--c-photo)', label: '写真の CT' },
+    '未分類FAX': { key: 'fax', color: 'var(--c-fax)', label: '未分類 FAX' }
+  };
+  var VALUE_FIELDS = ['seal', 'n_w', 't_w', 'bales'];
+
+  var S = {
+    src: null, info: null, jik: null, queue: null, photos: {}, staff: null, me: null,
+    view: 'main', port: 'mine', filter: 'all', showUnarrived: true,
+    sel: null, picks: {}, panelInput: '', lb: null,
+    actions: [], mine: [], lastPoll: null, lastLoad: null,
+    qkind: 'all', qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {},
+    timer: null, remind: null, modal: null
+  };
+  C01.state = S;
+
+  /* ── ユーティリティ ── */
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function num(v) { return v == null || v === '' ? '' : (typeof v === 'number' ? v.toLocaleString('en-US') : esc(v)); }
+  function md(d) { return d ? String(d).slice(5).replace('-', '/') : ''; }
+  function $(id) { return document.getElementById(id); }
+  function jstNow() {
+    var d = new Date(Date.now() + 9 * 3600 * 1000);
+    return d.toISOString().slice(0, 19) + '+09:00';
+  }
+  function actionId() { return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+  function rowKey(iv, r) { return iv.iv_no + '|' + (r.ct || r.container_id) + '|' + (r.packer || iv.packer || ''); }
+  function addDays(iso, n) { var d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function isFolder() { return S.src instanceof C01.sources.Folder; }
+  function imgTag(rel, cls, alt) {
+    if (!rel) return '';
+    if (isFolder()) return '<img class="' + cls + '" data-rel="' + esc(rel) + '" alt="' + esc(alt || '') + '">';
+    return '<img class="' + cls + '" src="' + esc(S.src.fileUrl(rel)) + '" alt="' + esc(alt || '') + '">';
+  }
+  function hydrate(root) {
+    if (!isFolder()) return;
+    (root || document).querySelectorAll('[data-rel]').forEach(function (el) {
+      var rel = el.getAttribute('data-rel');
+      S.src.resolveUrl(rel).then(function (u) { if (u) el.src = u; });
+    });
+  }
+  function toast(msg, type) {
+    if (window.LEENAI && LEENAI.toast) LEENAI.toast(msg, type || 'info');
+    else console.log(msg);
+  }
+
+  /* ── 担当港 (決定 #95: pol_staff の 担当・補助、マスターにない港 = '*' 行) ── */
+  function staffList() {
+    var m = S.staff || {};
+    return m.staff || [];
+  }
+  function myPorts() {
+    if (!S.me || !S.staff) return null;
+    var items = S.staff.items || [];
+    var mine = [], star = false;
+    items.forEach(function (it) {
+      var main = it.main || it['担当'] || '', sub = it.sub || it['補助'] || '';
+      var hit = [main, sub].some(function (x) { return x && (x === S.me.code || x === S.me.email); });
+      if (!hit) return;
+      if (it.pol === '*') star = true; else mine.push(it.pol);
+    });
+    return { ports: mine, star: star, known: items.map(function (it) { return it.pol; }).filter(function (p) { return p !== '*'; }) };
+  }
+  function portOk(pol) {
+    if (S.port === 'all') return true;
+    if (S.port === 'mine') {
+      var mp = myPorts();
+      if (!mp) return true;
+      if (mp.ports.indexOf(pol) >= 0) return true;
+      return mp.star && mp.known.indexOf(pol) < 0;
+    }
+    return pol === S.port;
+  }
+
+  /* ── _actions 重ね表示 (他の人 = 30 秒ごと · 自分 = すぐ) ── */
+  function allActions() {
+    var seen = {}, out = [];
+    S.actions.concat(S.mine).forEach(function (x) {
+      var a = x.action || x;
+      if (!a || !a.action_id || seen[a.action_id]) return;
+      seen[a.action_id] = 1;
+      out.push(a);
+    });
+    out.sort(function (a, b) { return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
+    return out;
+  }
+  function overlay() {
+    var byQueue = {}, byCell = {}, rejected = {}, bySlot = {};
+    var qById = {};
+    ((S.queue && S.queue.items) || []).forEach(function (q) { qById[q.queue_id] = q; });
+    allActions().forEach(function (a) {
+      var q = a.queue_id ? qById[a.queue_id] : null;
+      if (a.queue_id) {
+        if (!byQueue[a.queue_id]) byQueue[a.queue_id] = { win: a, later: [] };
+        else byQueue[a.queue_id].later.push(a);
+      }
+      if (a.action === 'slot_change' && a.value && a.value.slot_guid) {
+        bySlot[a.iv + '|' + a.ct] = a;                 /* #109 ②: 同じ CT の後の変更が上書き */
+        if (a.value.swap_ct) bySlot[a.iv + '|' + a.value.swap_ct] = { action_id: a.action_id, action: a.action, iv: a.iv, ct: a.value.swap_ct, by: a.by, at: a.at,
+          value: { slot_guid: a.value.slot_before, slot_before: a.value.slot_guid, swap_ct: a.ct } };   /* 入れ替え相手 = 前の枠へ (1 件の記録で 2 台) */
+      }
+      if (a.action === 'confirm_value' || a.action === 'manual_input') {
+        var cid = q && q.container_id ? q.container_id : null;
+        var key = (cid || (a.iv + '|' + a.ct)) + '|' + a.field;
+        if (!byCell[key]) byCell[key] = a; else if (a.queue_id && byQueue[a.queue_id] && byQueue[a.queue_id].win !== a) rejected[a.action_id] = 1;
+      }
+    });
+    return { byQueue: byQueue, byCell: byCell, bySlot: bySlot };
+  }
+  function queueState(q, ov) {
+    /* → {done, by, mineLost, engine} */
+    if (q.resolved) return { done: true, by: q.resolved.by, engine: true, mineLost: q.superseded && S.me && q.superseded.some(function (x) { return x.by === S.me.email; }) && q.resolved.by !== S.me.email };
+    var w = ov.byQueue[q.queue_id];
+    if (!w) return { done: false };
+    var lost = S.me && w.win.by !== S.me.email && w.later.some(function (a) { return a.by === S.me.email; });
+    return { done: true, by: w.win.by, engine: false, mineLost: lost };
+  }
+
+  /* ── 実況表のデータ組み立て ── */
+  function statusOf(r, iv, ov) {
+    var st = r.status;
+    var human = Object.assign({}, r.human || {});
+    VALUE_FIELDS.concat(['ct', 'work_date']).forEach(function (f) {
+      var a = ov.byCell[r.container_id + '|' + f] || ov.byCell[iv.iv_no + '|' + r.ct + '|' + f];
+      if (a && !human[f]) human[f] = { value: a.value, source: a.source, by: a.by, at: a.at, action_id: a.action_id, overlay: true, override: a.override || null };
+    });
+    if (st === '再確認') {
+      var open = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id && !queueState(q, ov).done; });
+      var had = ((S.queue && S.queue.items) || []).some(function (q) { return q.container_id === r.container_id; });
+      if (had && !open.length && Object.keys(human).length) st = '確認済';
+    }
+    return { st: st, human: human };
+  }
+  function buildGroups() {
+    var ov = overlay();
+    var out = [], cnt = { check: 0, compass: 0, remind: 0 }, no = 0;
+    var today = (S.info && S.info.today) || '';
+    var ivs = ((S.jik && S.jik.ivs) || []).filter(function (iv) { return portOk(iv.pol); })
+      .slice().sort(function (a, b) { return (a.cy_cut || '') < (b.cy_cut || '') ? -1 : (a.cy_cut || '') > (b.cy_cut || '') ? 1 : (a.iv_no < b.iv_no ? -1 : 1); });
+    ivs.forEach(function (iv) {
+      var rows = iv.rows.map(function (r) {
+        var x = statusOf(r, iv, ov);
+        var vals = {};
+        ['ct', 'seal', 'n_w', 't_w', 'bales', 'work_date'].forEach(function (f) { vals[f] = x.human[f] ? x.human[f].value : r[f]; });
+        var openQ = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id && !queueState(q, ov).done; });
+        var short = openQ.length && openQ[0].field ? FIELD_SHORT[openQ[0].field] : (REASON_SHORT[(r.reasons || [])[0]] || (r.reasons || [])[0] || '');
+        var photoMiss = (r.reasons || []).indexOf('PHOTO_SET_INCOMPLETE') >= 0 && r.photo_missing ? r.photo_missing : '';
+        if (photoMiss && !(openQ.length && openQ[0].field)) short = REASON_SHORT.PHOTO_SET_INCOMPLETE + '（' + photoMiss + '）';
+        var wait = '';
+        if (x.st === '受信中') {
+          wait = r.has_docs === false ? '搬入票待ち' : r.has_photos === false ? '写真待ち' : photoMiss ? '写真待ち（' + photoMiss + '）' : '受信待ち';
+          if (r.work_date && today && r.work_date < today) wait += ' · ' + Math.round((Date.parse(today) - Date.parse(r.work_date)) / 86400000) + '日';
+        }
+        return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, wait: wait, openQ: openQ };
+      });
+      var unarr = (iv.mail_missing || []).map(function (m) {
+        return { kind: 'missing', key: iv.iv_no + '|missing|' + m.slot_guid, m: m, st: 'メール未着', vals: { work_date: m.work_date }, wait: 'メール未着' };
+      });
+      var okN = rows.filter(function (x) { return x.st === '自動OK' || x.st === '確認済'; }).length;
+      var allOk = rows.length > 0 && okN === rows.length && !unarr.length;
+      var hasCheck = rows.some(function (x) { return x.st === '再確認'; });
+      /* v0.2.0: 催促 = エンジンの催促下書き (remind.json — 現行リマインダーの基準) がある IV。remind.json が無い時は R5 と同じ (受信中・メール未着) */
+      var remind = S.remind ? remindsOf(iv.iv_no).length > 0 : (rows.some(function (x) { return x.st === '受信中'; }) || unarr.length > 0);
+      var compassDone = (iv.compass_input || []).length > 0;
+      cnt.check += rows.filter(function (x) { return x.st === '再確認'; }).length;
+      if (allOk && !compassDone) cnt.compass += 1;
+      if (remind) cnt.remind += 1;
+      var onlyUn = rows.length === 0 && unarr.length > 0;
+      if (onlyUn && !S.showUnarrived) return;
+      if (S.filter === 'check' && !hasCheck) return;
+      if (S.filter === 'compass' && !(allOk && !compassDone)) return;
+      if (S.filter === 'remind' && !remind) return;
+      var list = rows.concat(S.showUnarrived ? unarr : []);
+      list.forEach(function (x) { no += 1; x.no = no; });
+      out.push({ iv: iv, rows: list, okN: okN, total: rows.length + unarr.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
+    });
+    return { groups: out, cnt: cnt, ov: ov };
+  }
+
+  /* ── 描画: ナビ ── */
+  function renderNav() {
+    var open = openQueue().length;
+    var t = (S.info && S.info.today) || '';
+    var upd = S.lastLoad ? S.lastLoad.toTimeString().slice(0, 5) : '--:--';
+    var staffOpts = '<option value="">担当者を選ぶ</option>' + staffList().map(function (s) {
+      return '<option value="' + esc(s.code) + '"' + (S.me && S.me.code === s.code ? ' selected' : '') + '>' + esc(s.name || s.code) + '</option>';
+    }).join('');
+    $('c01-nav').innerHTML =
+      '<nav class="c01-tabs" aria-label="画面">' +
+      '<button id="tab-main" class="c01-tab' + (S.view === 'main' ? ' on' : '') + '">実況表</button>' +
+      '<button id="tab-input" class="c01-tab' + (S.view === 'input' ? ' on' : '') + '">確認・入力 <span class="c01-badge" id="badge-open">' + open + '</span></button>' +
+      '</nav>' +
+      '<span class="c01-sub">' + esc(t) + ' 時点 · 最終更新 ' + upd + '（自動更新）</span>' +
+      '<span class="c01-flex"></span>' +
+      '<span class="c01-local" title="データは選んだフォルダから読んでいます (SharePoint には接続しません)">ローカルプレビュー · ' + esc(S.info ? S.info.label : '') + '</span>' +
+      '<label class="c01-me">担当者 <select id="me-select" aria-label="担当者">' + staffOpts + '</select></label>';
+    $('tab-main').onclick = function () { S.view = 'main'; render(); };
+    $('tab-input').onclick = function () { S.view = 'input'; if (!S.qsel) { var f = openQueue()[0]; S.qsel = f ? f.queue_id : null; } render(); };
+    $('me-select').onchange = function (e) {
+      var s = staffList().filter(function (x) { return x.code === e.target.value; })[0] || null;
+      S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
+      try { localStorage.setItem('c01_local_me', S.me ? S.me.code : ''); } catch (er) { /* なし */ }
+      S.port = S.me ? 'mine' : 'all';
+      updateUserChip();
+      render();
+    };
+  }
+  function updateUserChip() {
+    var un = $('ln-username'), av = $('ln-avatar');
+    if (un) un.textContent = S.me ? S.me.name : '（担当者未選択）';
+    if (av) av.textContent = S.me ? S.me.code.slice(0, 2) : '--';
+  }
+
+  /* ── 描画: 実況表 ── */
+  function renderMain() {
+    var b = buildGroups();
+    var mp = myPorts();
+    var ports = [['mine', '自分の担当' + (mp ? '（' + (mp.ports.join(' · ') || 'なし') + (mp.star ? ' · *' : '') + '）' : '（担当者未選択）')], ['all', '全港']];
+    var pols = {};
+    ((S.jik && S.jik.ivs) || []).forEach(function (iv) { if (iv.pol) pols[iv.pol] = 1; });
+    /* 港チップの順: pol_staff に順番の列 (order) があればその順、無ければ名前順 (v0.2.0 — 今のマスターには順番の列なし) */
+    var ord = {};
+    (((S.staff && S.staff.items) || [])).forEach(function (it) { if (it.order !== undefined && it.order !== null && it.order !== '') ord[it.pol] = +it.order; });
+    Object.keys(pols).sort(function (a, b) {
+      var oa = ord[a] !== undefined ? ord[a] : Infinity, ob = ord[b] !== undefined ? ord[b] : Infinity;
+      return oa !== ob ? oa - ob : (a < b ? -1 : a > b ? 1 : 0);
+    }).forEach(function (p) { ports.push([p, p]); });
+    var html = '<div class="c01-bar">' +
+      '<span class="c01-lab">担当港</span>' +
+      ports.map(function (p) { return '<button class="c01-chip' + (S.port === p[0] ? ' on' : '') + '" data-port="' + esc(p[0]) + '">' + esc(p[1]) + '</button>'; }).join('') +
+      '<span class="c01-hint">（⚙ マスター「POL 担当」の 担当・補助 から自動）</span>' +
+      '<span class="c01-flex"></span>' +
+      '<div class="c01-filters">' +
+      '<button class="c01-f c01-f-check' + (S.filter === 'check' ? ' on' : '') + '" data-filter="check">要確認 ' + b.cnt.check + '台</button>' +
+      '<button class="c01-f c01-f-compass' + (S.filter === 'compass' ? ' on' : '') + '" data-filter="compass">Compass入力待ち ' + b.cnt.compass + '件</button>' +
+      '<button class="c01-f c01-f-remind' + (S.filter === 'remind' ? ' on' : '') + '" data-filter="remind">催促候補 ' + b.cnt.remind + '件</button>' +
+      '<label class="c01-chk"><input type="checkbox" id="show-unarrived"' + (S.showUnarrived ? ' checked' : '') + '>メール未着も表示</label>' +
+      '</div></div>';
+    html += '<div class="c01-tablewrap"><table class="c01-table" id="jikkyou-table"><thead><tr>' +
+      '<th class="c-no">No</th><th>CYカット</th><th>Invoice番号</th><th>品目</th><th>CT番号</th><th>シール番号</th>' +
+      '<th class="r">正味重量</th><th class="r">風袋重量</th><th class="r">ベール数</th><th>作業日</th><th>条件</th><th>圧縮業者</th><th>Plant</th><th>写真</th><th>状況</th>' +
+      '</tr></thead>';
+    b.groups.forEach(function (g) {
+      var iv = g.iv;
+      html += '<tbody data-iv="' + esc(iv.iv_no) + '"><tr class="c01-ivrow"><td colspan="15"><div class="c01-ivhead">' +
+        '<span class="b">▼ CY ' + esc(md(iv.cy_cut)) + '</span>' +
+        '<span class="pol">' + esc(iv.pol || '') + '</span>' +
+        '<span class="mono">' + esc(iv.iv_no) + '</span>' +
+        '<span class="t2">BKG ' + esc(iv.bkg_no || '') + '</span>' +
+        '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
+        '<span class="c01-flex"></span>' +
+        (g.remind ? '<button class="c01-btn-sub" data-remind="' + esc(iv.iv_no) + '">✉ 催促</button>' : '') +
+        (g.compassDone ? '<span class="c01-done">✓ 入力済</span>' :
+          g.allOk ? '<button class="c01-btn-pri" data-compass="' + esc(iv.iv_no) + '">⬇ Compass入力</button>' :
+            (!g.onlyUn ? '<button class="c01-blocked" data-compass="' + esc(iv.iv_no) + '" title="全台が 自動OK / 確認済 になると入力できます（比較表だけ見られます）">Compass入力（未完了あり）</button>' : '')) +
+        '</div></td></tr>';
+      g.rows.forEach(function (x) {
+        var cls = x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';
+        if (S.sel === x.key) cls += ' sel';
+        if (x.kind === 'missing') {
+          html += '<tr class="c01-row wait missing" data-key="' + esc(x.key) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') + '</td><td class="mono">' + esc(iv.iv_no) +
+            '</td><td>' + esc(iv.item) + '</td><td></td><td></td><td></td><td></td><td></td><td>' + esc(md(x.m.work_date)) + '</td><td>' + esc(iv.incoterms) + '</td><td>' +
+            esc(x.m.packer || iv.packer) + '</td><td>' + esc(x.m.plant || iv.plant) + '</td><td></td><td><span class="st-wait">メール未着</span></td></tr>';
+          return;
+        }
+        var r = x.r, v = x.vals;
+        var photos = r.photos || 0;
+        var ctCell = photos > 0 ? '<button class="c01-ctlink" data-photos="' + esc(x.key) + '" title="クリックで写真を表示">' + esc(v.ct || '') + '</button>' : '<span class="mono">' + esc(v.ct || '') + '</span>';
+        var hmark = function (f) { return x.human[f] ? ' <span class="c01-hm" title="確認済 ' + esc(x.human[f].by || '') + '">✓</span>' : ''; };
+        var stCell = x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
+          x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
+            '<span class="st-wait">' + esc(x.wait) + '</span>';
+        stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '');
+        html += '<tr class="c01-row ' + cls + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
+          '</td><td class="mono">' + esc(iv.iv_no) + '</td><td>' + esc(r.item || iv.item) + '</td><td>' + ctCell + '</td><td class="mono">' + esc(v.seal || '') + hmark('seal') +
+          '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
+          '</td><td>' + esc(md(v.work_date)) + '</td><td>' + esc(iv.incoterms) + '</td><td>' + esc(r.packer || iv.packer) + '</td><td>' + esc(r.plant || iv.plant) + '</td><td' +
+          (photoAlert(photos) ? ' class="c01-ph-alert" title="写真 ' + photos + '枚（5枚以下・15枚以上）"' : '') + '>' +
+          (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '">📷 ' + photos + '枚</button>' : '0枚') + '</td><td>' + stCell + '</td></tr>';
+      });
+      html += '</tbody>';
+    });
+    if (!b.groups.length) html += '<tbody><tr><td colspan="15" class="c01-empty">表示する IV がありません（担当港・絞り込みを確認してください）</td></tr></tbody>';
+    html += '</table></div>';
+    html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK / 確認済</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
+      '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
+    $('c01-main').innerHTML = html;
+    var root = $('c01-main');
+    root.querySelectorAll('[data-port]').forEach(function (el) { el.onclick = function () { S.port = el.getAttribute('data-port'); render(); }; });
+    root.querySelectorAll('[data-filter]').forEach(function (el) { el.onclick = function () { var f = el.getAttribute('data-filter'); S.filter = S.filter === f ? 'all' : f; render(); }; });
+    $('show-unarrived').onchange = function () { S.showUnarrived = !S.showUnarrived; render(); };
+    root.querySelectorAll('[data-photos]').forEach(function (el) { el.onclick = function () { openLightbox(el.getAttribute('data-photos'), 0); }; });
+    root.querySelectorAll('[data-compass]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCompass(el.getAttribute('data-compass')); }; });
+    root.querySelectorAll('[data-remind]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRemind(el.getAttribute('data-remind')); }; });
+    root.querySelectorAll('[data-sel]').forEach(function (el) { el.onclick = function () { S.sel = el.getAttribute('data-sel'); S.picks = {}; S.panelInput = ''; render(); }; });
+    root.querySelectorAll('[data-slot]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openSlot(el.getAttribute('data-slot')); }; });
+    renderPanel(b);
+  }
+
+  /* ── v0.2.0 Compass入力 DRY 窓 (設計 §6 · 決定 #1~#3 · #91) — 比較表だけ。送信は無効「DRY — 送信しません」 ── */
+  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）' };
+  var WARN_LABEL = { PACKER_DIFF: '業者が違う', ITEM_DIFF: '品目が違う', OFFICE_DIFF: '営業所が違う', EXISTING_DIFF: 'COMPASS に別の値', CT_DUP: 'CT が別の枠にもある',
+    TYPE_42_22: '形態 42GP/22GP — 担当者が判断', NUM_INVALID: '数字にできない — この行は入力しない',
+    /* v0.2.1 (D-11 (가) 準備 · C01.COMPASS.follow_same_cond_slot · 既定オフ) */
+    SLOT_FOLLOWED: '同じ CT がある同一条件の枠で比較', CT_DUP_OTHER_COND: '同じ CT が条件の違う枠にある', CT_DUP_MULTI: '同じ CT が 2 つ以上の枠にある',
+    OTHER_CT_IN_SLOT: '枠に別の CT が入っている' };
+  var SKIP_LABEL = { NO_CT_ID: '枠 (ct_id) なし — 入力しない', NOT_FOUND: 'COMPASS の枠が見つからない', NOT_OK: '対象外（自動OK・確認済 以外）', NUM_INVALID: '数字にできない値がある',
+    CT_DUP_OTHER_COND: '同じ CT が条件の違う枠にある — 入力しない', CT_DUP_MULTI: '同じ CT が 2 つ以上の枠にある — 入力しない',
+    OTHER_CT_IN_SLOT: '枠に別の CT が入っている — 上書きしない' };
+  var CF_LABEL = { ct: 'CT', seal: 'シール', n_w: '正味', g_w: '総重量(=正味)', t_w: '風袋', bales: 'ベール', type: '形態' };
+  function ivById(ivNo) { return ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === ivNo; })[0] || null; }
+  function compassInput(iv) {
+    var ov = overlay();
+    return iv.rows.map(function (r) {
+      var x = statusOf(r, iv, ov);
+      var v = function (f) { return x.human[f] ? x.human[f].value : r[f]; };
+      return { container_id: r.container_id, ct: v('ct'), seal: v('seal'), n_w: v('n_w'), t_w: v('t_w'), bales: v('bales'), status: x.st,
+        packer: r.packer, plant: r.plant, item: r.item, ct_id: r.slot_guid || null };
+    });
+  }
+  function closeModal() { var m = $('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } S.modal = null; }
+  function showModal(html) {
+    var m = $('c01-modal');
+    m.innerHTML = '<div class="c01-mbg" id="m-bg"></div><div class="c01-modal" role="dialog" aria-modal="true">' + html + '</div>';
+    m.hidden = false;
+    $('m-bg').onclick = closeModal;
+    m.querySelectorAll('[data-close]').forEach(function (el) { el.onclick = closeModal; });
+  }
+  function openCompass(ivNo) {
+    var iv = ivById(ivNo);
+    if (!iv) return;
+    S.modal = { kind: 'compass', iv: ivNo };
+    S.src.getJson('compass_now/' + ivNo + '.json').then(function (snap) { return snap; }).catch(function () { return null; }).then(function (snap) {
+      if (!S.modal || S.modal.iv !== ivNo) return;
+      var html = '<div class="c01-mh"><b>Compass入力 — 比較表</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(md(iv.cy_cut)) + '</span>' +
+        '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>';
+      if (!snap) {
+        html += '<div class="c01-mb"><p class="c01-err">COMPASS の今の値がありません（ローカルプレビュー: compass_now/' + esc(ivNo) + '.json なし）</p></div>';
+        showModal(html);
+        return;
+      }
+      var res = C01.compass.compareIv(ivNo, compassInput(iv), snap.cells || {}, snap.dups || {}, C01.COMPASS || null);
+      S.modal.res = res;
+      html += '<div class="c01-mb"><div class="c01-csum">' +
+        '<span class="c01-cst SAME">同じ ' + res.count.cells.SAME + '</span><span class="c01-cst FILL">空欄→入力 ' + res.count.cells.FILL + '</span>' +
+        '<span class="c01-cst DIFF">違う値 ' + res.count.cells.DIFF + '</span><span class="c01-cst KEEP">値なし ' + res.count.cells.KEEP + '</span>' +
+        '<span class="t2">PATCH 対象 ' + res.count.patch_rows + '行 · 作業日は入れません</span></div>' +
+        (res.all_ok ? '' : '<p class="c01-warnline" id="cmp-reason">' + esc(res.button.reason || '') + ' — 比較表だけ表示します</p>') +
+        '<table class="c01-ctable" id="compass-table"><thead><tr><th>CT</th>' + C01.compass.FIELDS.map(function (f) { return '<th>' + CF_LABEL[f[0]] + '</th>'; }).join('') +
+        '<th>警告・理由</th></tr></thead><tbody>';
+      res.rows.forEach(function (r) {
+        html += '<tr data-crow="' + esc(r.container_id || '') + '"><td class="mono">' + esc(r.ct || '—') + '</td>';
+        if (r.skip) {
+          html += '<td colspan="' + C01.compass.FIELDS.length + '" class="c01-skip">' + esc(SKIP_LABEL[r.skip] || r.skip) + '</td>';
+        } else {
+          r.cells.forEach(function (c) {
+            html += '<td class="c01-cell ' + c.state + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL[c.state]) + '" data-state="' + c.state + '">' +
+              '<div class="now">' + esc(c.now == null ? '（空）' : c.now) + '</div>' + (c.state === 'SAME' || c.state === 'KEEP' ? '' : '<div class="put">→ ' + esc(c.put == null ? '' : c.put) + '</div>') + '</td>';
+          });
+        }
+        html += '<td>' + r.warnings.map(function (w) { return '<span class="c01-wchip" data-warn="' + w + '">' + esc(WARN_LABEL[w] || w) + '</span>'; }).join('') + '</td></tr>';
+      });
+      html += '</tbody></table><details class="c01-patch"><summary>PATCH 本文（送りません）</summary><pre id="compass-patch">' +
+        esc(JSON.stringify(res.patches, null, 1)) + '</pre></details></div>' +
+        '<div class="c01-mf"><span class="t2">If-Match (etag) 付きで入力 → もう一度読んで確認 → compass_done を記録（R7 以降・職員ログイン）</span><span class="c01-flex"></span>' +
+        '<button id="compass-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 はローカル DRY">DRY — 送信しません</button></div>';
+      showModal(html);
+    });
+  }
+  /* ── v0.2.0 催促 プレビュー窓 (設計 §7 · 決定 #97) — 下書きだけ。送信は無効「下書きのみ」 ── */
+  /* ── #109 行の情報表示 · スロット変更 (全職員 · 入れ替え確認 · _actions に 誰・いつ・前→後 · 元に戻す) ── */
+  var INFO_TEXT = { CT_CHECKDIGIT_OVERRIDE: 'チェックディジット不一致を確認して保存（確認済 · 自動OK にしない）' };
+  function canSlotChange() {
+    var R = C01.RULES || {};
+    if (R.slotChange === 'all') return true;
+    return !!(S.me && (R.adminUsers || []).indexOf(S.me.email) >= 0);
+  }
+  function slotOf(iv, r, ov) { var a = ov.bySlot[iv.iv_no + '|' + r.ct]; return a ? a.value.slot_guid : (r.slot_guid || null); }
+  function slotLabel(iv, guid) {
+    var ss = iv.slots || [];
+    for (var i = 0; i < ss.length; i++) {
+      if (ss[i].slot_guid === guid) return '枠' + (i + 1) + ' · ' + [ss[i].packer, ss[i].plant, ss[i].item, ss[i].type].filter(Boolean).join(' ');
+    }
+    return guid ? '（一覧にない枠）' : '（枠なし）';
+  }
+  function slotInfo(iv, r, ov) {
+    var a = ov.bySlot[iv.iv_no + '|' + r.ct];
+    if (a) return { action_id: a.action_id, by: a.by, at: a.at, before: a.value.slot_before || null, after: a.value.slot_guid, swap_ct: a.value.swap_ct || null };
+    return r.slot_change || null;
+  }
+  function staffName(email) { var s = staffList().filter(function (x) { return x.email === email; })[0]; return s ? (s.name || s.code) : (email || ''); }
+  function slotInfoText(iv, si) {
+    return 'スロット変更 · ' + staffName(si.by) + ' · ' + String(si.at || '').slice(0, 16).replace('T', ' ') + ' · ' + slotLabel(iv, si.before) + ' → ' + slotLabel(iv, si.after) +
+      (si.swap_ct ? ' · 入れ替え ' + si.swap_ct : '');
+  }
+  function rowInfo(iv, r, x, ov) {
+    var out = '';
+    var diffs = (r.info || []).filter(function (s) { return /^human_vs_engine_diff\(/.test(s); });
+    if (diffs.length && (C01.RULES || {}).humanVsEngine === 'keep_info') {
+      out += ' <span class="c01-ibadge" data-info="human_vs_engine" title="確認した値を表示しています（エンジンの判定し直しの値と違います: ' +
+        esc(diffs.map(function (s) { return FIELD_LABEL[s.slice(22, -1)] || s; }).join('・')) + '）">ⓘ</span>';
+    }
+    var ovr = (r.info || []).indexOf('CT_CHECKDIGIT_OVERRIDE') >= 0 || Object.keys(x.human || {}).some(function (f) { return (x.human[f].override || []).indexOf('CT_CHECKDIGIT_OVERRIDE') >= 0; });
+    if (ovr) out += ' <span class="c01-ibadge" data-info="CT_CHECKDIGIT_OVERRIDE" title="' + esc(INFO_TEXT.CT_CHECKDIGIT_OVERRIDE) + '">CD</span>';
+    var si = slotInfo(iv, r, ov);
+    if (si) out += ' <span class="c01-ibadge" data-info="slot_change" title="' + esc(slotInfoText(iv, si)) + '">⇄ 枠変更</span>';
+    return out;
+  }
+  function openSlot(key) {
+    var f = findRow(key);
+    if (!f) return;
+    var iv = f.iv, r = f.r, ov = overlay();
+    var cur = slotOf(iv, r, ov);
+    S.modal = { kind: 'slot', key: key, pick: null };
+    var si = slotInfo(iv, r, ov);
+    var html = '<div class="c01-mh"><b>スロット変更</b><span class="mono">' + esc(r.ct) + '</span><span class="t2">' + esc(iv.iv_no) + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<p class="t2">いまの枠: <b id="slot-cur">' + esc(slotLabel(iv, cur)) + '</b></p><div class="c01-slotlist">' +
+      (iv.slots || []).map(function (s, i) {
+        var occ = iv.rows.filter(function (y) { return y.container_id !== r.container_id && y.ct && slotOf(iv, y, ov) === s.slot_guid; }).map(function (y) { return y.ct; });
+        return '<button class="c01-choice' + (s.slot_guid === cur ? ' on' : '') + '" data-slotpick="' + esc(s.slot_guid) + '"' + (s.slot_guid === cur ? ' disabled' : '') + '>' +
+          '<span>' + esc(slotLabel(iv, s.slot_guid)) + '</span><span class="s mono">' + esc(s.slot_guid === cur ? 'いまの枠' : occ.length ? occ.join(', ') : '空き') + '</span></button>';
+      }).join('') + '</div>' +
+      (si ? '<div class="c01-rpast" id="slot-hist"><b>変更の記録</b><p>' + esc(slotInfoText(iv, si)) + '</p>' +
+        (si.before ? '<button class="c01-btn-ghost2" id="slot-undo">元に戻す</button>' : '') + '</div>' : '') +
+      '</div><div class="c01-mf"><span class="t2">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + ' · 誰・いつ・前→後 を _actions に記録</span><span class="c01-flex"></span>' +
+      '<button id="slot-apply" class="c01-btn-pri" disabled>この枠に変更</button></div>';
+    showModal(html);
+    var m = $('c01-modal');
+    m.querySelectorAll('[data-slotpick]').forEach(function (el) {
+      el.onclick = function () {
+        S.modal.pick = el.getAttribute('data-slotpick');
+        m.querySelectorAll('[data-slotpick]').forEach(function (e2) { e2.classList.toggle('on', e2 === el); });
+        $('slot-apply').disabled = false;
+      };
+    });
+    $('slot-apply').onclick = function () { if (S.modal && S.modal.pick) changeSlot(iv, r, S.modal.pick); };
+    var u = $('slot-undo');
+    if (u) u.onclick = function () { changeSlot(iv, r, si.before, true); };
+  }
+  function changeSlot(iv, r, target, undo) {
+    if (!S.me) { toast('担当者を選んでください', 'warn'); return; }
+    var ov = overlay();
+    var cur = slotOf(iv, r, ov);
+    if (!target || target === cur) return;
+    var occ = iv.rows.filter(function (y) { return y.container_id !== r.container_id && y.ct && slotOf(iv, y, ov) === target; })[0] || null;
+    if (occ) {
+      if (!cur) { toast('入れ替え先の枠がありません（いまの枠なし）', 'error'); return; }
+      if (!window.confirm(occ.ct + ' が入っています。入れ替えますか')) return;
+    }
+    /* 入れ替えは 1 件 (swap_ct) — エンジンが 2 台を一度に反映 (片方だけ反映されることはない) */
+    var act = mkAction('slot_change', { iv: iv.iv_no, ct: r.ct, field: null, value: { slot_guid: target, slot_before: cur, swap_ct: occ ? occ.ct : null }, source: null, queue_id: null });
+    writeAction(act).then(function () { closeModal(); render(); toast(undo ? '元に戻しました' : (occ ? '入れ替えました' : 'スロットを変更しました'), 'success'); });
+  }
+
+  var SIGN_PLACEHOLDER = '(送信者のメールアドレス)';   /* エンジン engine/notify/remind.py SIGN_PLACEHOLDER と同じ (#112) */
+  function signed(t) { return S.me && S.me.email ? String(t).split(SIGN_PLACEHOLDER).join(S.me.email) : t; }
+  function remindsOf(ivNo) { return ((S.remind && S.remind.ivs) || {})[ivNo] || []; }
+  function openRemind(ivNo) {
+    var iv = ivById(ivNo);
+    var ds = remindsOf(ivNo);
+    S.modal = { kind: 'remind', iv: ivNo };
+    var STAGE = { d2: 'CY カット 2 営業日前', d1: 'CY カット 前営業日', workdate_passed: '作業日を過ぎて未着', overdue: '期限超過' };
+    var html = '<div class="c01-mh"><b>催促メール — プレビュー</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">';
+    if (!ds.length) html += '<p class="c01-note2">催促の対象はありません</p>';
+    ds.forEach(function (d, i) {
+      html += '<section class="c01-rmd" data-rmd="' + i + '"><div class="c01-rmeta">' +
+        '<div><span class="k">宛先</span><span class="mono">' + esc((d.to || []).join(', ') || '（送信先未登録）') + '</span></div>' +
+        '<div><span class="k">CC</span><span class="mono">' + esc((d.cc || []).join(', ')) + '</span></div>' +
+        '<div><span class="k">差出人</span><span>' + esc(S.me ? S.me.email || S.me.name : '（ログイン者）') + '</span></div>' +
+        '<div><span class="k">件名</span><span class="rsub">' + esc(d.subject) + '</span></div>' +
+        '<div><span class="k">回数</span><span>' + esc(d.round) + ' 回目 · ' + esc(STAGE[d.stage] || d.stage) + ' · ' + esc(d.packer) + '</span></div></div>' +
+        '<pre class="c01-rbody">' + esc(signed(d.body_text || '')) + '</pre></section>';
+    });
+    var past = (iv && iv.reminders) || [];
+    html += '<div class="c01-rpast"><b>これまでの催促</b>' + (past.length ? '<ul>' + past.map(function (p) {
+      return '<li>' + esc(String(p.at || '').slice(0, 16).replace('T', ' ')) + ' · ' + esc(p.by || '') + (p.value && p.value.round ? ' · ' + esc(p.value.round) + '回目' : '') + '</li>';
+    }).join('') + '</ul>' : '<span class="t2"> なし</span>') + '</div></div>' +
+      '<div class="c01-mf"><span class="t2">送信は押した職員本人のメールから（決定 #97）· 回数・送信者を記録</span><span class="c01-flex"></span>' +
+      '<button id="remind-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 は下書きだけ">下書きのみ</button></div>';
+    showModal(html);
+  }
+
+  function findRow(key) {
+    var found = null;
+    ((S.jik && S.jik.ivs) || []).forEach(function (iv) { iv.rows.forEach(function (r) { if (rowKey(iv, r) === key) found = { iv: iv, r: r }; }); });
+    return found;
+  }
+
+  /* ── 要確認 横パネル ── */
+  function renderPanel(b) {
+    var el = $('c01-panel');
+    if (!S.sel) { el.innerHTML = ''; el.hidden = true; return; }
+    var f = findRow(S.sel);
+    if (!f) { S.sel = null; el.hidden = true; return; }
+    var iv = f.iv, r = f.r, ov = b.ov;
+    var qs = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id; });
+    var diffQ = {};
+    qs.forEach(function (q) { if (q.field) diffQ[q.field] = q; });
+    var doc = qs.map(function (q) { return (q.files || [])[0]; }).filter(Boolean)[0];
+    var ph = (S.photos[iv.iv_no] && (S.photos[iv.iv_no].containers || []).filter(function (c) { return c.container_id === r.container_id; })[0]) || null;
+    var firstPhoto = ph && ph.photos && ph.photos[0];
+    var fields = VALUE_FIELDS.map(function (fd) {
+      var q = diffQ[fd];
+      var st = q ? queueState(q, ov) : null;
+      if (q && q.kind === '値の違い' && !st.done) {
+        var alts = [];
+        Object.keys(q.values || {}).forEach(function (src) { (q.values[src] || []).forEach(function (v) { alts.push([src, v]); }); });
+        var pick = S.picks[fd];
+        return '<div class="c01-pf"><span class="c01-pl">' + FIELD_LABEL[fd] + '</span><div class="c01-alts">' + alts.map(function (a, i) {
+          var on = pick && pick[0] === a[0] && String(pick[1]) === String(a[1]);
+          return '<button class="c01-alt' + (on ? ' on' : '') + '" data-pick="' + fd + '" data-i="' + i + '"><span class="s">' + esc(a[0]) + '</span><span class="mono v">' + esc(typeof a[1] === 'number' ? a[1].toLocaleString('en-US') : a[1]) + '</span></button>';
+        }).join('') + '</div></div>';
+      }
+      if (q && q.kind === '手入力' && !st.done) {
+        return '<div class="c01-pf"><span class="c01-pl">' + FIELD_LABEL[fd] + '</span><div class="c01-note2">読めませんでした — 確認・入力 で原本を見て入力してください</div></div>';
+      }
+      var v = r[fd];
+      var note = st && st.done ? '確認済' + (st.by ? ' · ' + st.by : '') : '';
+      return '<div class="c01-pf"><span class="c01-pl">' + FIELD_LABEL[fd] + '</span><div class="c01-same"><span class="mono">' + num(v) + '</span><span class="ok">' + esc(note) + '</span></div></div>';
+    }).join('');
+    var needPick = Object.keys(diffQ).filter(function (fd) { return diffQ[fd].kind === '値の違い' && !queueState(diffQ[fd], ov).done; });
+    var ready = needPick.length > 0 && (needPick.every(function (fd) { return S.picks[fd]; }) || (needPick.length === 1 && S.panelInput.trim()));
+    var lostMsg = qs.some(function (q) { var s = queueState(q, ov); return s.mineLost; }) ? '<p class="c01-lost">他の人が先に確認しました</p>' : '';
+    el.hidden = false;
+    el.innerHTML = '<div class="c01-overlay" id="panel-bg"></div><aside class="c01-side" role="dialog" aria-label="要確認の詳細">' +
+      '<div class="c01-side-h"><div><div class="k">要確認</div><div class="mono big">' + esc(r.ct || '（CT 不明）') + '</div><div class="t2">' +
+      esc(iv.iv_no + ' · ' + (iv.pol || '') + ' · ' + (r.packer || iv.packer) + ' ' + (r.plant || iv.plant)) + '</div></div>' +
+      '<button class="c01-x" id="panel-close" aria-label="閉じる">✕</button></div>' +
+      '<div class="c01-side-b">' + lostMsg +
+      '<p class="c01-reason">' + esc(reasonTexts(r).join(' / ') || (r.reasons || []).join(' / ')) + '</p>' +
+      '<div class="c01-thumbs"><button id="panel-doc" class="c01-thumb"' + (doc ? '' : ' disabled') + '>' + (doc ? imgTag(doc.path, 'c01-thimg', '原本') : '') + '<span>' + (doc ? esc('原本 ' + (doc.name || '') + (doc.page ? ' p' + doc.page : '')) : '原本なし') + '</span></button>' +
+      '<button id="panel-photo" class="c01-thumb"' + (firstPhoto ? '' : ' disabled') + '>' + (firstPhoto ? imgTag(firstPhoto.path, 'c01-thimg', '写真') : '') + '<span>' + (firstPhoto ? esc('写真 ' + (firstPhoto.label || '')) : '写真なし') + '</span></button></div>' +
+      fields +
+      (needPick.length === 1 ? '<label class="c01-direct">どちらも違う場合は直接入力<input id="panel-input" type="text" placeholder="正しい値" value="' + esc(S.panelInput) + '"></label>' : '') +
+      (needPick.length ? '' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
+      '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
+      '<button id="panel-later" class="c01-btn-ghost2">あとで</button></div>' +
+      '<p class="c01-foot">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</p>' +
+      '</div></aside>';
+    hydrate(el);
+    $('panel-close').onclick = $('panel-later').onclick = $('panel-bg').onclick = function () { S.sel = null; render(); };
+    if (doc) $('panel-doc').onclick = function () { S.view = 'input'; S.qsel = qs[0].queue_id; S.sel = null; render(); };
+    if (firstPhoto) $('panel-photo').onclick = function () { openLightbox(S.sel, 0); };
+    el.querySelectorAll('[data-pick]').forEach(function (b2) {
+      b2.onclick = function () {
+        var fd = b2.getAttribute('data-pick'), i = +b2.getAttribute('data-i');
+        var q = diffQ[fd], alts = [];
+        Object.keys(q.values || {}).forEach(function (src) { (q.values[src] || []).forEach(function (v) { alts.push([src, v]); }); });
+        S.picks[fd] = alts[i];
+        S.panelInput = '';
+        render();
+      };
+    });
+    var pin = $('panel-input');
+    if (pin) pin.oninput = function () { S.panelInput = pin.value; var btn = $('panel-ok'); var ok = !!pin.value.trim() || needPick.every(function (fd) { return S.picks[fd]; }); btn.disabled = !ok; btn.className = 'c01-btn-big' + (ok ? ' ready' : ''); btn.textContent = ok ? '確認する' : '正しい値を選んでください'; };
+    $('panel-ok').onclick = function () {
+      if (!S.me) { toast('担当者を選んでください', 'warn'); return; }
+      var acts = [];
+      for (var k = 0; k < needPick.length; k++) {
+        var fd = needPick[k], q = diffQ[fd];
+        var typed = needPick.length === 1 ? S.panelInput.trim() : '';
+        var val = typed || S.picks[fd][1], src = typed ? '手入力' : S.picks[fd][0];
+        var v = C01.validate.field(fd, val);
+        if (!v.ok) { toast(FIELD_LABEL[fd] + ': ' + v.error, 'error'); return; }
+        acts.push(mkAction('confirm_value', { iv: iv.iv_no, ct: r.ct, field: fd, value: v.value, source: src, queue_id: q.queue_id }));
+      }
+      Promise.all(acts.map(writeAction)).then(function () { S.sel = null; S.picks = {}; S.panelInput = ''; render(); toast('確認しました', 'success'); });
+    };
+  }
+
+  /* ── 写真 (大きく · 左右 · サムネイル帯) ── */
+  function photosOf(key) {
+    var f = findRow(key);
+    if (!f) return null;
+    var p = S.photos[f.iv.iv_no];
+    var c = p && (p.containers || []).filter(function (x) { return x.container_id === f.r.container_id; })[0];
+    return { title: f.iv.iv_no + ' / ' + (f.r.ct || ''), list: (c && c.photos) || [] };
+  }
+  function openLightbox(key, idx) {
+    var f = findRow(key);
+    var go = function () { S.lb = { key: key, idx: idx || 0 }; renderLightbox(); };
+    if (f && !S.photos[f.iv.iv_no]) loadPhotos(f.iv.iv_no).then(go); else go();
+  }
+  function openLightboxList(title, list, idx) { S.lb = { title: title, list: list, idx: idx || 0 }; renderLightbox(); }
+  function renderLightbox() {
+    var el = $('c01-lb');
+    if (!S.lb) { el.hidden = true; el.innerHTML = ''; return; }
+    var d = S.lb.list ? { title: S.lb.title, list: S.lb.list } : photosOf(S.lb.key);
+    if (!d || !d.list.length) { S.lb = null; el.hidden = true; return; }
+    var n = d.list.length, i = ((S.lb.idx % n) + n) % n;
+    S.lb.idx = i;
+    var p = d.list[i];
+    el.hidden = false;
+    el.innerHTML = '<div class="c01-lb" role="dialog" aria-label="写真">' +
+      '<div class="c01-lb-h"><span class="mono">' + esc(d.title) + '</span><span class="c">' + (i + 1) + ' / ' + n + ' · ' + esc(p.label || ('写真 ' + (i + 1))) + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-lb-x" id="lb-close" aria-label="閉じる">✕</button></div>' +
+      '<div class="c01-lb-m"><button class="c01-lb-nav" id="lb-prev" aria-label="前の写真">‹</button>' +
+      '<div class="c01-lb-img" id="lb-stage">' + imgTag(p.path, 'c01-lbimg', p.label) + '</div>' +
+      '<button class="c01-lb-nav" id="lb-next" aria-label="次の写真">›</button></div>' +
+      '<div class="c01-lb-strip">' + d.list.map(function (q, k) {
+        return '<button class="c01-lb-th' + (k === i ? ' on' : '') + '" data-go="' + k + '" title="' + esc(q.label || '') + '">' + imgTag(q.path, 'c01-thimg', q.label) + '</button>';
+      }).join('') + '</div></div>';
+    hydrate(el);
+    $('lb-close').onclick = function () { S.lb = null; renderLightbox(); };
+    $('lb-prev').onclick = function () { S.lb.idx -= 1; renderLightbox(); };
+    $('lb-next').onclick = function () { S.lb.idx += 1; renderLightbox(); };
+    el.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { S.lb.idx = +b.getAttribute('data-go'); renderLightbox(); }; });
+    var img = el.querySelector('.c01-lbimg'), scale = 1;
+    $('lb-stage').onwheel = function (e) { e.preventDefault(); scale = Math.max(1, Math.min(4, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (img) img.style.transform = 'scale(' + scale + ')'; };
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!S.lb) return;
+    if (e.key === 'ArrowLeft') { S.lb.idx -= 1; renderLightbox(); }
+    if (e.key === 'ArrowRight') { S.lb.idx += 1; renderLightbox(); }
+    if (e.key === 'Escape') { S.lb = null; renderLightbox(); }
+  });
+
+  /* ── 確認・入力 ── */
+  function openQueue() {
+    var ov = overlay();
+    return ((S.queue && S.queue.items) || []).filter(function (q) { return !queueState(q, ov).done && queuePortOk(q); });
+  }
+  function queuePortOk(q) {
+    if (!q.iv_no) return true;
+    var iv = ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0];
+    return !iv || portOk(iv.pol);
+  }
+  /* 写真枚数の色: 旧 実況表 (phase4_report.py · photo_count < 6 or >= 15) と同じ基準 */
+  function photoAlert(n) { n = +n || 0; return n <= 5 || n >= 15; }
+  function kindLabel(k) { return (KIND[k] && KIND[k].label) || k; }
+  function renderInput() {
+    var ov = overlay();
+    var all = ((S.queue && S.queue.items) || []).filter(queuePortOk);
+    var doneN = all.filter(function (q) { return queueState(q, ov).done; }).length;
+    var counts = { all: all.length - doneN };
+    Object.keys(KIND).forEach(function (k) { counts[k] = all.filter(function (q) { return q.kind === k && !queueState(q, ov).done; }).length; });
+    var vis = all.filter(function (q) { return S.qkind === 'all' || q.kind === S.qkind; });
+    if (!S.qsel || !all.some(function (q) { return q.queue_id === S.qsel; })) { var f0 = vis.filter(function (q) { return !queueState(q, ov).done; })[0] || vis[0]; S.qsel = f0 ? f0.queue_id : null; }
+    var q = all.filter(function (x) { return x.queue_id === S.qsel; })[0] || null;
+    var iv = q && q.iv_no ? ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0] : null;
+    var html = '<div class="c01-input">';
+    html += '<aside class="c01-list" aria-label="作業リスト"><div class="c01-kinds">' +
+      [['all', 'すべて']].concat(Object.keys(KIND).map(function (k) { return [k, kindLabel(k)]; })).map(function (k) {
+        return '<button class="c01-chip' + (S.qkind === k[0] ? ' on' : '') + '" data-kind="' + esc(k[0]) + '">' + esc(k[1]) + ' ' + (counts[k[0]] || 0) + '</button>';
+      }).join('') + '</div>' +
+      '<div class="c01-prog"><div class="bar"><div style="width:' + (all.length ? Math.round(doneN / all.length * 100) : 0) + '%"></div></div><span>' + doneN + ' / ' + all.length + ' 完了</span></div>' +
+      '<div class="c01-items">' + vis.map(function (x) {
+        var st = queueState(x, ov);
+        return '<button class="c01-item' + (x.queue_id === S.qsel ? ' on' : '') + (st.done ? ' done' : '') + '" data-q="' + esc(x.queue_id) + '">' +
+          '<span class="r1"><span class="k" style="color:' + KIND[x.kind].color + '">' + esc(kindLabel(x.kind)) + '</span><span class="c01-flex"></span><span class="cy">CY ' + esc(md(x.cy_cut) || '—') + '</span></span>' +
+          '<span class="mono t">' + esc(x.kind === '写真のCT' ? 'CT 不明の写真 ' + (x.files || []).length + '枚' : x.kind === '未分類FAX' ? ((x.files || [])[0] || {}).name || 'FAX' : (x.ct || '（CT 不明）')) + '</span>' +
+          '<span class="s">' + esc((x.iv_no ? x.iv_no + ' · ' : '') + (x.field ? FIELD_LABEL[x.field] : '') + (x.issuer ? ' · ' + x.issuer : '')) + '</span>' +
+          (st.done ? '<span class="d">' + (st.mineLost ? '他の人が先に確認しました' : '完了' + (st.by ? ' · ' + esc(st.by) : '')) + '</span>' : '') + '</button>';
+      }).join('') + (vis.length ? '' : '<p class="c01-empty">作業はありません</p>') + '</div></aside>';
+    /* 原本 */
+    html += '<section class="c01-orig" aria-label="原本">';
+    if (q) {
+      var files = q.files || [];
+      var f = files[0] || {};
+      var isPhotos = q.kind === '写真のCT';
+      var qrow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+      var qph = qrow ? (qrow.photos || 0) : null;
+      html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
+        (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph) ? ' c01-ph-alert' : '') + '" title="このコンテナの写真枚数（5枚以下・15枚以上は色付き）">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
+        (!isPhotos ? '<button class="c01-tool" id="z-out" aria-label="縮小">−</button><span class="z">' + S.zoom + '%</span><button class="c01-tool" id="z-in" aria-label="拡大">+</button>' +
+          '<button class="c01-tool" id="rot" aria-label="回転">⟳</button><span class="t2">' + (f.page ? 'p.' + f.page : '') + '</span>' : '') + '</div>';
+      html += '<div class="c01-orig-b">';
+      if (isPhotos) {
+        html += '<div class="c01-grid">' + files.map(function (pf, k) { return '<button class="c01-gph" data-gph="' + k + '">' + imgTag(pf.path, 'c01-gimg', pf.name) + '<span>' + esc(pf.name || '') + '</span></button>'; }).join('') + '</div>';
+      } else if (f.path) {
+        var isPdf = /\.pdf$/i.test(f.path), isImg = /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(f.path);
+        var w = Math.round(640 * S.zoom / 100);
+        html += '<div class="c01-doc" style="width:' + w + 'px;transform:rotate(' + S.rot + 'deg)">';
+        if (isImg) html += imgTag(f.path, 'c01-docimg', f.name);
+        else if (isPdf) html += isFolder() ? '<iframe class="c01-docpdf" data-rel="' + esc(f.path) + '" title="原本"></iframe>' : '<iframe class="c01-docpdf" src="' + esc(S.src.fileUrl(f.path)) + (f.page ? '#page=' + f.page : '') + '" title="原本"></iframe>';
+        else html += '<p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）</p>';
+        if (f.bbox && f.bbox.length === 4 && isImg) {
+          var bb = f.bbox;
+          html += '<div class="c01-bbox" style="left:' + (bb[0] * 100) + '%;top:' + (bb[1] * 100) + '%;width:' + ((bb[2] - bb[0]) * 100) + '%;height:' + ((bb[3] - bb[1]) * 100) + '%"></div>';
+        }
+        html += '</div>';
+      } else {
+        html += '<p class="c01-note2">原本ファイルがありません</p>';
+      }
+      html += '</div>';
+    }
+    html += '</section>';
+    /* 入力 */
+    html += '<section class="c01-form" aria-label="入力">';
+    if (q) {
+      var st = queueState(q, ov);
+      var KC = KIND[q.kind];
+      html += '<div class="c01-form-h"><span class="k" style="color:' + KC.color + '">' + esc(kindLabel(q.kind)) + '</span><span class="mono big">' +
+        esc(q.kind === '写真のCT' ? 'CT 不明の写真 ' + (q.files || []).length + '枚' : q.kind === '未分類FAX' ? ((q.files || [])[0] || {}).name || '' : (q.ct || '（CT 不明）')) + '</span>' +
+        '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 不明' : (q.iv_no || '') + ' · ' + (iv ? (iv.packer + ' ' + iv.plant) : '') + ' · CY ' + (md(q.cy_cut) || '—')) + '</span></div>';
+      html += '<div class="c01-form-b">';
+      if (st.done) html += '<p class="' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? 'c01-lost' : 'c01-okmsg') + '">' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? '他の人が先に確認しました' : '完了しました') + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
+      html += '<p class="c01-qnote k-' + KC.key + '">' + esc(noteOf(q)) + '</p>';
+      var msg = S.qmsg[q.queue_id];
+      if (msg) html += '<p class="c01-err" id="q-err">' + esc(msg) + '</p>';
+      if (q.kind === '値の違い' || q.kind === '手入力') {
+        var fd = q.field;
+        var vals = S.qvals[q.queue_id] || {};
+        var cur = vals[fd] !== undefined ? vals[fd] : '';
+        var alts = [];
+        Object.keys(q.values || {}).forEach(function (src) { (q.values[src] || []).forEach(function (v) { alts.push([src, v]); }); });
+        html += '<div class="c01-field"><label for="q-in"><b>' + FIELD_LABEL[fd] + '</b><span class="c01-flex"></span><span class="hint">' + esc(hintOf(fd)) + '</span></label>' +
+          '<input id="q-in" class="' + (cur ? '' : 'need') + '" value="' + esc(cur) + '" placeholder="' + (q.kind === '手入力' ? '原本を見て入力' : '選ぶか入力') + '" aria-label="' + FIELD_LABEL[fd] + '">' +
+          (alts.length && q.kind === '値の違い' ? '<div class="c01-alts2">' + alts.map(function (a, i) { return '<button class="c01-alt2' + (String(cur) === String(a[1]) ? ' on' : '') + '" data-alt="' + i + '">' + esc(a[0]) + ' <span class="mono">' + esc(a[1]) + '</span></button>'; }).join('') + '</div>' : '') +
+          '</div>';
+        var row = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+        if (row) {
+          var fst = q.field_source_text || {};      /* v0.2.0: エンジンの項目別出典一致 (field_sources) の文 — 無い時は値だけ */
+          html += VALUE_FIELDS.filter(function (x) { return x !== fd; }).map(function (x) {
+            return '<div class="c01-field ro"><label><b>' + FIELD_LABEL[x] + '</b><span class="c01-flex"></span>' +
+              (fst[x] ? '<span class="c01-src" data-src-field="' + x + '">' + esc(fst[x]) + '</span>' : '') +
+              '</label><div class="mono rov">' + num(row[x]) + '</div></div>';
+          }).join('');
+        }
+      } else if (q.kind === '写真のCT') {
+        var cands = photoCands(q, iv);
+        html += '<fieldset class="c01-choices"><legend>どのコンテナの写真ですか</legend>' + cands.map(function (ct, i) {
+          var r = iv ? iv.rows.filter(function (x) { return x.ct === ct; })[0] : null;
+          return '<button class="c01-choice' + (S.qchoice[q.queue_id] === i ? ' on' : '') + '" data-choice="' + i + '"><span class="mono">' + esc(ct) + '</span><span class="s">' +
+            esc(r ? (r.photos ? '写真あり ' + r.photos + '枚（重複の可能性）' : '写真待ち') + (r.seal ? ' · ' + r.seal : '') + (r.work_date ? ' · ' + md(r.work_date) : '') : '') + '</span></button>';
+        }).join('') + (cands.length ? '' : '<p class="c01-note2">候補がありません</p>') +
+          '<label class="c01-direct">CT 番号を入力して指定<input id="q-ct" placeholder="CT 番号" value="' + esc((S.qvals[q.queue_id] || {}).ct || '') + '"></label></fieldset>';
+      } else if (q.kind === '未分類FAX') {
+        var ivc = q.candidates || [];
+        html += '<fieldset class="c01-choices"><legend>どのインボイスに連結しますか</legend>' + ivc.map(function (c, i) {
+          return '<button class="c01-choice' + (S.qchoice[q.queue_id] === i ? ' on' : '') + '" data-choice="' + i + '"><span class="mono">' + esc(c) + '</span></button>';
+        }).join('') + '<label class="c01-direct">IV 番号を入力して指定<input id="q-iv" placeholder="IV 番号" value="' + esc((S.qvals[q.queue_id] || {}).iv || '') + '"></label></fieldset>';
+      }
+      html += '</div>';
+      var ready = readyOf(q);
+      html += '<div class="c01-form-f"><button id="q-submit" class="c01-btn-big' + (ready || st.done ? ' ready' : '') + '"' + (ready || st.done ? '' : ' disabled') + '>' +
+        (st.done ? '完了しました — 次へ' : ready ? '確認して次へ' : (q.kind === '値の違い' || q.kind === '手入力' ? '未入力の項目があります' : '選んでください')) + '</button>' +
+        '<div class="row"><button id="q-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
+        (q.kind === '未分類FAX' ? '<button id="q-notours" class="c01-btn-ghost2 danger"' + (st.done ? ' disabled' : '') + '>当社案件ではない</button>' : '') + '</div>' +
+        '<span class="c01-foot">確認した内容は実況表にすぐ反映 · 記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</span></div>';
+    } else {
+      html += '<p class="c01-empty">作業はありません</p>';
+    }
+    html += '</section></div><p class="c01-powered">✦ Powered by LEENAI Automation System</p>';
+    $('c01-main').innerHTML = html;
+    hydrate($('c01-main'));
+    var root = $('c01-main');
+    root.querySelectorAll('[data-kind]').forEach(function (el) { el.onclick = function () { S.qkind = el.getAttribute('data-kind'); S.qsel = null; render(); }; });
+    root.querySelectorAll('[data-q]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-q'); S.zoom = 100; S.rot = 0; render(); }; });
+    if (!q) return;
+    var zi = $('z-in'), zo = $('z-out'), ro = $('rot');
+    if (zi) zi.onclick = function () { S.zoom = Math.min(200, S.zoom + 20); render(); };
+    if (zo) zo.onclick = function () { S.zoom = Math.max(60, S.zoom - 20); render(); };
+    if (ro) ro.onclick = function () { S.rot = (S.rot + 90) % 360; render(); };
+    root.querySelectorAll('[data-gph]').forEach(function (el) {
+      el.onclick = function () { openLightboxList('CT 不明の写真', (q.files || []).map(function (pf) { return { path: pf.path, label: pf.name }; }), +el.getAttribute('data-gph')); };
+    });
+    var qin = $('q-in');
+    if (qin) qin.oninput = function () { S.qvals[q.queue_id] = Object.assign({}, S.qvals[q.queue_id], (function () { var o = {}; o[q.field] = qin.value; return o; })()); delete S.qmsg[q.queue_id]; refreshSubmit(q); };
+    root.querySelectorAll('[data-alt]').forEach(function (el) {
+      el.onclick = function () {
+        var alts = [];
+        Object.keys(q.values || {}).forEach(function (src) { (q.values[src] || []).forEach(function (v) { alts.push([src, v]); }); });
+        var a = alts[+el.getAttribute('data-alt')];
+        var o = {}; o[q.field] = String(a[1]); o._src = a[0];
+        S.qvals[q.queue_id] = o; delete S.qmsg[q.queue_id];
+        render();
+      };
+    });
+    root.querySelectorAll('[data-choice]').forEach(function (el) { el.onclick = function () { S.qchoice[q.queue_id] = +el.getAttribute('data-choice'); render(); }; });
+    var qct = $('q-ct');
+    if (qct) qct.oninput = function () { S.qvals[q.queue_id] = { ct: qct.value }; if (qct.value) delete S.qchoice[q.queue_id]; delete S.qmsg[q.queue_id]; refreshSubmit(q); };
+    var qiv = $('q-iv');
+    if (qiv) qiv.oninput = function () { S.qvals[q.queue_id] = { iv: qiv.value }; if (qiv.value) delete S.qchoice[q.queue_id]; refreshSubmit(q); };
+    $('q-skip').onclick = function () { S.qsel = nextQueueId(q); render(); };
+    var no = $('q-notours');
+    if (no) no.onclick = function () { submitQueue(q, 'not_ours'); };
+    $('q-submit').onclick = function () { if (queueState(q, overlay()).done) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
+  }
+  /* 写真の CT の候補: エンジンの candidates → 無ければ同じ IV の CT がある行 (この行を除く) */
+  function photoCands(q, iv) {
+    if ((q.candidates || []).length) return q.candidates;
+    if (!iv) return [];
+    /* 安定キー IV + CT + 業者: この写真の行と同じ業者の行だけ (エンジン apply.container_by と同じ) */
+    var me = iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0];
+    var pk = me ? (me.packer || iv.packer) : null;
+    return iv.rows.filter(function (r) { return r.ct && r.container_id !== q.container_id && (!pk || (r.packer || iv.packer) === pk); }).map(function (r) { return r.ct; });
+  }
+  function refreshSubmit(q) {
+    var b = $('q-submit');
+    var r = readyOf(q);
+    b.disabled = !r;
+    b.className = 'c01-btn-big' + (r ? ' ready' : '');
+    b.textContent = r ? '確認して次へ' : (q.kind === '値の違い' || q.kind === '手入力' ? '未入力の項目があります' : '選んでください');
+  }
+  function readyOf(q) {
+    var v = S.qvals[q.queue_id] || {};
+    if (q.kind === '値の違い' || q.kind === '手入力') return !!String(v[q.field] || '').trim();
+    if (q.kind === '写真のCT') return S.qchoice[q.queue_id] !== undefined || !!String(v.ct || '').trim();
+    if (q.kind === '未分類FAX') return S.qchoice[q.queue_id] !== undefined || !!String(v.iv || '').trim();
+    return false;
+  }
+  function noteOf(q) {
+    if (q.kind === '値の違い') return FIELD_LABEL[q.field] + ' が出典によって違います。原本を見て、正しい方を選ぶか入力してください。';
+    if (q.kind === '手入力') return FIELD_LABEL[q.field] + ' が読めませんでした。原本を見て入力してください。';
+    if (q.kind === '写真のCT') return '写真から CT 番号が読めませんでした。写真を見て、どのコンテナか選んでください。';
+    return 'どのインボイスの搬入票か判定できませんでした。';
+  }
+  function hintOf(fd) {
+    return fd === 'ct' ? '英字4 + 数字7 · チェックデジット' : fd === 'seal' ? '英数字（空白なし）' : fd === 'work_date' ? 'YYYY-MM-DD' : '正の整数';
+  }
+  function nextQueueId(q) {
+    var ov = overlay();
+    var all = ((S.queue && S.queue.items) || []).filter(queuePortOk);
+    var ids = all.map(function (x) { return x.queue_id; });
+    var i = ids.indexOf(q.queue_id);
+    var after = all.slice(i + 1).concat(all.slice(0, i));
+    var n = after.filter(function (x) { return !queueState(x, ov).done && x.queue_id !== q.queue_id; })[0];
+    return n ? n.queue_id : q.queue_id;
+  }
+  function submitQueue(q, special) {
+    if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
+    var a;
+    if (special === 'not_ours') a = mkAction('not_ours', { iv: null, ct: null, field: null, value: null, source: null, queue_id: q.queue_id });
+    else if (q.kind === '値の違い' || q.kind === '手入力') {
+      var vals = S.qvals[q.queue_id] || {};
+      var v = C01.validate.field(q.field, vals[q.field]);
+      if (!v.ok) { S.qmsg[q.queue_id] = v.error; render(); return; }
+      if (v.warn && !window.confirm(v.warn)) { S.qmsg[q.queue_id] = v.warn; render(); return; }   /* #109 ③ 確認窓 → OK なら保存 */
+      var src = q.kind === '手入力' ? '手入力' : (vals._src && String(vals[q.field]) === String(((q.values || {})[vals._src] || []).filter(function (x) { return String(x) === String(vals[q.field]); })[0]) ? vals._src : '手入力');
+      a = mkAction(q.kind === '手入力' ? 'manual_input' : 'confirm_value', { iv: q.iv_no, ct: q.ct, field: q.field, value: v.value, source: src, queue_id: q.queue_id, override: v.override });
+    } else if (q.kind === '写真のCT') {
+      var typedCt = String((S.qvals[q.queue_id] || {}).ct || '').trim();
+      var ct = typedCt ? null : photoCands(q, ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0])[S.qchoice[q.queue_id]];
+      if (typedCt) {
+        var vc = C01.validate.field('ct', typedCt);
+        if (!vc.ok) { S.qmsg[q.queue_id] = vc.error; render(); return; }
+        if (vc.warn && !window.confirm(vc.warn)) { S.qmsg[q.queue_id] = vc.warn; render(); return; }
+        ct = vc.value;
+      }
+      a = mkAction('assign_photos', { iv: q.iv_no, ct: ct, field: null, value: { paths: (q.files || []).map(function (f) { return f.path; }) }, source: null, queue_id: q.queue_id });
+    } else if (q.kind === '未分類FAX') {
+      var typed = String((S.qvals[q.queue_id] || {}).iv || '').trim().toUpperCase();
+      var iv = typed || (q.candidates || [])[S.qchoice[q.queue_id]];
+      a = mkAction('link_fax', { iv: iv, ct: null, field: null, value: null, source: null, queue_id: q.queue_id });
+    }
+    if (!a) return;
+    writeAction(a).then(function () {
+      var lost = queueState(q, overlay()).mineLost;
+      if (lost) { toast('他の人が先に確認しました', 'warn'); render(); return; }
+      S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; render();
+    });
+  }
+
+  /* ── _actions 書き込み (設計 §5 の形) ── */
+  function mkAction(action, f) {
+    var a = { schema_version: 1, action_id: actionId(), action: action, iv: f.iv == null ? null : f.iv, ct: f.ct == null ? null : f.ct,
+      field: f.field == null ? null : f.field, value: f.value === undefined ? null : f.value, source: f.source == null ? null : f.source,
+      by: S.me.email, at: jstNow(), queue_id: f.queue_id || null };
+    if (f.override) a.override = [f.override];                 /* #109 ③ CT_CHECKDIGIT_OVERRIDE */
+    return a;
+  }
+  function writeAction(a) {
+    S.mine.push({ action: a, pending: true });          /* 本人の画面はすぐ反映 (決定 #100) */
+    render();
+    return S.src.writeAction(a).then(function () { return a; }).catch(function (e) {
+      S.mine = S.mine.filter(function (x) { return x.action.action_id !== a.action_id; });
+      toast('保存できませんでした: ' + e.message, 'error');
+      render();
+      throw e;
+    });
+  }
+
+  /* ── 読み込み · 30 秒ごとの更新 ── */
+  function loadPhotos(iv) {
+    return S.src.getJson('photos/' + iv + '.json').then(function (p) { S.photos[iv] = p; }).catch(function () { S.photos[iv] = { containers: [], unassigned: [], docs: [] }; });
+  }
+  function loadAll() {
+    return Promise.all([S.src.getJson('jikkyou.json'), S.src.getJson('queue.json').catch(function () { return { items: [] }; }),
+      S.src.getJson('remind.json').catch(function () { return null; })]).then(function (r) {
+      S.jik = r[0]; S.queue = r[1]; S.remind = r[2]; S.lastLoad = new Date();
+      return Promise.all(((S.jik && S.jik.ivs) || []).map(function (iv) { return loadPhotos(iv.iv_no); }));
+    });
+  }
+  function poll() {
+    var t = (S.info && S.info.today) || new Date().toISOString().slice(0, 10);
+    var days = [addDays(t, -1), t];
+    var nowDay = jstNow().slice(0, 10);
+    if (days.indexOf(nowDay) < 0) days.push(nowDay);
+    return S.src.listActions(days).then(function (items) {
+      S.actions = items;
+      var ids = {};
+      items.forEach(function (x) { ids[x.action.action_id] = 1; });
+      S.mine = S.mine.filter(function (x) { return !ids[x.action.action_id]; });
+      S.lastPoll = new Date();
+    }).catch(function () { /* 読めない時は次回 */ });
+  }
+  function tick() {
+    return Promise.all([poll(), loadAll().catch(function () {})]).then(render);
+  }
+
+  function render() {
+    if (!S.jik) return;
+    renderNav();
+    if (S.view === 'main') renderMain(); else { $('c01-panel').hidden = true; renderInput(); }
+    renderLightbox();
+    document.body.setAttribute('data-c01-ready', '1');
+  }
+
+  /* ── 開始 ── */
+  function start(src) {
+    S.src = src;
+    return src.init().then(function (info) {
+      S.info = info;
+      return src.getStaff().then(function (s) { S.staff = s; }).catch(function () { S.staff = null; });
+    }).then(function () {
+      var saved = null;
+      try { saved = localStorage.getItem('c01_local_me'); } catch (e) { /* なし */ }
+      var s = staffList().filter(function (x) { return x.code === saved; })[0];
+      S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
+      S.port = S.me ? 'mine' : 'all';
+      updateUserChip();
+      return loadAll();
+    }).then(poll).then(function () {
+      render();
+      if (S.timer) clearInterval(S.timer);
+      S.timer = setInterval(tick, C01.SOURCE.pollMs);
+    }).catch(function (e) {
+      $('c01-main').innerHTML = '<div class="c01-fatal"><b>データを読めませんでした</b><p>' + esc(e.message) + '</p><p>_data フォルダ (jikkyou.json · queue.json) があるフォルダを選んでください。</p></div>';
+    });
+  }
+  C01.app = { start: start, render: render, tick: tick, poll: poll };
+})();
