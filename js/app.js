@@ -800,7 +800,7 @@ window.C01 = window.C01 || {};
       if (!S.qload[q.iv_no]) { S.qload[q.iv_no] = 1; loadPhotos(q.iv_no).then(function () { render(); }); }
       return [];
     }
-    return (ph.docs || []).filter(function (d) { return d && d.path; }).map(function (d) {
+    return (ph.docs || []).filter(function (d) { return d && d.path && !/(^|\/)thumbs\.db$|\.db$/i.test(d.path); }).map(function (d) {
       return { path: d.path, name: String(d.path).split('/').pop(), page: 1, ivdoc: true };
     });
   }
@@ -876,7 +876,7 @@ window.C01 = window.C01 || {};
         html += isPdf ? '<div class="c01-doc pdf">' : '<div class="c01-doc" style="width:' + w + 'px;transform:rotate(' + S.rot + 'deg)">';
         if (isImg) html += imgTag(f.path, 'c01-docimg', f.name);
         else if (isPdf) html += pdfTag(f.path, pdfPg);                 /* v0.3.2: 回転・拡大は pdf.js の描画で (CSS 回転なし) */
-        else html += '<p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）</p>';
+        else html += '<p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）— 上の「別タブで開く」で SharePoint で開けます' + (/\.xls[xm]?$/i.test(f.path) ? ' (Excel)' : '') + '</p>';
         if (f.bbox && f.bbox.length === 4 && isImg) {
           var bb = f.bbox;
           html += '<div class="c01-bbox" style="left:' + (bb[0] * 100) + '%;top:' + (bb[1] * 100) + '%;width:' + ((bb[2] - bb[0]) * 100) + '%;height:' + ((bb[3] - bb[1]) * 100) + '%"></div>';
