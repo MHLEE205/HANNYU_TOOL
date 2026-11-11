@@ -317,7 +317,12 @@ window.C01 = window.C01 || {};
           wait = r.has_docs === false ? '搬入票待ち' : r.has_photos === false ? '写真待ち' : photoMiss ? '写真待ち（' + photoMiss + '）' : '受信待ち';
           if (r.work_date && today && r.work_date < today) wait += ' · ' + Math.round((Date.parse(today) - Date.parse(r.work_date)) / 86400000) + '日';
         }
-        return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, wait: wait, openQ: openQ };
+        /* v0.3.10 (R7I Part D): 足りない半分が受信済みメール (保留 · 対象外 · 別の束) にありそう = 「受信中・候補あり」 (本当に未着とは分けて表示 · 催促しない) */
+        var cand = x.st === '受信中' && r.cand ? r.cand : null;
+        if (cand) wait = '受信中・候補あり' + (cand.level === 'bkg' ? '（BKG）' : '') + ' · ' + wait;
+        var candTitle = cand ? (cand.level === 'ct' ? '同じ CT' : '同じ BKG') + 'の' + (r.has_docs === false ? '搬入票' : '写真') + 'らしいファイルが受信済みメールにあります（' +
+          (cand.where || []).join(' / ') + (cand.recv && cand.recv.length ? ' · ' + cand.recv.join(' / ') : '') + '）— 未着ではない可能性 · 催促の対象外' : '';
+        return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, wait: wait, openQ: openQ, candTitle: candTitle };
       });
       var unarr = (iv.mail_missing || []).map(function (m) {
         return { kind: 'missing', key: iv.iv_no + '|missing|' + m.slot_guid, m: m, st: 'メール未着', vals: { work_date: m.work_date }, wait: 'メール未着' };
@@ -458,14 +463,14 @@ window.C01 = window.C01 || {};
         var hmark = function (f) { return x.human[f] ? ' <span class="c01-hm" title="確認済 ' + esc(x.human[f].by || '') + '">✓</span>' : ''; };
         var stCell = x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
           x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
-            '<span class="st-wait">' + esc(x.wait) + '</span>';
+            '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>';
         if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '');
         html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
           '</td><td>' + esc(md(v.work_date)) + '</td>' + cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
-          (photoAlert(photos) ? ' class="c01-ph-alert" title="写真 ' + photos + '枚（5枚以下・15枚以上）"' : '') + '>' +
+          (photoAlert(photos, rowVal(iv, r, 'packer').v) ? ' class="c01-ph-alert" title="' + esc(photoAlertText(photos, rowVal(iv, r, 'packer').v)) + '"' : '') + '>' +
           (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '">📷 ' + photos + '枚</button>' : '0枚') + '</td><td class="c-st">' + stCell + '</td></tr>';
       });
       html += '</tbody>';
@@ -874,8 +879,24 @@ window.C01 = window.C01 || {};
     var iv = ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0];
     return !iv || portOk(iv.pol);
   }
-  /* 写真枚数の色: 旧 実況表 (phase4_report.py · photo_count < 6 or >= 15) と同じ基準 */
-  function photoAlert(n) { n = +n || 0; return n <= 5 || n >= 15; }
+  /* 写真枚数の色 (v0.3.10 · 決定 #143 · 表示だけ): 業者ごとの通常範囲 (エンジン meta.photo_range = 10〜90% の 下 −2 · 上 +3 · 週 1 回計算) の外。
+     範囲のない業者 (台数 10 未満) · meta がない時 = 旧 実況表 (phase4_report.py · photo_count < 6 or >= 15) と同じ基準 */
+  function photoRange(pk) {
+    var pr = S.meta && S.meta.photo_range;
+    var r = pr && pr.packers && pk ? pr.packers[String(pk).toUpperCase()] : null;
+    return r && typeof r.lo === 'number' && typeof r.hi === 'number' ? r : null;
+  }
+  function photoAlert(n, pk) {
+    n = +n || 0;
+    var r = photoRange(pk);
+    if (r) return n < r.lo || n > r.hi;
+    return n <= 5 || n >= 15;
+  }
+  function photoRangeText(pk) {
+    var r = photoRange(pk);
+    return r ? 'この業者の通常 ' + r.lo + '〜' + r.hi + '枚の外' : '5枚以下・15枚以上';
+  }
+  function photoAlertText(n, pk) { return '写真 ' + (+n || 0) + '枚（' + photoRangeText(pk) + '）'; }
   function kindLabel(k) { return (KIND[k] && KIND[k].label) || k; }
   /* v0.3.3 (R7C): 確認・入力 の原本 — 項目のファイル (複数なら切り替え)。ファイルの指定が無い項目 (手入力 など) は その IV の書類 (photos/{IV}.json docs) を出す */
   function qFiles(q) {
@@ -941,7 +962,7 @@ window.C01 = window.C01 || {};
       var isPdfF = !isPhotos && /\.pdf$/i.test(f.path || '');
       var pdfPg = isPdfF ? (S.pdfPage[f.path] || f.page || 1) : 0;
       html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
-        (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph) ? ' c01-ph-alert' : '') + '" title="このコンテナの写真枚数（5枚以下・15枚以上は色付き）">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
+        (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph, rowVal(iv, qrow, 'packer').v) ? ' c01-ph-alert' : '') + '" title="' + esc('このコンテナの写真枚数（' + photoRangeText(rowVal(iv, qrow, 'packer').v) + 'は色付き）') + '">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
         (!isPhotos ? '<button class="c01-tool" id="z-out" aria-label="縮小">−</button><span class="z">' + S.zoom + '%</span><button class="c01-tool" id="z-in" aria-label="拡大">+</button>' +
           '<button class="c01-tool" id="rot" aria-label="回転">⟳</button>' +
           (isPdfF ? '<button class="c01-tool" id="pdf-prev" aria-label="前のページ">‹</button><span class="t2" id="pdf-pg">p.' + pdfPg + '</span><button class="c01-tool" id="pdf-next" aria-label="次のページ">›</button>' +
@@ -1188,8 +1209,8 @@ window.C01 = window.C01 || {};
   }
   function loadAll() {
     return Promise.all([S.src.getJson('jikkyou.json'), S.src.getJson('queue.json').catch(function () { return { items: [] }; }),
-      S.src.getJson('remind.json').catch(function () { return null; })]).then(function (r) {
-      S.jik = r[0]; S.queue = r[1]; S.remind = r[2]; S.lastLoad = new Date();
+      S.src.getJson('remind.json').catch(function () { return null; }), S.src.getJson('meta.json').catch(function () { return null; })]).then(function (r) {
+      S.jik = r[0]; S.queue = r[1]; S.remind = r[2]; S.meta = r[3]; S.lastLoad = new Date();
       return Promise.all(((S.jik && S.jik.ivs) || []).map(function (iv) { return loadPhotos(iv.iv_no); }));
     });
   }

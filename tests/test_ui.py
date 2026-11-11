@@ -81,11 +81,18 @@ def main():
     jj = json.loads(jp.read_text(encoding="utf-8"))
     for iv in jj["ivs"]:
         for r in iv["rows"]:
+            if r["ct"] == "TSTU0010630":          # v0.3.10 R7I Part D: 受信中・候補あり (엔진 jikkyou 줄 cand 형식 그대로)
+                r["cand"] = {"level": "ct", "n": 1, "where": ["保留:NO_BKG"], "recv": ["2026-11-06"]}
             if r["ct"] == "TSTU0010218":
                 HUMAN_SEAL = r["human"]["seal"]["value"]
                 r["seal"] = HUMAN_SEAL
                 r["info"] = ["human_vs_engine_diff(seal)"]
     jp.write_text(json.dumps(jj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    # v0.3.10 (R7I · #143): meta.photo_range — PACKER_A 만 범위 (9〜12) · 그 밖 업체 = 지금 기준 (≤5 · ≥15)
+    mp = root / "_data" / "meta.json"
+    mm = json.loads(mp.read_text(encoding="utf-8"))
+    mm["photo_range"] = {"computed_on": "2026-11-08", "rule": "test", "default": {"le": 5, "ge": 15}, "packers": {"PACKER_A": {"n": 20, "lo": 9, "hi": 12}}}
+    mp.write_text(json.dumps(mm, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     port = free_port()
     srv = subprocess.Popen([sys.executable, str(TOOL / "tools" / "serve_local.py"), "--root", str(root), "--port", str(port), "--today", "2026-11-08"],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -105,11 +112,27 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.9", page.title() == "LEENAI C-01 搬入票 v0.3.9", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.10", page.title() == "LEENAI C-01 搬入票 v0.3.10", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.9" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.10" in page.locator(".ln-hdr-ver").inner_text())
+            # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
+            page.wait_for_timeout(300)
+            pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
+                (t.querySelector('.c01-phbtn')||{}).innerText||'', !!t.querySelector('td.c01-ph-alert'), (t.querySelector('td.c01-ph-alert')||{}).title||''])""")
+            a8 = [x for x in pa if x[0] and "8枚" in x[1]]
+            a9 = [x for x in pa if x[0] and "9枚" in x[1]]
+            oth = [x for x in pa if not x[0] and x[1] and int(x[1].split()[-1].rstrip("枚")) > 5]
+            ok("#143 장수 색 = 업체 범위 (PACKER_A 8장 색 · 9장 색 없음 · 다른 업체 6~9장 색 없음)",
+               bool(a8) and all(x[2] and "通常 9〜12枚の外" in x[3] for x in a8) and bool(a9) and not any(x[2] for x in a9) and bool(oth) and not any(x[2] for x in oth),
+               (len(a8), len(a9), len(oth), pa[:3]))
+            cw = page.locator("tr.c01-row", has_text="TSTU0010630").locator(".st-wait")
+            cw0 = page.locator("tr.c01-row", has_text="TSTU0010706").locator(".st-wait")
+            ok("Part D 受信中・候補あり (cand 줄만 · title = 保留 위치 · 다른 受信中 줄 그대로)",
+               cw.count() == 1 and cw.inner_text().startswith("受信中・候補あり") and "保留:NO_BKG" in (cw.get_attribute("title") or "")
+               and "催促の対象外" in (cw.get_attribute("title") or "") and cw0.count() == 1 and "候補あり" not in cw0.inner_text(),
+               (cw.count() and cw.inner_text(), cw0.count() and cw0.inner_text()))
             ok("기본 테마 DARK", page.evaluate("document.documentElement.getAttribute('data-theme')") == "dark")
             ths = page.locator("#jikkyou-table thead th").all_inner_texts()
             ok("実況表 열 15 · 순서", ths == ["No", "CYカット", "Invoice番号", "品目", "CT番号", "シール番号", "正味重量", "風袋重量", "ベール数", "作業日", "条件", "圧縮業者",
@@ -128,7 +151,7 @@ def main():
             sts = set(page.eval_on_selector_all("tr.c01-row", "els => els.map(e => e.getAttribute('data-status') || 'メール未着')"))
             ok("줄 색 4종 (自動OK·確認済 초록 / 再確認 주황 / 受信中·メール未着 회색)", kinds == {"ok", "check", "wait"} and {"自動OK", "確認済", "再確認", "受信中", "メール未着"} <= sts, sorted(sts))
             ok("メール未着 줄", page.locator("tr.missing").count() == 3, page.locator("tr.missing").count())
-            # v0.3.9 (R7E Part C · D-42): No = 부킹마다 1 부터 · 줄 순서 = COMPASS 칸 seq · 칸 없는 줄 = 맨 아래 「未割当」 · 台数 = 칸 수 (이중 셈 0)
+            # v0.3.10 (R7E Part C · D-42): No = 부킹마다 1 부터 · 줄 순서 = COMPASS 칸 seq · 칸 없는 줄 = 맨 아래 「未割当」 · 台数 = 칸 수 (이중 셈 0)
             nos = page.evaluate("""() => [...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
                 [...tb.querySelectorAll('tr.c01-row td.c-no')].map(td => +td.textContent)])""")
             ok("D-42 No = 부킹마다 1, 2, 3 …", all(v == list(range(1, len(v) + 1)) for _, v in nos) and len(nos) == 5, nos)
