@@ -48,6 +48,7 @@ def sha16(s):
 
 
 PHOTO_LABELS = ["空コンテナ", "床", "積込 25%", "積込 50%", "積込 100%", "片扉", "両扉", "シール", "TARE 表示"]
+PHOTO_FILL = {"積込 100%": "full", "両扉": "door_closed", "片扉": "door_open"}   # v0.3.14: エンジン fill (5種判読) の見本
 COLORS = ["#3b4a5a", "#4a5a3b", "#5a3b4a", "#3b5a55", "#55503b", "#40405a", "#5a4a3b", "#3b3b3b", "#2f4f4f"]
 
 
@@ -145,7 +146,10 @@ def main():
             for k in range(nph):
                 rel = f"{iv}/{ct}/{k + 1:02d}_{PHOTO_LABELS[k % len(PHOTO_LABELS)].replace(' ', '')}.svg"
                 put(rel, svg_photo(f"{iv} / {ct}", PHOTO_LABELS[k % len(PHOTO_LABELS)], k))
-                ph.append({"path": rel, "no": k + 1, "label": PHOTO_LABELS[k % len(PHOTO_LABELS)], "size": 2000, "sha16": sha16(rel)})
+                it = {"path": rel, "no": k + 1, "label": PHOTO_LABELS[k % len(PHOTO_LABELS)], "size": 2000, "sha16": sha16(rel)}
+                if PHOTO_FILL.get(it["label"]):        # v0.3.14 (R7M C-1): エンジン out_photo_fill の fill (写真ごとの判読) · 無い写真は null
+                    it["fill"] = PHOTO_FILL[it["label"]]
+                ph.append(it)
             conts.append({"container_id": cid, "ct": ct, "photos": ph})
             # 確認・入力
             docrel = f"{iv}/搬入票/搬入票_{i + 1:02d}.svg"

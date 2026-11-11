@@ -106,6 +106,8 @@ def photo_tab_checks(page, ctx, shots):
     ok("E 사진 크게 · ← → 키 · 썸네일 줄 9", (p1, p2, p3, p4) == ("1 / 9", "2 / 9", "9 / 9", "3 / 9") and tab.locator(".c01-pv-th").count() == 9, [p1, p2, p3, p4])
     chips = tab.eval_on_selector_all(".c01-pv-th .c01-pv-kind", "els => els.map(e => e.textContent)")
     ok("E 사진 종류 표시 (가명 라벨 → 空コンテナ · 積込中 · FULL · 扉 · SEAL)", {"空コンテナ", "積込中", "FULL", "SEAL", "扉"} <= set(chips) and tab.locator(".c01-pv-bar .c01-pv-kind").count() == 1, chips)
+    # v0.3.14 (R7M C-1): エンジン fill (out_photo_fill) — 両扉 (fill door_closed) = 扉閉め · 片扉 (door_open) = 扉 · 積込 100% (full) = FULL
+    ok("E 엔진 fill → 扉閉め (両扉 · door_closed) · 片扉 door_open = 扉", chips.count("扉閉め") == 1 and chips.count("扉") == 1 and chips.count("FULL") == 1, chips)
     km = tab.evaluate("""() => [{label:'interior'},{label:'cargo'},{fill:'full',label:'cargo'},{fill:'door_closed',label:'door'},{label:'door'},{label:'seal'},{label:'cotecna'},{label:''},{label:null}]
       .map(p => C01.photoKind(p).text)""")
     ok("E 종류 = 엔진 kind (interior 空 · cargo 積込中 · fill full FULL · door_closed 扉閉め · door 扉 · SEAL · COTECNA · 없음 = 표시 없음)",
@@ -214,11 +216,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.13", page.title() == "LEENAI C-01 搬入票 v0.3.13", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.14", page.title() == "LEENAI C-01 搬入票 v0.3.14", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.13" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.14" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),

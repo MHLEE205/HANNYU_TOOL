@@ -2,6 +2,12 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.14 (2026-11-11) — 写真の種類に エンジンの写真ごとの判読 (FULL · 扉閉め) (R7M Part C-1 · C-3)
+- **写真の種類:** エンジン v0.5.40 `out_photo_fill` (기본 OFF) が `_data/photos/{IV}.json` の写真に `fill` (empty · partial · full · door_closed · door_open · closed · other · 無い時 null) を出す。
+  TOOL は v0.3.13 から `fill` を先に見る (full = FULL · door_closed = 扉閉め · door_open = 扉 · other / null = これまでどおり label) — 名前はそのまま合う (TOOL コードの変更なし)。
+- 시험 데이터 (`tools/make_fixtures.py`): 積込 100% = fill full · 両扉 = door_closed · 片扉 = door_open (가명). test_ui: 새 탭 종류 칩 扉閉め 1 · 扉 1 · FULL 1.
+- README 버전 표기 0.3.9 → 0.3.14 (C-3) · 버전 0.3.14.
+
 ## 0.3.13 (2026-11-11) — 写真 = 同じウィンドウの新しいタブ (R7L Part E · D-65)
 - **写真ページ `photo.html` (新しいタブ):** 実況表 「📷 n枚」 · CT · 要確認の横の窓 「写真」 · 同一コンテナ候補 「写真」 を押すと 同じウィンドウの新しいタブで開く
   (クリックの中で `window.open('', 名前)` · 3 番目の引数なし = ポップアップ窓にしない · 止められた時は 理由 + この画面で表示)。
