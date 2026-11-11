@@ -219,6 +219,15 @@ def main():
                                      "nw": ("正味重量 (kg)", "21300")}, faint=("bkg", "ct")))
     queue.append(dict(kind="未分類FAX", iv_no=None, ct=None, field=None, container_id=None, values={}, candidates=[],
                       files=[{"path": faxrel, "name": "FAX_0001.svg", "page": None, "bbox": None, "sha16": sha16(faxrel)}], note="保留", cy=None))
+    # v0.3.11 (R7J Part C): 保留中のメールの書類 (業者・IV 未定) — IV 候補 TST2611-01 · 実況表の IV 見出しに 「候補書類あり (1)」
+    holdrel = "_hold/0a1b2c3d4e5f/HOLD_0001.svg"
+    put(holdrel, svg_doc("発行者 不明 (保留)", {"bkg": ("BOOKING NO.", "BKG-TEST-0001"), "ct": ("CONTAINER NO.", "TSTU 1?0?75")}, faint=("ct",)))
+    queue.append(dict(kind="業者・IV未定", iv_no="TST2611-01", ct=None, field=None, container_id=None, values={}, candidates=["TST2611-01"],
+                      files=[{"path": holdrel, "name": "HOLD_0001.svg", "page": None, "bbox": None, "sha16": sha16(holdrel)}], note="PACKER_MISMATCH", cy=None,
+                      extra={"received_at": today.isoformat() + "T09:10:00+09:00", "hold_code": "PACKER_MISMATCH", "packer_guess": None}))
+    for iv_ in jik_ivs:
+        if iv_["iv_no"] == "TST2611-01":
+            iv_["hold_docs"] = 1
     items = []
     row_of = {r["container_id"]: r for iv_ in jik_ivs for r in iv_["rows"]}
     for q in queue:
@@ -236,7 +245,7 @@ def main():
         items.append({"queue_id": qid, "kind": q["kind"], "iv_no": q["iv_no"], "ct": q["ct"], "field": q["field"], "container_id": q["container_id"],
                       "values": q["values"], "candidates": q["candidates"], "files": q["files"], "note": q["note"], "resolved": None, "superseded": [],
                       "cy_cut": q["cy"], "cy_open": None, "issuer": None,
-                      "field_sources": fs, "field_source_text": {f: src_text(v) for f, v in fs.items()}})
+                      "field_sources": fs, "field_source_text": {f: src_text(v) for f, v in fs.items()}, **q.get("extra", {})})
     reason_text = {"SOURCE_MISMATCH": "搬入票・写真・Excel で値が違います",          # = 엔진 마스터 작업본 reason_text 초안과 같은 문장
                    "RANGE": "値が通常の範囲の外です（風袋・重量・ベール数）",
                    "MISSING_FIELD": "必要な項目（CT・シール・重量・ベール数）が足りません",
@@ -253,8 +262,9 @@ def main():
            "statuses": ["自動OK", "再確認", "受信中", "確認済"],
            "count": {"ivs": len(jik_ivs), "rows": sum(len(x["rows"]) for x in jik_ivs), "by_status": by_status,
                      "mail_missing": sum(len(x["mail_missing"]) for x in jik_ivs)}, "ivs": jik_ivs}
-    qd = {"schema_version": 1, "today": today.isoformat(), "kinds": ["値の違い", "手入力", "写真のCT", "未分類FAX"],
-          "count": {k: sum(1 for x in items if x["kind"] == k) for k in ("値の違い", "手入力", "写真のCT", "未分類FAX")}, "items": items, "open": len(items)}
+    qk = ["値の違い", "手入力", "写真のCT", "未分類FAX", "業者・IV未定"]
+    qd = {"schema_version": 1, "today": today.isoformat(), "kinds": qk,
+          "count": {k: sum(1 for x in items if x["kind"] == k) for k in qk}, "items": items, "open": len(items)}
     meta = {"schema_version": 1, "engine_version": "fixture", "engine_commit": None, "last_run": {"at": today.isoformat() + "T10:13:00+09:00", "status": "ok"},
             "next_run": None, "error": None, "generated_at": today.isoformat() + "T10:13:00+09:00", "today": today.isoformat(), "db_name": "fixture",
             "rows": {"containers": jik["count"]["rows"]}}
@@ -303,7 +313,10 @@ def main():
         book = {r["packer"]: {"to": [f"{r['packer'].lower()}@example.invalid"], "cc": [], "company": f"{r['packer']} 株式会社"}
                 for iv_ in jik_ivs for r in iv_["rows"] if r.get("packer") and r["packer"] != "PACKER_C"}
         drafts = remind_draft.from_ivs(jik_ivs, today, book)
-        (data / "remind.json").write_text(dump(remind_draft.tool_index(drafts, today)), encoding="utf-8")
+        ri = remind_draft.tool_index(drafts, today)
+        # v0.3.11 (R7J Part H): 「候補あり」 で催促から外した行 (エンジン remind.index_for の cand と同じ形)
+        ri["cand"] = {"TST2611-02": {"PACKER_B": {"ct": 1, "bkg": 0, "cts": [ct_no("TSTU", 352)]}}}
+        (data / "remind.json").write_text(dump(ri), encoding="utf-8")
     for rel, text in files.items():
         p = out / rel
         p.parent.mkdir(parents=True, exist_ok=True)

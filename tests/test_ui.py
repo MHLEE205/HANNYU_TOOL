@@ -52,6 +52,11 @@ def watch(page, tag):
 HUMAN_SEAL = None
 
 
+def fill_field(page, label, value):
+    """v0.3.11: 카드 안 값 확인 칸 (label = CT番号 · ベール数 …) 에 입력."""
+    page.locator(".c01-field[data-vq]", has_text=label).locator("input").fill(value)
+
+
 def open_local(page, url, staff=None):
     page.goto(url)
     page.wait_for_selector("#c01-open-server", timeout=20000)
@@ -112,11 +117,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.10", page.title() == "LEENAI C-01 搬入票 v0.3.10", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.11", page.title() == "LEENAI C-01 搬入票 v0.3.11", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.10" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.11" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -213,6 +218,8 @@ def main():
                and "回目" in page.locator(".c01-rmeta").first.inner_text() and page.locator(".c01-rpast").count() == 1, subj)
             ok("催促 본문 끝 = ✦ Powered by LEENAI Automation System", body.strip().endswith("✦ Powered by LEENAI Automation System"))
             ok("催促 送信 비활성 「下書きのみ」", rs.is_disabled() and "下書き" in rs.inner_text())
+            ok("v0.3.11 催促 미리보기 「候補書類あり — 催促前に確認」 (엔진 remind.json cand)",
+               page.locator(".c01-rcand").count() == 1 and "催促前に確認" in page.locator(".c01-rcand").inner_text())
             page.screenshot(path=str(shots / "remind_preview.png"))
             page.click("[data-close]")
             page.click("tbody[data-iv='TST2611-03'] [data-remind]")
@@ -309,7 +316,7 @@ def main():
             page.click("#tab-input")
             page.wait_for_selector(".c01-input")
             kinds_txt = page.locator(".c01-kinds .c01-chip").all_inner_texts()
-            ok("確認・入力 4종 + すべて", [k.split(" ")[0] for k in kinds_txt] == ["すべて", "値の違い", "手入力", "写真の", "未分類"] or len(kinds_txt) == 5, kinds_txt)
+            ok("確認・入力 종류 칩 = すべて · 4종 · 業者・IV 未定 · 完了", [k.split(" ")[0] for k in kinds_txt] == ["すべて", "値の違い", "手入力", "写真の", "未分類", "業者・IV", "完了"], kinds_txt)
             page.screenshot(path=str(shots / "input_dark.png"), full_page=True)
             # v0.3.8 (R7D Part U-3): 판단 버튼 = 오른쪽 패널 맨 위 (항목 제목 바로 아래) · 모든 종류 같은 위치
             pos_ok = []
@@ -320,11 +327,13 @@ def main():
                     pos_ok.append((kd, page.evaluate("""() => { const h = document.querySelector('.c01-form .c01-form-h'); const a = h && h.nextElementSibling;
                       return !!(a && a.classList.contains('c01-form-a') && a.querySelector('#q-submit') && a.querySelector('#q-skip')
                         && a.getBoundingClientRect().top < document.querySelector('.c01-form .c01-form-b').getBoundingClientRect().top); }""")))
-            ok("U-3 판단 버튼 위치 = 제목 바로 아래 (STAFF_A 담당 港 3종 · 手入力 은 아래 全港 에서)", len(pos_ok) == 3 and all(v for _, v in pos_ok), pos_ok)
+            ok("U-3 판단 버튼 위치 = 제목 바로 아래 (STAFF_A 담당 港 · 끝난 値の違い 카드는 목록에서 빠짐 (v0.3.11) · 手入力 은 아래 全港 에서)",
+               len(pos_ok) >= 2 and all(v for _, v in pos_ok), pos_ok)
             page.click(".c01-kinds [data-kind='未分類FAX']")
-            ok("U-3 当社案件ではない 도 위 (未分類FAX)", page.locator(".c01-form-a #q-notours").count() == 1)
+            ok("U-3 「搬入票ではない」 도 위 (未分類FAX · 문구 바뀜)", page.locator(".c01-form-a #q-notours").count() == 1
+               and page.locator("#q-notours").inner_text() == "搬入票ではない")
             page.click(".c01-kinds [data-kind='all']")
-            page.click(".c01-kinds [data-kind='値の違い']")
+            page.click(".c01-kinds [data-kind='done']")         # v0.3.11: 위에서 확인한 シール 카드 = 完了
             items = page.locator(".c01-item")
             for i in range(items.count()):
                 if "シール" in items.nth(i).inner_text():
@@ -347,8 +356,12 @@ def main():
                     target = i
             items.nth(target).click()
             dmsg = []
+            ok("v0.3.11 Part A: 같은 컨테이너 手入力 2칸 (ベール数 · CT番号) = 카드 1장 · 입력 2칸", page.locator(".c01-field[data-vq]").count() == 2,
+               page.locator(".c01-field[data-vq]").count())
+            fill_field(page, "ベール数", "23")
+            ok("v0.3.11 Part B: 「搬入票ではない」 = 手入力 카드에도", page.locator("#q-notours").count() == 1 and page.locator("#q-notours").inner_text() == "搬入票ではない")
             page.once("dialog", lambda dg: (dmsg.append(dg.message), dg.dismiss()))
-            page.fill("#q-in", "TSTU0000015")
+            fill_field(page, "CT番号", "TSTU0000015")
             page.click("#q-submit")
             page.wait_for_timeout(300)
             err = page.locator("#q-err").inner_text() if page.locator("#q-err").count() else ""
@@ -360,17 +373,14 @@ def main():
             ovr = [x for x in actions(root) if x["action"] == "manual_input" and x["field"] == "ct"]
             ok("#109 ③ 확인 = 저장 (manual_input · override CT_CHECKDIGIT_OVERRIDE)", len(ovr) == 1 and ovr[0]["value"] == "TSTU0000015"
                and ovr[0].get("override") == ["CT_CHECKDIGIT_OVERRIDE"], ovr)
-            # 手入力 bales
+            # 手入力 bales (같은 카드 · 같은 「確認して次へ」 로 함께 저장)
+            ok("手入力 bales → manual_input 23 (같은 카드 한 번에)", any(x["action"] == "manual_input" and x["field"] == "bales" and x["value"] == 23 for x in actions(root)))
             page.click(".c01-kinds [data-kind='手入力']")
-            items = page.locator(".c01-item:not(.done)")
-            for i in range(items.count()):
-                if "ベール数" in items.nth(i).inner_text():
-                    items.nth(i).click()
-                    break
-            page.fill("#q-in", "23")
-            page.click("#q-submit")
-            page.wait_for_timeout(300)
-            ok("手入力 bales → manual_input 23", any(x["action"] == "manual_input" and x["field"] == "bales" and x["value"] == 23 for x in actions(root)))
+            ok("v0.3.11 Part B: 끝난 카드는 목록에서 빠짐 (手入力 칩)", not any("ベール数" in t for t in page.locator(".c01-item").all_inner_texts()),
+               page.locator(".c01-item").all_inner_texts())
+            page.click(".c01-kinds [data-kind='done']")
+            ok("v0.3.11 Part B: 「完了」 칩 = 끝난 카드가 다시 보임", any("ベール数" in t for t in page.locator(".c01-item.done").all_inner_texts()),
+               page.locator(".c01-item").all_inner_texts())
             # 先勝ち: 다른 사람이 먼저 (파일 직접 — 다른 창 흉내) → polling 뒤 「他の人が先に確認しました」
             q = json.loads((root / "_data" / "queue.json").read_text(encoding="utf-8"))
             tw = next(x for x in q["items"] if x["kind"] == "値の違い" and x["field"] == "t_w")
@@ -382,6 +392,8 @@ def main():
             page.evaluate("C01.app.tick()")
             page.wait_for_timeout(500)
             page.click(".c01-kinds [data-kind='値の違い']")
+            ok("v0.3.11: 다른 사람이 끝낸 카드도 목록에서 빠짐", not any("風袋重量" in t for t in page.locator(".c01-item").all_inner_texts()))
+            page.click(".c01-kinds [data-kind='done']")
             items = page.locator(".c01-item")
             for i in range(items.count()):
                 if "風袋重量" in items.nth(i).inner_text():
@@ -404,6 +416,50 @@ def main():
             page.click("#q-submit")
             page.wait_for_timeout(300)
             ok("未分類FAX → link_fax (IV 대문자)", any(x["action"] == "link_fax" and x["iv"] == "TST2611-01" for x in actions(root)))
+            # v0.3.11 Part B: 「搬入票ではない」 (値の違い 카드) → 목록에서 빠짐 → 完了 → 「元に戻す」 → 다시 나옴
+            page.click(".c01-kinds [data-kind='all']")
+            n_before = page.locator(".c01-item").count()
+            page.click(".c01-kinds [data-kind='業者・IV未定']")
+            page.locator(".c01-item").first.click()
+            dl2 = []
+            page.once("dialog", lambda dg: (dl2.append(dg.message), dg.accept()))
+            page.click("#q-notours")
+            page.wait_for_timeout(400)
+            nh = [x for x in actions(root) if x["action"] == "not_hannyuhyo"]
+            ok("「搬入票ではない」 (業者・IV 未定) = 확인창 → not_hannyuhyo 1 (sha16 · queue_id)", len(dl2) == 1 and "搬入票ではない" in dl2[0] and len(nh) == 1
+               and nh[0]["value"]["sha16"] and nh[0]["queue_id"], nh)
+            page.click(".c01-kinds [data-kind='all']")
+            ok("「搬入票ではない」 카드 = 목록에서 빠짐", page.locator(".c01-item").count() == n_before - 1, [n_before, page.locator(".c01-item").count()])
+            page.click(".c01-kinds [data-kind='done']")
+            items = page.locator(".c01-item.done")
+            hit = None
+            for i in range(items.count()):
+                if "搬入票ではない" in items.nth(i).inner_text():
+                    hit = i
+            ok("完了 칩 = 「搬入票ではない」 카드 표시", hit is not None, items.all_inner_texts())
+            if hit is not None:
+                items.nth(hit).click()
+                page.click("#q-undo")
+                page.wait_for_timeout(400)
+                ud = [x for x in actions(root) if x["action"] == "undo"]
+                ok("「元に戻す」 → undo 1 (value.action_id = not_hannyuhyo · queue_id null)", len(ud) == 1 and ud[0]["value"]["action_id"] == nh[0]["action_id"]
+                   and ud[0]["queue_id"] is None, ud)
+                page.click(".c01-kinds [data-kind='all']")
+                ok("「元に戻す」 뒤 카드가 다시 나옴", page.locator(".c01-item").count() == n_before, [n_before, page.locator(".c01-item").count()])
+            # v0.3.11 Part C: 業者・IV 未定 (보류 메일 서류)
+            page.click(".c01-kinds [data-kind='業者・IV未定']")
+            page.locator(".c01-item").first.click()
+            ok("業者・IV 未定 카드 = 보류 이유 · 候補 IV · 「搬入票ではない」 · 확인 버튼 잠김", page.locator(".c01-hold").count() == 1
+               and "業者が合いません" in page.locator(".c01-hold").inner_text() and page.locator("#q-notours").count() == 1 and page.locator("#q-submit").is_disabled())
+            # v0.3.11 Part C: 実況表 IV 머리 「候補書類あり (1)」 → 確認・入力 (그 IV 로 거름)
+            page.click("#tab-main")
+            hl = page.locator("[data-holdiv='TST2611-01']")
+            ok("実況表 IV 머리 「候補書類あり (1)」", hl.count() == 1 and "候補書類あり (1)" in hl.inner_text())
+            if hl.count():
+                hl.click()
+                page.wait_for_selector(".c01-input")
+                ok("候補書類あり → 確認・入力 「業者・IV 未定」 · IV 거름 표시", page.locator(".c01-qiv").count() == 1 and page.locator(".c01-item").count() == 1)
+                page.click("#qiv-clear")
             # 실況표 で 確認済 · 確認・入力 바지
             page.click("#tab-main")
             # _actions JSON = 엔진 스키마

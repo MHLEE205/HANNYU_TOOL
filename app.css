@@ -234,3 +234,14 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-qfiles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; }
 .c01-pdfmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 12px; }
 .c01-pdf[data-fallback] { display: block; width: 640px; }
+/* v0.3.11 (R7J): カードの項目タブ · 業者・IV 未定 · IV 絞り込み · 催促 候補あり · CT ✗ · 完了チップ */
+.c01-csecs { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px 0; }
+.c01-csecs .c01-chip.done { opacity: .7; }
+.c01-hold { display: grid; gap: 6px; padding: 8px 0; }
+.c01-hold .k, .c01-qiv .t2 { color: var(--c-text-2, inherit); margin-right: 6px; }
+.c01-qiv { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
+.c01-rcand { border-left: 3px solid var(--c-photo, #c80); padding-left: 8px; }
+.c01-bad { color: var(--c-diff, #c00); font-weight: 700; }
+.c01-chip-done { margin-left: auto; }
+.c01-holdlink { white-space: nowrap; }
+
