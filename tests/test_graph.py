@@ -163,7 +163,7 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.15", page.title() == "LEENAI C-01 搬入票 v0.3.15", page.title())
+            ok("탭 제목 v0.3.16", page.title() == "LEENAI C-01 搬入票 v0.3.16", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -306,6 +306,36 @@ def main():
             p2.wait_for_selector(".c01-orig [data-pdf][data-fallback] iframe", timeout=15000)
             ok("pdf.js 없음 → iframe (blob) 로 물러남", (p2.locator(".c01-orig iframe").get_attribute("src") or "").startswith("blob:"))
             p2.close()
+            # v0.3.16 (R7O Part D): 担当者 = 職員マスター (staff) 이름 · pol_staff 열 = staff (担当) · assist (補助) · 마스터에 없으면 「職員マスター未登録」
+            for case, (um, uc, want, ports_ok) in {"master": ("staff.b@example.invalid", "", "職員B", True),
+                                                   "code": ("other@example.invalid", "STAFF_B", "職員B", True),
+                                                   "none": ("nobody@example.invalid", "", "職員マスター未登録", False)}.items():
+                p3 = page.context.new_page()
+                p3.route("https://graph.microsoft.com/**", make_handler(root))
+                p3.goto(f"http://127.0.0.1:{port}/")
+                p3.wait_for_selector("#ln-splash", timeout=20000)
+                p3.evaluate(STUB, staff)
+                p3.evaluate("""([um, uc]) => {
+                  Object.defineProperty(LEENAI, 'user', { get: () => ({ name: 'MS DISPLAY NAME', email: um, staffCode: uc }), configurable: true });
+                  LEENAI.STAFF = [{ name: 'COMMON LIST NAME', email: 'staff.b@example.invalid', staffCode: 'STAFF_B' }];
+                  LEENAI.master.get = async (n) => {
+                    if (n === 'pol_staff') return [{ pol: 'TOKYO', staff: 'STAFF_A', assist: 'STAFF_B' }, { pol: 'YOKOHAMA', staff: 'STAFF_B', assist: '' }];
+                    if (n === 'staff') return [{ code: 'STAFF_A', name_ja: '職員A', name_en: 'STAFF A', email: 'staff.a@example.invalid', active: true },
+                                               { code: 'STAFF_B', name_ja: '職員B', name_en: 'STAFF B', email: 'Staff.B@example.invalid', active: true }];
+                    throw new Error('x');
+                  };
+                }""", [um, uc])
+                p3.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; C01.app.start(new C01.sources.Graph())")
+                p3.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
+                me = p3.locator("#me-name").inner_text()
+                body = p3.locator("body").inner_text()
+                cond = want in me and "MS DISPLAY NAME" not in me and "COMMON LIST NAME" not in me
+                if ports_ok:
+                    cond = cond and "自分の担当（TOKYO · YOKOHAMA）" in body
+                else:
+                    cond = cond and "c01-warn" in (p3.locator("#me-name").get_attribute("class") or "")
+                ok(f"v0.3.16 担当者 = 職員マスター ({case}) · pol_staff staff/assist", cond, [me, body[:200]])
+                p3.close()
             errs = [e for e in RES["console_errors"] if not ("Failed to load resource" in e and ("404" in e or "409" in e or "ERR_FAILED" in e))]
             ok("콘솔 오류 0 (예상한 404 · 409 제외)", not errs, errs[:5])
             br.close()

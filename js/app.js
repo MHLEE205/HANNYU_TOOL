@@ -256,8 +256,9 @@ window.C01 = window.C01 || {};
     var items = S.staff.items || [];
     var mine = [], star = false;
     items.forEach(function (it) {
-      var main = it.main || it['担当'] || '', sub = it.sub || it['補助'] || '';
-      var hit = [main, sub].some(function (x) { return x && (x === S.me.code || x === S.me.email); });
+      /* v0.3.16 (R7O Part D): 共通マスター pol_staff の列 = staff (担当) · assist (補助) — 前は main/sub だけ見ていて 「自分の担当（なし）」 */
+      var who = [].concat(it.staff || it.main || it['担当'] || [], it.assist || it.sub || it['補助'] || []);
+      var hit = who.some(function (x) { return x && (x === S.me.code || x === S.me.email); });
       if (!hit) return;
       if (it.pol === '*') star = true; else mine.push(it.pol);
     });
@@ -557,7 +558,7 @@ window.C01 = window.C01 || {};
       '<span class="c01-flex"></span>' +
       (graphMode()
         ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spRoot) + '</span>' +
-          '<span class="c01-me" id="me-name">担当者 ' + esc(S.me ? S.me.name : '?') + '</span>'
+          '<span class="c01-me' + (S.me && S.me.unregistered ? ' c01-warn' : '') + '" id="me-name"' + (S.me && S.me.unregistered ? ' title="ログインしたメール (' + esc(S.me.email) + ') が職員マスター (staff) にありません — マスターの確認が必要"' : '') + '>担当者 ' + esc(S.me ? S.me.name : '?') + '</span>'
         : '<span class="c01-local" title="データは選んだフォルダから読んでいます (SharePoint には接続しません)">ローカルプレビュー · ' + esc(S.info ? S.info.label : '') + '</span>' +
           '<label class="c01-me">担当者 <select id="me-select" aria-label="担当者">' + staffOpts + '</select></label>'), 3);
     $('tab-main').onclick = function () { S.view = 'main'; render(); };

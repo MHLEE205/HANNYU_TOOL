@@ -230,19 +230,32 @@ C01.sources = (function () {
     });
   };
   Graph.prototype.getStaff = function () {
-    /* 担当港 = 共通マスター pol_staff (SharePoint) · 職員一覧 = LEENAI.STAFF (code = staffCode) */
+    /* 担当港 = 共通マスター pol_staff (SharePoint · 列 staff = 担当 · assist = 補助 · 値 = 職員コード)
+       職員 = 共通マスター staff (code · email · name_ja) — v0.3.16 (R7O Part D): LEENAI.STAFF (共通ファイルに書かれた一覧) ではなくマスター。
+       staff マスターが読めないときだけ LEENAI.STAFF */
     if (!(LEENAI.master && LEENAI.master.get)) return Promise.reject(new Error('マスターなし'));
-    return LEENAI.master.get('pol_staff').then(function (items) {
-      var staff = (LEENAI.STAFF || []).map(function (s) { return { code: s.staffCode, name: s.name, email: s.email }; });
-      return { staff: staff, items: items || [] };
+    var pol = LEENAI.master.get('pol_staff');
+    var sm = LEENAI.master.get('staff').then(function (x) { return x; }, function () { return null; });
+    return Promise.all([pol, sm]).then(function (r) {
+      var items = r[0] || [], rows = r[1];
+      var staff = (rows && rows.length)
+        ? rows.filter(function (s) { return s && s.code && s.active !== false; }).map(function (s) {
+          return { code: s.code, name: s.name_ja || s.name_en || s.code, name_en: s.name_en || '', email: s.email || '' };
+        })
+        : (LEENAI.STAFF || []).map(function (s) { return { code: s.staffCode, name: s.name, email: s.email }; });
+      return { staff: staff, items: items, from: (rows && rows.length) ? 'master' : 'common' };
     });
   };
   Graph.prototype.me = function (staff) {
+    /* v0.3.16 (R7O Part D): ログインした人 (LEENAI_COMMON の LEENAI.user = ヘッダーと同じ人) を職員マスターで探す
+       (メール → 職員コード の順) · 名前 = 職員マスターの名前。見つからなければ Microsoft の名前を使わず 「職員マスター未登録」 */
     var u = LEENAI.user || {};
     var em = String(u.email || '').toLowerCase();
-    var s = ((staff && staff.staff) || []).filter(function (x) { return em && String(x.email || '').toLowerCase() === em; })[0];
-    if (s) return { code: s.code, name: s.name || s.code, email: s.email };
-    return u.email ? { code: u.staffCode || u.email, name: u.name || u.email, email: u.email } : null;
+    var list = (staff && staff.staff) || [];
+    var s = list.filter(function (x) { return em && String(x.email || '').toLowerCase() === em; })[0] ||
+      list.filter(function (x) { return u.staffCode && x.code === u.staffCode; })[0];
+    if (s) return { code: s.code, name: s.name || s.code, email: s.email || u.email };
+    return u.email ? { code: u.staffCode || u.email, name: '職員マスター未登録', email: u.email, unregistered: true } : null;
   };
 
   return { LocalServer: LocalServer, Folder: Folder, Graph: Graph };

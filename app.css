@@ -37,6 +37,7 @@
 .c01-local { font-size: 11px; padding: 2px 8px; border: 1px dashed var(--warn); color: var(--warn); border-radius: 999px; }
 .c01-me { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 6px; }
 .c01-me select { background: var(--read); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font-family: inherit; }
+.c01-me.c01-warn { color: var(--c-diff); font-weight: 700; }   /* v0.3.16 R7O Part D: 職員マスター未登録 */
 
 .c01-wrap { max-width: 1840px; margin: 0 auto; padding: 16px 24px 16px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; }
 .c01-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
