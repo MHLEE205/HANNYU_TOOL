@@ -166,6 +166,209 @@ def photo_tab_checks(page, ctx, shots):
     ok("E 要確認 옆 창 写真 = 새 탭 (라이트박스 아님)", got and got[0].startswith("c01-photo-") and got[1] == 0, got)
 
 
+def h4_checks(page, jj):
+    """v0.3.15 (R7N Part H-4 · 결정 #166): 칸보다 줄이 많은 부킹 = 넘는 줄만 빨강 「COMPASS 枠外」 · 머리 「枠外 n」. 칸이 남은 未割当 = 그대로."""
+    over = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
+        [tb.querySelectorAll('tr.c01-row.over').length, (tb.querySelector('.c01-overhead') || {}).textContent || '',
+         [...tb.querySelectorAll('tr.c01-row')].map(tr => tr.classList.contains('over') ? 'o' : tr.classList.contains('unassigned') ? 'u' : 's').join('')]]))""")
+    want = {iv["iv_no"]: max(0, len(iv["rows"]) - len(iv["slots"])) for iv in jj["ivs"]}
+    ok("H-4 칸 넘는 줄 수 = 줄 − COMPASS 칸 (TST2611-02 = 4줄 · 3칸 → 1) · 다른 부킹 0", {k: v[0] for k, v in over.items()} == want and want["TST2611-02"] == 1, [over, want])
+    ok("H-4 머리 「枠外 1」 (그 부킹만)", over["TST2611-02"][1] == "枠外 1" and all(v[1] == "" for k, v in over.items() if k != "TST2611-02"), over)
+    ok("H-4 枠外 줄 = 그 부킹 맨 아래 · TST2611-04 (칸 남음) 未割当 2줄 = 빨강 아님", over["TST2611-02"][2].endswith("o") and over["TST2611-04"][2].count("u") == 2
+       and "o" not in over["TST2611-04"][2], over)
+    tr = page.locator("tbody[data-iv='TST2611-02'] tr.c01-row.over")
+    ok("H-4 枠外 줄 状況 칸 = 「COMPASS 枠外」 (未割当 표시 대신)", tr.locator(".c01-over").inner_text() == "COMPASS 枠外" and tr.locator(".c01-unassigned").count() == 0,
+       tr.inner_text())
+    hd = page.locator("tbody[data-iv='TST2611-02'] .c01-ivhead").inner_text()
+    ok("H-4 머리 n/N台 의 N = 3 (枠外 줄을 세지 않음)", re.search(r"[0-9]+/3台", hd) is not None, hd)
+    ok("H-4 범례 「COMPASS 枠外」", "COMPASS 枠外" in page.locator(".c01-legend").inner_text())
+    cols = []
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        cols.append(page.evaluate("""() => { const td = document.querySelector("tbody[data-iv='TST2611-02'] tr.c01-row.over td.c-st");
+            const n = document.querySelector("tbody[data-iv='TST2611-02'] tr.c01-row:not(.over) td.c-st"); const ch = document.querySelector('.c01-overhead');
+            const cs = getComputedStyle(td), rgb = s => (s.match(/[0-9.]+/g) || []).map(Number);
+            return [document.documentElement.getAttribute('data-theme'), rgb(cs.backgroundColor), cs.fontWeight, rgb(getComputedStyle(n).backgroundColor), rgb(getComputedStyle(ch).backgroundColor)]; }"""))
+    page.evaluate("document.documentElement.setAttribute('data-theme','dark')")
+    red = lambda c: len(c) >= 3 and c[0] > c[1] + 60 and c[0] > c[2] + 40   # noqa: E731
+    ok("H-4 4테마 모두 빨강 배경 · 굵은 글씨 · 「枠外」 표 빨강 (보통 줄과 다름)", all(red(c[1]) and int(c[2]) >= 700 and c[1] != c[3] and red(c[4]) for c in cols), cols)
+
+
+def r7n_checks(page, root, shots, engine):
+    """v0.3.15 (R7N): F 자동 갱신 · G-1 搬入票 없는 줄 手入力 · G-2 서류 후보 · G-3 회전 · G-4 修正."""
+    jp, qp = root / "_data" / "jikkyou.json", root / "_data" / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    jj, qj = json.loads(jt0), json.loads(qt0)
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.wait_for_timeout(200)
+    st = lambda k: page.evaluate(f"C01.state.{k}")   # noqa: E731
+    # ── G-1: 受信中 · has_docs false 줄의 手入力 = 카드 없음 (実況表 「搬入票待ち」) · 同一候補 줄 = 同一コンテナ候補 카드로
+    nod = [x for x in qj["items"] if x["kind"] == "手入力" and not x["files"] and x["iv_no"] == "TST2611-03"]
+    cts = [x["ct"] for x in nod]
+    ok("G-1 시험 데이터: TST2611-03 受信中 · has_docs false 줄 手入力 2 (파일 없음 · 1줄 同一候補)", len(nod) == 2, cts)
+    wait = [page.locator("tr.c01-row", has_text=c).locator(".st-wait").inner_text() for c in cts]
+    ok("G-1 実況表 = 「搬入票待ち」 그대로", all("搬入票待ち" in w for w in wait), wait)
+    page.click("#tab-input")
+    page.click(".c01-kinds [data-kind='all']")
+    texts = page.locator(".c01-item").all_inner_texts()
+    ok("G-1 確認・入力 = 그 두 줄의 手入力 카드 없음 (「原本を見て入力」 요구 0)", not any(c in t and "手入力" in t for c in cts for t in texts)
+       and page.locator(f"[data-q='{nod[0]['queue_id']}'], [data-q='{nod[1]['queue_id']}']").count() == 0, texts)
+    ok("G-1 同一候補 줄 = 「同一コンテナ候補」 카드는 그대로", any("同一コンテナ候補" in t for t in texts), texts)
+    ok("G-1 배지 숫자 = 카드 수 (숨긴 手入力 안 셈)", page.locator("#badge-open").inner_text() == str(page.locator(".c01-item").count()),
+       [page.locator("#badge-open").inner_text(), page.locator(".c01-item").count()])
+    # ── G-2-0: 원본 지정 없는 手入力 (줄과 연결된 서류 없음) = 「搬入票なし（待ち）」 · IV 서류 전체 표시 없음
+    iv2 = next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-02")
+    r3 = iv2["rows"][3]
+    q3 = next(x for x in qj["items"] if x["kind"] == "手入力" and x["container_id"] == r3["container_id"])
+
+    def sel(qid, kind="all"):
+        page.evaluate(f"C01.state.qkind = '{kind}'; C01.state.qsel = '{qid}'; C01.app.render()")
+        page.wait_for_timeout(400)
+
+    sel(q3["queue_id"])
+    to = page.locator(".c01-orig").inner_text()
+    ok("G-2-0 연결된 서류 없음 = 「搬入票なし（待ち）」 · IV 서류 표시 0 · 칩 0", "搬入票なし（待ち）" in to and "IV の書類" not in to
+       and page.locator(".c01-orig img, .c01-orig [data-pdf]").count() == 0 and page.locator(".c01-qfiles [data-qf]").count() == 0, to[:200])
+    page.screenshot(path=str(shots / "r7n_g20_nodoc.png"))
+    # ── G-2 후보: 엔진 rows[].doc_sha16 (다음 판) 이 있으면 어느 줄에도 안 쓰인 IV 서류만 「候補」 (1~2) · 自動OK·確認済 줄 서류는 뺌
+    ph2 = json.loads((root / "_data" / "photos" / "TST2611-02.json").read_text(encoding="utf-8"))
+    for k, r in enumerate(iv2["rows"][:3]):
+        r["doc_sha16"] = [ph2["docs"][k]["sha16"]]
+    r3["doc_sha16"] = []
+    jp.write_text(dump(jj), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    sel(q3["queue_id"])
+    chips = page.locator(".c01-qfiles [data-qf]")
+    ok("G-2 후보 = 어느 줄에도 안 쓰인 서류 1개만 「候補」 (다른 줄 서류 3개 뺌) · 이유 표시",
+       chips.count() == 1 and chips.first.get_attribute("data-cand") == "1" and "候補" in chips.first.inner_text() and ph2["docs"][3]["path"].split("/")[-1] in chips.first.inner_text()
+       and "どの行にも使われていない" in page.locator("#q-candnote").inner_text(), [chips.count(), page.locator(".c01-orig").inner_text()[:200]])
+    page.screenshot(path=str(shots / "r7n_g2_cand.png"))
+    for r in iv2["rows"]:
+        r["doc_sha16"] = [d["sha16"] for d in ph2["docs"]]          # 전부 쓰임 → 후보 0 → 搬入票なし
+    jp.write_text(dump(jj), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    sel(q3["queue_id"])
+    ok("G-2 남는 서류 없음 = 후보 0 · 「搬入票なし（待ち）」", page.locator(".c01-qfiles [data-qf]").count() == 0 and "搬入票なし（待ち）" in page.locator(".c01-orig").inner_text())
+    # 같은 컨테이너 다른 항목의 서류 = 보임 · 그중 自動OK 줄 (다른 컨테이너) 에 쓰인 서류 = 뺌
+    r0 = iv2["rows"][0]
+    d0 = {"path": ph2["docs"][0]["path"], "name": ph2["docs"][0]["path"].split("/")[-1], "page": 1, "bbox": None, "sha16": "a0" * 8}
+    d3 = {"path": ph2["docs"][3]["path"], "name": ph2["docs"][3]["path"].split("/")[-1], "page": 1, "bbox": None, "sha16": "a3" * 8}
+    jp.write_text(jt0, encoding="utf-8")
+    qj2 = json.loads(qt0)
+    qj2["items"].append(dict(q3, queue_id="b1" * 8, field="t_w", files=[d0, d3]))
+    qj2["items"].append(dict(q3, queue_id="b2" * 8, kind="値の違い", field="seal", container_id=r0["container_id"], ct=r0["ct"], files=[d0],
+                             resolved={"action": "confirm_value", "action_id": "fx-r7n-0001", "by": "staff.b@example.invalid", "at": "2026-11-08T09:00:00+09:00"}))
+    qp.write_text(dump(qj2), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    sel(q3["queue_id"])
+    oh = page.locator(".c01-orig-h").inner_text()
+    ok("G-2 같은 컨테이너 항목 서류만 · 自動OK 줄 (다른 컨테이너) 에 쓰인 서류는 뺌 (2 → 1)", page.locator(".c01-qfiles [data-qf]").count() == 0 and d3["name"] in oh and d0["name"] not in oh, oh)
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    # ── G-3: 엔진 rotation (files[].rotation 180) = 처음부터 바로 · ⟳ 는 그 위에 더함
+    fq = next(x for x in qj["items"] if x["kind"] == "未分類FAX")
+    sel(fq["queue_id"], "done")
+    if page.locator(".c01-orig .c01-doc").count() == 0:
+        sel(fq["queue_id"], "all")
+    tf = page.get_attribute(".c01-orig .c01-doc", "style") or ""
+    ok("G-3 뒤집힌 FAX (rotation 180) = 처음부터 180° · 「向き補正 180°」", "rotate(180deg)" in tf and page.locator("#q-autorot").inner_text() == "向き補正 180°", tf)
+    page.screenshot(path=str(shots / "r7n_g3_rot.png"))
+    page.click("#rot")
+    page.wait_for_timeout(200)
+    tf2 = page.get_attribute(".c01-orig .c01-doc", "style") or ""
+    ok("G-3 ⟳ = 엔진 각도 위에 90° 더함 (270°)", "rotate(270deg)" in tf2, tf2)
+    rots = page.evaluate("""() => [180, -90, 450, 45, '90'].map(v => C01.app._rot({rotation: v, page: null}))""")
+    rmap = page.evaluate("""() => [C01.app._rot({rotation: {'4': 180, '2': 90}, page: 1}), C01.app._rot({rotation: 270, page: 3})]""")
+    ok("G-3 rotation 형식 (수 · {쪽: 각도} · 90 배수만 · 음수/360 넘음 정리)", rots == [{"*": 180}, {"*": 270}, {"*": 90}, {}, {"*": 90}] and rmap == [{"4": 180, "2": 90}, {"3": 270}], [rots, rmap])
+    page.evaluate("C01.state.rot = 0; C01.app.render()")
+    # ── G-4: 모든 값 칸 「✎ 修正」 → manual_input (source 手入力 · 사람 값 우선) · 이미 사람 값 = 못 누름 (이유)
+    sel(q3["queue_id"])
+    ro = page.locator(".c01-form .c01-field.ro[data-ef]")
+    eds = page.locator(".c01-form .c01-field.ro[data-ef] .c01-edit")
+    ok("G-4 값 칸마다 「✎ 修正」 (CT · シール · 風袋 · ベール · 作業日 = 입력 중 아닌 칸 전부)", ro.count() == 5 and eds.count() == 5, [ro.count(), eds.count()])
+    ids0 = {x["action_id"] for x in actions(root)}
+    page.click(".c01-form .c01-field[data-ef='t_w'] .c01-edit")
+    page.wait_for_selector("#edit-in")
+    page.fill("#edit-in", "3,700")
+    page.click("#edit-save")
+    page.wait_for_timeout(500)
+    new = [x for x in actions(root) if x["action_id"] not in ids0]
+    ok("G-4 修正 → _actions manual_input (t_w 3700 · source 手入力 · queue_id 16자 · queue 에 없는 id → 엔진은 IV+CT 로 찾음)",
+       len(new) == 1 and new[0]["action"] == "manual_input" and new[0]["field"] == "t_w" and new[0]["value"] == 3700 and new[0]["source"] == "手入力"
+       and re.fullmatch(r"[0-9a-f]{16}", new[0]["queue_id"] or "") is not None and new[0]["queue_id"] not in {x["queue_id"] for x in qj["items"]} and new[0]["ct"] == r3["ct"], new)
+    fv = page.locator(".c01-form .c01-field[data-ef='t_w']")
+    ok("G-4 修正 뒤 = 새 값 · 「✓ 修正」 · 그 칸 ✎ 잠김 (사람 값 · 이유)", "3,700" in fv.inner_text() and "修正" in fv.locator(".c01-hm2").inner_text()
+       and fv.locator(".c01-edit").is_disabled() and "人が確認した値" in (fv.locator(".c01-edit").get_attribute("title") or ""), fv.inner_text())
+    sys.path.insert(0, engine)
+    from engine.output import schema_check  # noqa: E402
+    errs = schema_check.errors(new[0], schema_check.load("action")) if new else ["없음"]
+    ok("G-4 修正 action = 엔진 action.schema.json (오류 0)", not errs, errs)
+    page.click("#tab-main")
+    trw = page.locator(f"tr.c01-row[data-key*='{r3['ct']}']")
+    ok("G-4 実況表 줄도 사람 값 (3,700 ✓)", "3,700" in trw.inner_text() and trw.locator(".c01-hm").count() >= 1, trw.inner_text())
+    pk = page.locator("tbody[data-iv='TST2611-04'] tr.c01-row").first.get_attribute("data-key")
+    page.evaluate("k => { C01.state.sel = k; C01.app.render(); }", pk)       # 要確認 옆 창 (앞의 시험에서 再確認 줄은 모두 끝남)
+    page.wait_for_selector(".c01-side")
+    ok("G-4 要確認 옆 창 값 칸 ✎ 修正", page.locator(".c01-side .c01-edit").count() >= 3, page.locator(".c01-side .c01-edit").count())
+    page.evaluate("C01.state.sel = null; C01.app.render()")
+    # ── F: 자동 갱신 — 바뀐 것 없으면 다시 그리지 않음 · 스크롤 그대로 · 바뀐 줄만 · 입력 중이면 미룸
+    page.set_viewport_size({"width": 1440, "height": 520})
+    page.evaluate("C01.app.render()")
+    page.evaluate("C01.app.tick()")
+    wrap = "#jikkyou-wrap"
+    page.evaluate(f"document.querySelector('{wrap}').scrollTop = 260")
+    page.wait_for_timeout(100)
+    sc0 = page.evaluate(f"document.querySelector('{wrap}').scrollTop")
+    page.evaluate("document.querySelectorAll('tr.c01-row, tr.c01-row td').forEach(t => t._m = 1)")
+    n0 = st("renders")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(200)
+    same = page.evaluate("[...document.querySelectorAll('tr.c01-row, tr.c01-row td')].every(t => t._m === 1)")
+    ok("F 바뀐 것 없음 = 다시 그리지 않음 (render 0 · 줄 DOM 그대로 · 스크롤 그대로 · 「最終更新」 시각만)",
+       sc0 >= 200 and st("renders") == n0 and same and page.evaluate(f"document.querySelector('{wrap}').scrollTop") == sc0 and page.locator("#c01-upd").count() == 1,
+       [sc0, n0, st("renders"), same])
+    jj3 = json.loads(jt0)
+    iv4 = next(iv for iv in jj3["ivs"] if iv["iv_no"] == "TST2611-04")
+    rr = next(r for r in iv4["rows"] if r["status"] == "自動OK")
+    rr["n_w"] = (rr["n_w"] or 0) + 11
+    jp.write_text(dump(jj3), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(200)
+    um = page.evaluate("[...new Set([...document.querySelectorAll('tr.c01-row td')].filter(t => t._m !== 1).map(t => t.parentNode.dataset.key))]")
+    sc1 = page.evaluate(f"document.querySelector('{wrap}').scrollTop")
+    ok("F 다른 사람 변경 (1줄 값) = 그 줄의 칸만 바뀜 (다른 줄 DOM 그대로) · 스크롤 그대로", st("renders") == n0 + 1 and len(um) == 1 and rr["ct"] in um[0] and sc1 == sc0
+       and f"{rr['n_w']:,}" in page.locator(f"tr.c01-row[data-key*='{rr['ct']}']").inner_text(), [st("renders"), n0, um, sc1, sc0])
+    page.screenshot(path=str(shots / "r7n_f_scroll.png"))
+    # 입력 중 = 미룸 (값 · 커서 그대로) → 입력 칸을 비우고 나가면 그때 갱신
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.click("#tab-input")
+    sel(q3["queue_id"])
+    inp = page.locator(".c01-field[data-vq] input").first
+    inp.click()
+    inp.type("21500")
+    page.evaluate("document.querySelectorAll('.c01-item').forEach(t => t._m = 1)")
+    n1 = st("renders")
+    rr["n_w"] += 11
+    jp.write_text(dump(jj3), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(200)
+    foc = page.evaluate("document.activeElement && document.activeElement.value")
+    ok("F 입력 중 (커서 · 쓰던 값) = 갱신 미룸 (render 0 · 값 그대로 · 커서 그대로)", st("renders") == n1 and foc == "21500" and st("dirty") is True
+       and page.evaluate("[...document.querySelectorAll('.c01-item')].every(t => t._m === 1)"), [n1, st("renders"), foc, st("dirty")])
+    page.click(".c01-form-h")
+    page.wait_for_timeout(200)
+    ok("F 입력 칸에서 나가도 쓰던 값이 있으면 미룸 (저장 안 한 값 보호)", st("renders") == n1 and inp.input_value() == "21500", [n1, st("renders")])
+    inp.fill("")
+    page.click(".c01-form-h")
+    page.wait_for_timeout(300)
+    ok("F 쓰던 값을 지우고 나가면 그때 갱신 · 열린 카드 그대로", st("renders") == n1 + 1 and st("dirty") is False and st("qsel") == q3["queue_id"], [n1, st("renders"), st("qsel")])
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.click("#tab-main")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -216,11 +419,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.14", page.title() == "LEENAI C-01 搬入票 v0.3.14", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.15", page.title() == "LEENAI C-01 搬入票 v0.3.15", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.14" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.15" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -268,9 +471,9 @@ def main():
             ok("C 칸 없는 줄 = 「未割当」 표시 (TST2611-04 2줄 · 맨 아래)", un4 == [False, False, True, True], un4)
             tot = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
                 (tb.querySelector('.c01-ivhead').textContent.match(/([0-9]+)[/]([0-9]+)台/) || [])[2]]))""")
-            want_tot = {iv["iv_no"]: str(max(len(iv["slots"]), len(iv["rows"]) - min(sum(1 for r in iv["rows"] if not r.get("slot_guid")), len(iv["mail_missing"])) + len(iv["mail_missing"])))
-                        for iv in jj["ivs"]}
-            ok("C 台数 = 칸 수 기준 (未割当 · メール未着 이중 셈 0)", tot == want_tot and all(int(v) <= len(iv["slots"]) for iv in jj["ivs"] for k, v in tot.items() if k == iv["iv_no"]), [tot, want_tot])
+            want_tot = {iv["iv_no"]: str(len(iv["slots"])) for iv in jj["ivs"]}
+            ok("v0.3.15 H-4 台数 N = COMPASS 칸 수 그대로 (#166 · 줄이 칸보다 많아도 늘리지 않음)", tot == want_tot, [tot, want_tot])
+            h4_checks(page, jj)
             ms = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-03'] tr.c01-row")].map(tr => tr.classList.contains('missing') ? 'm' : (tr.classList.contains('unassigned') ? 'u' : 's'))""")
             ok("C メール未着 칸 줄 = 칸 자리 · 未割当 줄은 그 아래 (v0.3.12: 搬入票待ち 1 줄 칸 있음 · FAX 줄 未割当)", ms == ["m", "s", "u", "u"], ms)
             page.uncheck("#show-unarrived")
@@ -664,6 +867,7 @@ def main():
             ok("元に戻す → slot_change (전 칸으로 · slot_before = 지금 칸)", len(un) == 2 and un[-1]["value"]["slot_guid"] == r0["slot_guid"]
                and un[-1]["value"]["slot_before"] == free_guid, un[-1:])
             page.screenshot(path=str(shots / "slot_change.png"))
+            r7n_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

@@ -1,5 +1,6 @@
 /* ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL 画面 (試案のレイアウト · 色は LEENAI_COMMON テーマ トークン) */
 :root, [data-theme="dark"] {
+  --row-over: rgba(230, 40, 60, .55); --row-over-b: #ff4d5e; --row-over-t: #ffffff; --over-chip: #d91a2e;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: rgba(34, 160, 90, .16); --row-ok-b: rgba(34, 160, 90, .35);
   --row-check: rgba(224, 140, 30, .18); --row-check-b: rgba(224, 160, 88, .55);
   --row-wait: rgba(140, 150, 165, .12); --row-wait-b: rgba(140, 150, 165, .3);
@@ -7,14 +8,17 @@
   --c-diff: #f0a84a; --c-manual: #7fb0ff; --c-photo: #b4a2f0; --c-fax: #f08a7a; --ph-alert: rgba(255, 110, 130, .30);
 }
 [data-theme="light"] {
+  --row-over: #F8B4BC; --row-over-b: #C8102E; --row-over-t: #7A0010; --over-chip: #C8102E;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #E8F4EC; --row-ok-b: #C8E3D2; --row-check: #FDF1E2; --row-check-b: #F0D3AC; --row-wait: #F1F1EE; --row-wait-b: #E0E0DA;
   --row-sel: #FBE6CB; --ivhead: #E9EFF7; --ivhead-b: #D5DEEA; --c-diff: #8A4D00; --c-manual: #1E5AA8; --c-photo: #5B4A9E; --c-fax: #8A3B2E; --ph-alert: #FFC7CE;
 }
 [data-theme="leenai"] {
+  --row-over: #F4A9B2; --row-over-b: #B3001B; --row-over-t: #6E000E; --over-chip: #B3001B;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #DCEFD9; --row-ok-b: #B6D8B0; --row-check: #F6E6CC; --row-check-b: #E2C291; --row-wait: #E3EBE1; --row-wait-b: #C8D5C5;
   --row-sel: #F0D9B0; --ivhead: #D4E8D0; --ivhead-b: #A8C8A3; --c-diff: #7c3f00; --c-manual: #1f4f86; --c-photo: #4a3c86; --c-fax: #7a2e22; --ph-alert: #F6C3CA;
 }
 [data-theme="focus"] {
+  --row-over: #F2A6B0; --row-over-b: #A8001A; --row-over-t: #64000D; --over-chip: #A8001A;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #D9ECDF; --row-ok-b: #AFCFB9; --row-check: #F3E3CC; --row-check-b: #DDBF92; --row-wait: #DDE2EA; --row-wait-b: #BEC8D6;
   --row-sel: #EBD5B0; --ivhead: #CDD4E0; --ivhead-b: #9DAABE; --c-diff: #7c2d12; --c-manual: #1f3f70; --c-photo: #40357a; --c-fax: #7a2618; --ph-alert: #F2C2C8;
 }
@@ -279,3 +283,22 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-pv-msg { margin: 60px auto; max-width: 640px; padding: 24px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-size: 15px; text-align: center; }
 .c01-pv-wait, .c01-pv-load { color: var(--text2); }
 .c01-pv-foot { padding: 6px 18px 10px; font-size: 11px; color: var(--text2); text-align: right; }
+
+/* v0.3.15 (R7N Part H-4 · 決定 #166): COMPASS の枠の数を超えた行 = 赤 (背景 · 太字 · 「COMPASS 枠外」) · 見出し 「枠外 n」 — 4 テーマ */
+.c01-row.over td { background: var(--row-over) !important; color: var(--row-over-t); font-weight: 700; border-top: 1px solid var(--row-over-b); border-bottom: 1px solid var(--row-over-b); }
+.c01-row.over td .st-wait, .c01-row.over td .st-ok { color: var(--row-over-t); }
+.c01-over, .c01-overhead { display: inline-block; padding: 1px 7px; border-radius: 4px; background: var(--over-chip); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .02em; }
+.c01-overhead { font-size: 12px; }
+.lg.over { background: var(--row-over); border: 1px solid var(--row-over-b); }
+/* v0.3.15 (R7N Part G): 原本 = 行と結び付いた書類だけ · 候補 · 搬入票なし（待ち） · 向き補正 · ✎ 修正 */
+.c01-candchip { border-style: dashed !important; }
+.c01-candnote { margin: 0 10px 6px; padding: 4px 8px; border-left: 3px solid var(--c-diff); color: var(--c-diff); font-size: 12px; }
+.c01-nodoc { padding: 24px; font-size: 15px; font-weight: 700; color: var(--text2); }
+.c01-autorot { font-size: 11px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text2); }
+.c01-edit { margin-left: 6px; padding: 1px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--read); color: var(--text); cursor: pointer; font-family: inherit; }
+.c01-edit:hover:not([disabled]) { color: var(--c-diff); border-color: var(--c-diff); }
+.c01-edit[disabled] { opacity: .45; cursor: not-allowed; }
+.c01-editrow { display: flex; gap: 6px; align-items: center; }
+.c01-editrow input { flex: 1; min-width: 0; }
+.c01-hm2 { font-size: 11px; color: var(--ok); font-weight: 600; }
+.c01-pf-edit .c01-field { width: 100%; }

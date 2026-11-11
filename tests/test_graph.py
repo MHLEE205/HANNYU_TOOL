@@ -163,7 +163,7 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.14", page.title() == "LEENAI C-01 搬入票 v0.3.14", page.title())
+            ok("탭 제목 v0.3.15", page.title() == "LEENAI C-01 搬入票 v0.3.15", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -271,8 +271,9 @@ def main():
             page.click(f'[data-q="{man_q["queue_id"]}"]')
             page.wait_for_timeout(800)
             t_man = page.locator(".c01-orig").inner_text()
-            ok("手入力 (파일 지정 없음) = IV 서류 표시 · 칩", "IV の書類を表示" in t_man and page.locator(".c01-qfiles [data-qf]").count() >= 2
-               and page.locator(".c01-orig img.c01-docimg[src^='blob:']").count() == 1, t_man[:120])
+            # v0.3.15 (R7N G-2-0): IV 서류 전체 표시 없앰 → 같은 컨테이너의 다른 항목 (手入力 CT) 의 서류 1개만 · 칩 없음
+            ok("v0.3.15 手入力 (파일 지정 없음) = 같은 컨테이너 항목의 서류만 (IV 서류 전체 표시 없음 · 칩 0)", "IV の書類を表示" not in t_man and "搬入票_04" in t_man
+               and page.locator(".c01-qfiles [data-qf]").count() == 0 and page.locator(".c01-orig img.c01-docimg[src^='blob:']").count() == 1, t_man[:120])
             ok("手入力 「原本ファイルがありません」 없음", "原本ファイルがありません" not in t_man)
             page.screenshot(path=str(shots / "graph_r7c_ivdocs.png"))
             # 未分類 FAX: 새 것만 기본 목록 · 오래된 것은 숨김 + 「古い未分類 FAX も表示」
@@ -284,7 +285,11 @@ def main():
             page.click(f'[data-q="{fax_q["queue_id"]}"]')
             page.wait_for_selector(".c01-orig [data-pdf][data-drawn]", timeout=30000)
             ink4 = page.evaluate(INK, ".c01-orig [data-pdf] canvas")
-            ok("未分類 FAX PDF = canvas 에 그림 · 受信 날짜 표시", ink4 and ink4["L"] > 50 and "受信 11/07" in page.locator(".c01-form-h").inner_text(), ink4)
+            # v0.3.15 (R7N G-3): 가명 FAX = files[].rotation 180 → 처음부터 180° 돌려 그림 (가명 PDF 의 글자는 왼쪽 → 돌리면 오른쪽)
+            br4 = page.get_attribute(".c01-orig [data-pdf]", "data-base-rot")
+            ok("未分類 FAX PDF = canvas 에 그림 · 受信 날짜 표시 · v0.3.15 엔진 rotation 180 = 처음부터 돌려 그림 (글자 오른쪽 · 「向き補正 180°」)",
+               ink4 and ink4["R"] > 50 and ink4["L"] == 0 and br4 == "180" and "向き補正 180°" in page.locator(".c01-orig-h").inner_text()
+               and "受信 11/07" in page.locator(".c01-form-h").inner_text(), [ink4, br4])
             page.screenshot(path=str(shots / "graph_fax.png"))
             # pdf.js 를 못 읽으면 iframe 로 물러남 (새 창 · cdnjs 막음)
             p2 = page.context.new_page()

@@ -64,7 +64,7 @@ def svg_photo(title, label, idx):
 """
 
 
-def svg_doc(title, boxes, faint=()):
+def svg_doc(title, boxes, faint=(), upside_down=False):
     cells = []
     for i, (k, (label, val)) in enumerate(boxes.items()):
         x = 60 + (i % 2) * 560
@@ -81,7 +81,13 @@ def svg_doc(title, boxes, faint=()):
 {''.join(cells)}
 <text x="60" y="960" font-size="22" fill="#8a8a82" font-family="sans-serif">上記の通り搬入いたします。 （FIXTURE · 가명 데이터）</text>
 </svg>
-"""
+""" if not upside_down else _flip(svg_doc(title, boxes, faint))
+
+
+def _flip(svg):
+    """v0.3.15 (R7N G-3): 上下逆に届いた FAX の見本 (180° 回した絵) — エンジンの rotation 180 で正しい向きに戻る"""
+    head, rest = svg.split("\n", 1)
+    return head + '\n<g transform="rotate(180 600 500)">\n' + rest.rsplit("</svg>", 1)[0] + "</g>\n</svg>\n"
 
 
 def main():
@@ -198,6 +204,8 @@ def main():
         slots_n = max(len(rows), 3) if iv != "TST2611-05" else 2
         if iv == "TST2611-01":
             slots_n = len(rows) + 1                       # v0.2.2: 空き枠 1 つ (スロット変更の試験)
+        if iv == "TST2611-02":
+            slots_n = len(rows) - 1                       # v0.3.15 (R7N H-4 · #166): COMPASS 枠 3 < 行 4 → 枠外 1 行 (赤)
         mm = []
         if iv == "TST2611-03":
             mm = [{"slot_guid": sha16(iv + "m1") + "-slot", "work_date": d(1), "packer": packer, "plant": plant, "item": item, "incoterms": "CIF",
@@ -247,9 +255,10 @@ def main():
     # 未分類 FAX
     faxrel = "_fax_unmatched/2026-11-08/FAX_0001.svg"
     put(faxrel, svg_doc("発行者 不明", {"bkg": ("BOOKING NO.", "BKG-TEST-00?2"), "ct": ("CONTAINER NO.", "TSTU 10?0?5"), "seal": ("SEAL NO.", "TS00?0?7"),
-                                     "nw": ("正味重量 (kg)", "21300")}, faint=("bkg", "ct")))
+                                     "nw": ("正味重量 (kg)", "21300")}, faint=("bkg", "ct"), upside_down=True))
+    # v0.3.15 (R7N G-3): FAX は上下逆 → files[].rotation = 180 (時計回り · エンジンが判読の時に見つけた向き · TOOL が最初から正しい向きで表示)
     queue.append(dict(kind="未分類FAX", iv_no=None, ct=None, field=None, container_id=None, values={}, candidates=[],
-                      files=[{"path": faxrel, "name": "FAX_0001.svg", "page": None, "bbox": None, "sha16": sha16(faxrel)}], note="保留", cy=None))
+                      files=[{"path": faxrel, "name": "FAX_0001.svg", "page": None, "bbox": None, "sha16": sha16(faxrel), "rotation": 180}], note="保留", cy=None))
     # v0.3.11 (R7J Part C): 保留中のメールの書類 (業者・IV 未定) — IV 候補 TST2611-01 · 実況表の IV 見出しに 「候補書類あり (1)」
     holdrel = "_hold/0a1b2c3d4e5f/HOLD_0001.svg"
     put(holdrel, svg_doc("発行者 不明 (保留)", {"bkg": ("BOOKING NO.", "BKG-TEST-0001"), "ct": ("CONTAINER NO.", "TSTU 1?0?75")}, faint=("ct",)))
@@ -259,6 +268,18 @@ def main():
     for iv_ in jik_ivs:
         if iv_["iv_no"] == "TST2611-01":
             iv_["hold_docs"] = 1
+    # v0.3.15 (R7N Part G-1 · G-2-0): 搬入票の無い行の 手入力 (エンジンが出す形 · files なし)
+    #  TST2611-03 = 受信中 · has_docs false の 2 行 (1 行は 同一候補あり) → 確認・入力 のカードにしない (実況表 「搬入票待ち」 だけ)
+    #  TST2611-02 4 行目 = has_docs true だが 行と結び付いた書類なし → カードは出す · 原本 = 「搬入票なし（待ち）」 (IV の書類は出さない)
+    for iv_ in jik_ivs:
+        if iv_["iv_no"] == "TST2611-03":
+            for r, fld in zip(iv_["rows"][:2], ("seal", "n_w")):
+                queue.append(dict(kind="手入力", iv_no=iv_["iv_no"], ct=r["ct"], field=fld, container_id=r["container_id"], values={"搬入票": []}, candidates=[],
+                                  files=[], note=f"MISSING_FIELD({fld})", cy=iv_["cy_cut"]))
+        if iv_["iv_no"] == "TST2611-02":
+            r = iv_["rows"][3]
+            queue.append(dict(kind="手入力", iv_no=iv_["iv_no"], ct=r["ct"], field="n_w", container_id=r["container_id"], values={"搬入票": []}, candidates=[],
+                              files=[], note="MISSING_FIELD(n_w)", cy=iv_["cy_cut"]))
     items = []
     row_of = {r["container_id"]: r for iv_ in jik_ivs for r in iv_["rows"]}
     for q in queue:
