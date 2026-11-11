@@ -5,6 +5,7 @@
 사용: python tests/test_ui.py [--shots 폴더] [--engine C:\\LEENAI_C01_V2\\engine_r5] [--no-wait30]"""
 import argparse
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -67,6 +68,102 @@ def open_local(page, url, staff=None):
         page.wait_for_timeout(200)
 
 
+def photo_tab_checks(page, ctx, shots):
+    """v0.3.13 (R7L Part E · D-65): 사진 버튼 = 같은 창의 새 탭 (photo.html)."""
+    page.evaluate("""() => { const o = window.open; window.__oa = []; window.open = function () { window.__oa.push([].slice.call(arguments)); return o.apply(window, arguments); }; }""")
+    btn = page.locator("tbody[data-iv='TST2611-01'] .c01-phbtn").first
+    key = btn.get_attribute("data-photos")
+    iv_no, ct = key.split("|")[0], key.split("|")[1]
+    n_pages0 = len(ctx.pages)
+    with ctx.expect_page(timeout=10000) as pi:
+        btn.click()
+    tab = pi.value
+    watch(tab, "PHOTO")
+    tab.wait_for_selector(".c01-pv-th", timeout=10000)
+    tab.wait_for_function("() => document.querySelectorAll('.c01-pv-thimg').length === 9 && [...document.querySelectorAll('.c01-pv-thimg')].every(e => e.complete && e.naturalWidth > 0)", timeout=10000)
+    oa = page.evaluate("window.__oa")
+    name = tab.evaluate("window.name")
+    want = page.evaluate("k => C01.app.photoTabName(k)", key)
+    ok("E 사진 클릭 = 새 탭 (window.open 인자 2개 · 창 기능 문자열 없음 = 팝업 창 아님)", len(oa) == 1 and len(oa[0]) == 2 and oa[0][1] == want and len(ctx.pages) == n_pages0 + 1, oa)
+    ok("E 탭 이름 = c01-photo-{행 키 해시 8자리} · 주소 = photo.html?k=해시 (CT 를 이름·주소에 안 넣음)",
+       name == want and re.fullmatch(r"c01-photo-[0-9a-f]{8}", name) and re.search(r"/photo\.html\?k=[0-9a-f]{8}$", tab.url) and ct not in tab.url and ct not in name, [name, tab.url])
+    head = tab.locator("#pv-head").inner_text()
+    ok("E 머리 = IV · CT · 업체 · 장수", iv_no in head and ct in head and "PACKER_A" in head and "9枚" in head, head)
+    ok("E 탭 제목 = 写真 CT · IV", tab.title().startswith("写真 " + ct) and iv_no in tab.title(), tab.title())
+    srcs = tab.eval_on_selector_all(".c01-pv-thimg", "els => els.map(e => e.src.slice(0, 5))")
+    ok("E 사진 = 원래 탭에서 받은 Blob (새 탭 = 로그인·Graph 호출 0 · blob: URL)", srcs and all(x == "blob:" for x in srcs), srcs[:3])
+    ok("E 새 탭에 로그인 화면 · LEENAI_COMMON JS 없음", tab.locator("#ln-splash").count() == 0 and tab.evaluate("typeof window.LEENAI") == "undefined")
+    pos = lambda: tab.locator("#pv-pos").inner_text()
+    p1 = pos()
+    tab.keyboard.press("ArrowRight")
+    p2 = pos()
+    tab.keyboard.press("ArrowLeft")
+    tab.keyboard.press("ArrowLeft")
+    p3 = pos()
+    tab.click(".c01-pv-th[data-go='2']")
+    p4 = pos()
+    tab.wait_for_function("() => { const e = document.querySelector('.c01-pv-img'); return e && e.complete && e.naturalWidth > 0; }", timeout=5000)
+    ok("E 사진 크게 · ← → 키 · 썸네일 줄 9", (p1, p2, p3, p4) == ("1 / 9", "2 / 9", "9 / 9", "3 / 9") and tab.locator(".c01-pv-th").count() == 9, [p1, p2, p3, p4])
+    chips = tab.eval_on_selector_all(".c01-pv-th .c01-pv-kind", "els => els.map(e => e.textContent)")
+    ok("E 사진 종류 표시 (가명 라벨 → 空コンテナ · 積込中 · FULL · 扉 · SEAL)", {"空コンテナ", "積込中", "FULL", "SEAL", "扉"} <= set(chips) and tab.locator(".c01-pv-bar .c01-pv-kind").count() == 1, chips)
+    km = tab.evaluate("""() => [{label:'interior'},{label:'cargo'},{fill:'full',label:'cargo'},{fill:'door_closed',label:'door'},{label:'door'},{label:'seal'},{label:'cotecna'},{label:''},{label:null}]
+      .map(p => C01.photoKind(p).text)""")
+    ok("E 종류 = 엔진 kind (interior 空 · cargo 積込中 · fill full FULL · door_closed 扉閉め · door 扉 · SEAL · COTECNA · 없음 = 표시 없음)",
+       km == ["空コンテナ", "積込中", "FULL", "扉閉め", "扉", "SEAL", "COTECNA", "", ""], km)
+    th = []
+    for i in range(4):
+        th.append(tab.evaluate("document.documentElement.getAttribute('data-theme')"))
+        tab.screenshot(path=str(shots / f"photo_tab_{th[-1]}.png"))
+        tab.click("#pv-theme")
+    ok("E 새 탭 4 테마 (dark → light → leenai → focus)", th == ["dark", "light", "leenai", "focus"], th)
+    tab.evaluate("localStorage.setItem('leenai_theme','dark'); document.documentElement.setAttribute('data-theme','dark')")
+    page.evaluate("document.documentElement.setAttribute('data-theme','dark')")
+    # 같은 컨테이너 다시 = 새 탭 안 만듦 (그 탭으로)
+    tab.keyboard.press("ArrowRight")
+    n1 = len(ctx.pages)
+    btn.click()
+    page.wait_for_timeout(800)
+    ok("E 같은 컨테이너 다시 = 새 탭 없음 · 같은 탭 (다시 읽지 않음 · 1장으로)", len(ctx.pages) == n1 and not tab.is_closed() and pos() == "1 / 9"
+       and page.evaluate("window.__oa.length") == 2, [len(ctx.pages), n1, pos()])
+    # 다른 컨테이너 = 다른 탭
+    other = page.locator("tbody[data-iv='TST2611-01'] .c01-phbtn").nth(1)
+    with ctx.expect_page(timeout=10000) as pi2:
+        other.click()
+    tab2 = pi2.value
+    tab2.wait_for_selector(".c01-pv-th", timeout=10000)
+    ok("E 다른 컨테이너 = 다른 탭 (이름 다름)", tab2.evaluate("window.name") != name and tab2.evaluate("window.name").startswith("c01-photo-"))
+    tab2.close()
+    # 실況表에 없는 해시 · 원래 화면 없음
+    with ctx.expect_page(timeout=10000) as pi3:
+        page.evaluate("window.open('photo.html?k=00000000', 'c01-photo-test')")
+    t3 = pi3.value
+    t3.wait_for_selector(".c01-pv-msg", timeout=10000)
+    ok("E 없는 컨테이너 = 「今の実況表にありません」", "実況表にありません" in t3.locator(".c01-pv-msg").inner_text())
+    t3.close()
+    lone = ctx.new_page()
+    lone.goto(tab.url)
+    lone.wait_for_selector(".c01-pv-msg", timeout=10000)
+    ok("E 원래 화면 없이 열면 = 안내만 (로그인 시작 0)", "元の画面" in lone.locator(".c01-pv-msg").inner_text() and lone.locator("#ln-splash").count() == 0, lone.locator(".c01-pv-msg").inner_text())
+    lone.close()
+    tab.close()
+    # 要確認 옆 창 「写真」 = 같은 새 탭 방식
+    got = None
+    for i in range(page.locator(".c01-checkbtn").count()):
+        page.locator(".c01-checkbtn").nth(i).click()
+        page.wait_for_selector("#panel-photo", timeout=5000)
+        if page.locator("#panel-photo").is_enabled():
+            with ctx.expect_page(timeout=10000) as pi4:
+                page.click("#panel-photo")
+            t4 = pi4.value
+            t4.wait_for_selector(".c01-pv-th", timeout=10000)
+            got = [t4.evaluate("window.name"), page.locator(".c01-lb").count()]
+            t4.close()
+            page.evaluate("C01.state.sel = null; C01.app.render()")
+            break
+        page.evaluate("C01.state.sel = null; C01.app.render()")
+    ok("E 要確認 옆 창 写真 = 새 탭 (라이트박스 아님)", got and got[0].startswith("c01-photo-") and got[1] == 0, got)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -117,11 +214,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.12", page.title() == "LEENAI C-01 搬入票 v0.3.12", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.13", page.title() == "LEENAI C-01 搬入票 v0.3.13", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.12" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.13" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -272,8 +369,10 @@ def main():
             page.click("[data-close]")
             page.select_option("#me-select", "STAFF_A")
             page.wait_for_timeout(200)
-            # 사진 보기
-            page.locator("tbody[data-iv='TST2611-01'] .c01-phbtn").first.click()
+            # v0.3.13 (R7L Part E · D-65): 사진 = 같은 창의 새 탭 (photo.html) · 같은 컨테이너 = 그 탭 · Shift+클릭 = 라이트박스
+            photo_tab_checks(page, ctx, shots)
+            # 사진 보기 (Shift+클릭 = 라이트박스)
+            page.locator("tbody[data-iv='TST2611-01'] .c01-phbtn").first.click(modifiers=["Shift"])
             page.wait_for_selector(".c01-lb")
             c1 = page.locator(".c01-lb-h .c").inner_text()
             page.click("#lb-next")

@@ -255,3 +255,27 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-same th, .c01-same td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; }
 .c01-same thead th { color: var(--text2); font-weight: 600; }
 .c01-same tr.d td { color: var(--danger); font-weight: 700; }
+/* v0.3.13 (R7L Part E · D-65): 写真ページ (photo.html · 同じウィンドウの新しいタブ) — 4 テーマ = LEENAI_COMMON トークン */
+.c01-pv-body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--frame, var(--bg)); color: var(--text); font-family: var(--font, 'Segoe UI', 'Noto Sans JP', 'Yu Gothic UI', sans-serif); font-size: 13px; }
+.c01-pv-top { display: flex; align-items: center; gap: 12px; padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.c01-pv-sys { font-size: 12px; color: var(--text2); } .c01-pv-ver { font-size: 12px; color: var(--text3, var(--text2)); }
+.c01-pv-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; font-size: 15px; }
+.c01-pv-ct { font-size: 18px; font-weight: 700; } .c01-pv-iv, .c01-pv-pk { color: var(--text2); } .c01-pv-n { font-weight: 600; color: var(--accent); }
+.c01-pv-main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 10px 18px 0; }
+.c01-pv-bar { display: flex; align-items: center; gap: 10px; min-height: 30px; } .c01-pv-pos { font-weight: 600; } .c01-pv-name { color: var(--text2); }
+.c01-pv-stage-row { flex: 1 1 auto; display: flex; align-items: center; gap: 12px; min-height: 0; }
+.c01-pv-stage { flex: 1 1 auto; height: calc(100vh - 250px); min-height: 240px; border-radius: 10px; background: var(--surface2, var(--surface)); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.c01-pv-img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .1s; }
+.c01-pv-nav { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 26px; line-height: 1; }
+.c01-pv-strip { display: flex; gap: 8px; padding: 12px 0; overflow-x: auto; }
+.c01-pv-th { position: relative; flex: 0 0 auto; width: 96px; height: 72px; border-radius: 6px; border: 2px solid transparent; background: var(--surface2, var(--surface)); padding: 0; cursor: pointer; overflow: hidden; }
+.c01-pv-th.on { border-color: var(--accent); } .c01-pv-thimg { width: 100%; height: 100%; object-fit: cover; }
+.c01-pv-th .c01-pv-kind { position: absolute; left: 3px; bottom: 3px; font-size: 10px; padding: 0 5px; }
+.c01-pv-kind { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.c01-pv-kind.big { font-size: 14px; padding: 2px 12px; }
+.c01-pv-kind.k-empty { border-color: var(--c-manual); color: var(--c-manual); } .c01-pv-kind.k-partial { border-color: var(--c-diff); color: var(--c-diff); }
+.c01-pv-kind.k-full { border-color: var(--ok); color: var(--ok); } .c01-pv-kind.k-closed, .c01-pv-kind.k-door { border-color: var(--c-photo); color: var(--c-photo); }
+.c01-pv-kind.k-seal, .c01-pv-kind.k-cotecna { border-color: var(--c-fax); color: var(--c-fax); }
+.c01-pv-msg { margin: 60px auto; max-width: 640px; padding: 24px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-size: 15px; text-align: center; }
+.c01-pv-wait, .c01-pv-load { color: var(--text2); }
+.c01-pv-foot { padding: 6px 18px 10px; font-size: 11px; color: var(--text2); text-align: right; }

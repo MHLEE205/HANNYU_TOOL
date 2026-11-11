@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL 写真ページ (v0.3.13 · R7L Part E · D-65)
+     実況表・確認・入力 で 写真 を押すと 同じウィンドウの新しいタブで開く。データ・トークンはこのファイルに入れない:
+     写真は 元の画面 (実況表) から postMessage で受け取る (このタブではログインしない · Graph を呼ばない)。 -->
+<title>写真 — LEENAI C-01 搬入票</title>
+<link rel="stylesheet" href="https://mhlee205.github.io/LEENAI_COMMON/v1/leenai-common.css">
+<link rel="stylesheet" href="app.css">
+<script src="js/config.js"></script>
+<script src="js/photo.js"></script>
+</head>
+<body class="c01-pv-body">
+<header class="c01-pv-top">
+  <div class="ln-logo">LEEN<span>AI</span></div>
+  <span class="c01-pv-sys" id="pv-sys">C-01</span>
+  <div class="c01-pv-head" id="pv-head"><span class="c01-pv-wait">読み込み中…</span></div>
+  <span class="c01-flex"></span>
+  <span class="c01-pv-ver" id="pv-ver"></span>
+  <button class="ln-btn-ghost" id="pv-theme">🌙 ダーク</button>
+</header>
+<main class="c01-pv-main" id="pv-main"></main>
+<footer class="c01-pv-foot">← → で写真を切り替え · ホイールで拡大 · ✦ Powered by LEENAI Automation System</footer>
+</body>
+</html>

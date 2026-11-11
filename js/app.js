@@ -541,7 +541,7 @@ window.C01 = window.C01 || {};
         }
         var r = x.r, v = x.vals;
         var photos = r.photos || 0;
-        var ctCell = photos > 0 ? '<button class="c01-ctlink" data-photos="' + esc(x.key) + '" title="クリックで写真を表示">' + esc(v.ct || '') + '</button>' : '<span class="mono">' + esc(v.ct || '') + '</span>';
+        var ctCell = photos > 0 ? '<button class="c01-ctlink" data-photos="' + esc(x.key) + '" title="クリックで写真を新しいタブに表示 (Shift+クリック = この画面で表示)">' + esc(v.ct || '') + '</button>' : '<span class="mono">' + esc(v.ct || '') + '</span>';
         var hmark = function (f) { return x.human[f] ? ' <span class="c01-hm" title="確認済 ' + esc(x.human[f].by || '') + '">✓</span>' : ''; };
         var stCell = x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
           x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
@@ -556,7 +556,7 @@ window.C01 = window.C01 || {};
           '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null) +
           cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
           (photoAlert(photos, rowVal(iv, r, 'packer').v) ? ' class="c01-ph-alert" title="' + esc(photoAlertText(photos, rowVal(iv, r, 'packer').v)) + '"' : '') + '>' +
-          (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '">📷 ' + photos + '枚</button>' : '0枚') + '</td><td class="c-st">' + stCell + '</td></tr>';
+          (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '" title="新しいタブで写真を表示 (Shift+クリック = この画面で表示)">📷 ' + photos + '枚</button>' : '0枚') + '</td><td class="c-st">' + stCell + '</td></tr>';
       });
       html += '</tbody>';
     });
@@ -569,7 +569,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-port]').forEach(function (el) { el.onclick = function () { pickPort(el.getAttribute('data-port')); render(); }; });
     root.querySelectorAll('[data-filter]').forEach(function (el) { el.onclick = function () { var f = el.getAttribute('data-filter'); S.filter = S.filter === f ? 'all' : f; render(); }; });
     $('show-unarrived').onchange = function () { S.showUnarrived = !S.showUnarrived; render(); };
-    root.querySelectorAll('[data-photos]').forEach(function (el) { el.onclick = function () { openLightbox(el.getAttribute('data-photos'), 0); }; });
+    root.querySelectorAll('[data-photos]').forEach(function (el) { el.onclick = function (ev) { openPhotos(ev, el.getAttribute('data-photos'), 0); }; });
     root.querySelectorAll('[data-compass]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCompass(el.getAttribute('data-compass')); }; });
     root.querySelectorAll('[data-remind]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRemind(el.getAttribute('data-remind')); }; });
     root.querySelectorAll('[data-same]').forEach(function (el) {
@@ -884,7 +884,7 @@ window.C01 = window.C01 || {};
     hydrate(el);
     $('panel-close').onclick = $('panel-later').onclick = $('panel-bg').onclick = function () { S.sel = null; render(); };
     if (doc) $('panel-doc').onclick = function () { S.view = 'input'; S.qsel = qs[0].queue_id; S.sel = null; render(); };
-    if (firstPhoto) $('panel-photo').onclick = function () { openLightbox(S.sel, 0); };
+    if (firstPhoto) $('panel-photo').onclick = function (ev) { openPhotos(ev, S.sel, 0); };
     el.querySelectorAll('[data-pick]').forEach(function (b2) {
       b2.onclick = function () {
         var fd = b2.getAttribute('data-pick'), i = +b2.getAttribute('data-i');
@@ -926,6 +926,73 @@ window.C01 = window.C01 || {};
     var go = function () { S.lb = { key: key, idx: idx || 0 }; renderLightbox(); };
     if (f && !S.photos[f.iv.iv_no]) loadPhotos(f.iv.iv_no).then(go); else go();
   }
+  /* ── v0.3.13 (R7L Part E · D-65): 写真 = 同じウィンドウの新しいタブ (photo.html) ──
+     - クリックの中で window.open('', 名前) (ポップアップ窓にしない = 3 番目の引数なし · openTab と同じくクリックの中で先に開く)。
+       名前 = 'c01-photo-' + 行キーのハッシュ (CT そのものは タブ名 · アドレスに入れない) → 同じコンテナをもう一度押すと そのタブへ (新しいタブを作らない)
+     - 新しいタブはログインしない: LEENAI_COMMON のトークンはこのタブのメモリだけ (保存しない) → 写真はこのタブが読み (今と同じ Graph GET)、
+       Blob を postMessage で渡す (トークンは渡さない · 同じオリジンの photo.html だけに答える)
+     - Shift+クリック = これまでのライトボックス (この画面の上) */
+  function hkey(s) {
+    var h = 0x811c9dc5;
+    s = String(s);
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
+  function photoTabName(key) { return 'c01-photo-' + hkey(key); }
+  function keyByHash(h) {
+    var out = null;
+    ((S.jik && S.jik.ivs) || []).forEach(function (iv) { (iv.rows || []).forEach(function (r) { var k = rowKey(iv, r); if (!out && hkey(k) === h) out = k; }); });
+    return out;
+  }
+  function openPhotos(ev, key, idx) {
+    if (ev && ev.shiftKey) { if (ev.preventDefault) ev.preventDefault(); openLightbox(key, idx); return; }
+    var h = hkey(key);
+    var url = new URL('photo.html?k=' + h + (idx ? '&i=' + idx : ''), location.href).href;
+    var w = window.open('', photoTabName(key));
+    if (!w) { toast('ブラウザがポップアップを止めました — このサイトのポップアップを許可してください (この画面で表示します)', 'warn'); openLightbox(key, idx); return; }
+    var same = false;
+    try { same = /photo\.html$/.test(w.location.pathname) && w.location.search.indexOf('k=' + h) >= 0; } catch (e) { same = false; }
+    if (same) { try { w.postMessage({ t: 'c01-photo-go', k: h, i: idx || 0 }, msgOrigin()); } catch (e) { /* なし */ } }
+    else w.location.href = url;
+    try { w.focus(); } catch (e) { /* なし */ }
+    if (!S.photoTabs) S.photoTabs = {};
+    S.photoTabs[h] = w;
+  }
+  function msgOrigin() { return location.origin && location.origin !== 'null' ? location.origin : '*'; }
+  /* 写真タブ (photo.html) からの要求 → 見出し + 写真 (Blob) を順に返す */
+  function photoKindSrc(p) { return { label: p.label || '', fill: p.fill || '', kind: p.kind || '' }; }
+  function servePhotos(win, h) {
+    var send = function (m) { m.k = h; try { win.postMessage(m, msgOrigin()); } catch (e) { /* タブが閉じた */ } };
+    if (!S.jik) { send({ t: 'c01-photo-wait' }); return; }
+    var key = keyByHash(h);
+    if (!key) { send({ t: 'c01-photo-err', msg: 'このコンテナは今の実況表にありません — 実況表から開き直してください' }); return; }
+    var f = findRow(key);
+    (S.photos[f.iv.iv_no] ? Promise.resolve() : loadPhotos(f.iv.iv_no)).then(function () {
+      var d = photosOf(key) || { list: [] };
+      var list = d.list || [];
+      send({ t: 'c01-photo-head', head: { iv: f.iv.iv_no, ct: f.r.ct || '', packer: rowVal(f.iv, f.r, 'packer').v || '', plant: rowVal(f.iv, f.r, 'plant').v || '',
+        n: list.length, photos: list.map(function (p, i) { var o = photoKindSrc(p); o.no = p.no || i + 1; o.name = String(p.path || '').split('/').pop(); return o; }) } });
+      var next = 0;
+      function one() {
+        var i = next++;
+        if (i >= list.length) return Promise.resolve();
+        var rel = list[i].path;
+        var pu = isFolder() ? S.src.resolveUrl(rel) : Promise.resolve(S.src.fileUrl(rel));
+        return pu.then(function (u) {
+          if (!u) return send({ t: 'c01-photo-img', i: i, err: fileErrText(rel) });
+          return fetch(u).then(function (r) { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
+            .then(function (b) { send({ t: 'c01-photo-img', i: i, blob: b }); });
+        }).catch(function () { send({ t: 'c01-photo-img', i: i, err: fileErrText(rel) }); }).then(one);
+      }
+      return Promise.all([one(), one(), one()]);
+    });
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || typeof d !== 'object' || d.t !== 'c01-photo-req' || !e.source) return;
+    if (e.origin !== location.origin) return;                         /* 同じオリジン (この TOOL) の photo.html だけ */
+    servePhotos(e.source, String(d.k || '').replace(/[^0-9a-f]/g, '').slice(0, 8));
+  });
   function openLightboxList(title, list, idx) { S.lb = { title: title, list: list, idx: idx || 0 }; renderLightbox(); }
   function renderLightbox() {
     var el = $('c01-lb');
@@ -1285,7 +1352,7 @@ window.C01 = window.C01 || {};
     var ns = $('q-notsame');
     if (ns) ns.onclick = function () { sameAction(q, 'not_same'); };
     var sph = $('same-ph');
-    if (sph && q.same) sph.onclick = function () { var ivx = ivById(q.iv_no); if (ivx) openLightbox(rowKey(ivx, q.same.photo), 0); };
+    if (sph && q.same) sph.onclick = function (ev) { var ivx = ivById(q.iv_no); if (ivx) openPhotos(ev, rowKey(ivx, q.same.photo), 0); };
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
   }
   /* 写真の CT の候補: エンジンの candidates → 無ければ同じ IV の CT がある行 (この行を除く) */
@@ -1508,5 +1575,5 @@ window.C01 = window.C01 || {};
       $('c01-main').innerHTML = '<div class="c01-fatal"><b>データを読めませんでした</b><p>' + esc(e.message) + '</p><p>_data フォルダ (jikkyou.json · queue.json) があるフォルダを選んでください。</p></div>';
     });
   }
-  C01.app = { start: start, render: render, tick: tick, poll: poll };
+  C01.app = { start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName };
 })();

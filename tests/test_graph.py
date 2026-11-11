@@ -78,7 +78,8 @@ def make_handler(root, web="https://sp.example.invalid/view?spview=1"):
             if not p.is_file():
                 RES.setdefault("not_found", []).append(rel)
                 return route.fulfill(status=404, body="{}")
-            ct = "application/json" if p.suffix == ".json" else ("image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "application/octet-stream")
+            ct = "application/json" if p.suffix == ".json" else ("image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else
+                                                                   "image/svg+xml" if p.suffix.lower() == ".svg" else "application/octet-stream")   # v0.3.13: 가명 사진 (svg) 도 Graph 처럼 형식
             return route.fulfill(status=200, body=p.read_bytes(), headers={"Content-Type": ct})
         if request.method == "GET" and tail == "":                 # v0.3.3: 아이템 정보 (webUrl · 「別タブで開く」)
             if not p.exists():
@@ -162,7 +163,7 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.12", page.title() == "LEENAI C-01 搬入票 v0.3.12", page.title())
+            ok("탭 제목 v0.3.13", page.title() == "LEENAI C-01 搬入票 v0.3.13", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -181,6 +182,20 @@ def main():
             u2 = page.evaluate("new C01.sources.Graph().resolveUrl('NO_SUCH/x.jpg')")
             ok("없는 사진 = 빈 값 (오류 없이)", u2 == "", u2)
             page.screenshot(path=str(shots / "graph_jikkyou.png"))
+            # v0.3.13 (R7L Part E · D-65): 사진 = 새 탭 (photo.html) — 새 탭은 Graph 를 부르지 않고 (토큰 없음) 원래 탭이 읽은 Blob 을 받음
+            g_tab = []
+            page.context.on("request", lambda r: g_tab.append(r.url) if "graph.microsoft.com" in r.url and r.frame.page != page else None)
+            n_g0 = len(RES["graph_urls"])
+            with page.context.expect_page(timeout=15000) as pi_ph:
+                page.locator(".c01-phbtn").first.click()
+            ptab = pi_ph.value
+            ptab.wait_for_function("() => { const t = [...document.querySelectorAll('.c01-pv-thimg')]; return t.length > 0 && t.every(e => e.complete && e.naturalWidth > 0); }", timeout=20000)
+            n_ph = ptab.locator(".c01-pv-thimg").count()
+            ok("E graph: 사진 새 탭 = 원래 탭이 Graph 로 읽은 사진 (Blob) 표시 · 새 탭의 Graph 호출 0 · 로그인 0",
+               n_ph >= 1 and not g_tab and ptab.locator("#ln-splash").count() == 0 and ptab.evaluate("typeof window.LEENAI") == "undefined"
+               and len(RES["graph_urls"]) > n_g0, [n_ph, g_tab[:2], len(RES["graph_urls"]) - n_g0])
+            ptab.screenshot(path=str(shots / "graph_photo_tab.png"))
+            ptab.close()
             # _actions 쓰기 · 다시 쓰기 거부 · 읽기
             act = {"action_id": "agraphtest01", "at": "2026-11-08T10:00:00+09:00", "by": "staff.a@example.invalid", "action": "confirm_value"}
             r1 = page.evaluate("(a) => new C01.sources.Graph().writeAction(a).then(r => r.file, e => 'ERR ' + e.message)", act)

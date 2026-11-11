@@ -7,8 +7,8 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.12',
-  date: '2026-11-10',
+  version: '0.3.13',
+  date: '2026-11-11',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (DRY) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
 
