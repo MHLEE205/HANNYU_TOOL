@@ -117,11 +117,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.11", page.title() == "LEENAI C-01 搬入票 v0.3.11", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.12", page.title() == "LEENAI C-01 搬入票 v0.3.12", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.11" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.12" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -173,7 +173,7 @@ def main():
                         for iv in jj["ivs"]}
             ok("C 台数 = 칸 수 기준 (未割当 · メール未着 이중 셈 0)", tot == want_tot and all(int(v) <= len(iv["slots"]) for iv in jj["ivs"] for k, v in tot.items() if k == iv["iv_no"]), [tot, want_tot])
             ms = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-03'] tr.c01-row")].map(tr => tr.classList.contains('missing') ? 'm' : (tr.classList.contains('unassigned') ? 'u' : 's'))""")
-            ok("C メール未着 칸 줄 = 칸 자리 · 未割当 줄은 그 아래", ms == ["m", "u", "u"], ms)
+            ok("C メール未着 칸 줄 = 칸 자리 · 未割当 줄은 그 아래 (v0.3.12: 搬入票待ち 1 줄 칸 있음 · FAX 줄 未割当)", ms == ["m", "s", "u", "u"], ms)
             page.uncheck("#show-unarrived")
             ok("メール未着も表示 끄기 → 줄 없음", page.locator("tr.missing").count() == 0)
             page.check("#show-unarrived")
@@ -225,6 +225,8 @@ def main():
             page.click("tbody[data-iv='TST2611-03'] [data-remind]")
             page.wait_for_selector(".c01-rmd")
             ok("주소 없는 업체 = 「送信先未登録」", "送信先未登録" in page.locator(".c01-rmeta").first.inner_text())
+            ok("v0.3.12 催促 下書き 「候補あり — 確認してから送信」 (BKG 후보 줄도 대상 · D-55 (나))",
+               page.locator(".c01-rcand-bkg").count() == 1 and "確認してから送信" in page.locator(".c01-rcand-bkg").inner_text())
             page.click("[data-close]")
             # 담당 港 (#95)
             page.select_option("#me-select", "STAFF_A")
@@ -316,7 +318,7 @@ def main():
             page.click("#tab-input")
             page.wait_for_selector(".c01-input")
             kinds_txt = page.locator(".c01-kinds .c01-chip").all_inner_texts()
-            ok("確認・入力 종류 칩 = すべて · 4종 · 業者・IV 未定 · 完了", [k.split(" ")[0] for k in kinds_txt] == ["すべて", "値の違い", "手入力", "写真の", "未分類", "業者・IV", "完了"], kinds_txt)
+            ok("確認・入力 종류 칩 = すべて · 4종 · 業者・IV 未定 · 同一コンテナ候補 (v0.3.12) · 完了", [k.split(" ")[0] for k in kinds_txt] == ["すべて", "値の違い", "手入力", "写真の", "未分類", "業者・IV", "同一コンテナ候補", "完了"], kinds_txt)
             page.screenshot(path=str(shots / "input_dark.png"), full_page=True)
             # v0.3.8 (R7D Part U-3): 판단 버튼 = 오른쪽 패널 맨 위 (항목 제목 바로 아래) · 모든 종류 같은 위치
             pos_ok = []
@@ -461,6 +463,46 @@ def main():
                 ok("候補書類あり → 確認・入力 「業者・IV 未定」 · IV 거름 표시", page.locator(".c01-qiv").count() == 1 and page.locator(".c01-item").count() == 1)
                 page.click("#qiv-clear")
             # 실況표 で 確認済 · 確認・入力 바지
+            page.click("#tab-main")
+            # v0.3.12 (R7K Part G · #153): 作業日 = 搬入票 값 (검정) · 없으면 칸 COMPASS 예정일 (회색 · 오늘 이전 = 굵은 빨강) · 표시만
+            page.click("[data-port='all']")
+            page.wait_for_timeout(200)
+            t3 = "tbody[data-iv='TST2611-03']"
+            wp = page.locator(t3 + " .c01-wdplan")
+            ok("v0.3.12 Part G: 搬入票待ち 줄 작업일 = 칸 COMPASS 예정일 (어제 → 굵은 빨강 past)", wp.count() >= 1 and page.locator(t3 + " .c01-wdplan.past").count() >= 1
+               and "予定日" in (wp.first.get_attribute("title") or ""), wp.count())
+            t5 = "tbody[data-iv='TST2611-05']"
+            if not page.locator("#show-unarrived").is_checked():
+                page.click("#show-unarrived")
+                page.wait_for_timeout(200)
+            w5 = page.locator(t5 + " tr.missing .c01-wdplan")
+            ok("v0.3.12 Part G: メール未着 칸 작업일 = 회색 (앞날 = past 아님)", w5.count() >= 1 and page.locator(t5 + " tr.missing .c01-wdplan.past").count() == 0, w5.count())
+            ok("v0.3.12 Part G: 搬入票 작업일 있는 줄 = 그대로 (회색 표시 없음)", page.locator("tbody[data-iv='TST2611-01'] .c01-wdplan").count() == 0)
+            # v0.3.12 (R7K Part C · #150): 同一コンテナ候補 — 実況表 두 줄 배지 → 確認・入力 카드 (두 줄 값 나란히) → 「同じコンテナとして合わせる」 → 完了 → 元に戻す
+            sb = page.locator(t3 + " .c01-samebadge")
+            ok("v0.3.12 Part C: 実況表 두 줄에 「同一候補」", sb.count() == 2, sb.count())
+            ids_s = {x["action_id"] for x in actions(root)}
+            sb.first.click()
+            page.wait_for_selector(".c01-same")
+            ok("同一候補 카드 = 두 줄 값 나란히 (FAX · 写真) · 다른 값 강조", page.locator(".c01-same tbody tr").count() == 7 and page.locator(".c01-same tr.d").count() >= 1
+               and "同じコンテナとして合わせる" in page.locator("#q-submit").inner_text() and page.locator("#q-notsame").count() == 1)
+            page.once("dialog", lambda dg: dg.accept())
+            page.click("#q-submit")
+            page.wait_for_timeout(400)
+            ms = [x for x in actions(root) if x["action"] == "merge_same" and x["action_id"] not in ids_s]
+            ok("「同じコンテナとして合わせる」 → merge_same 1 (fax · photo container_id · pair_id = queue_id)", len(ms) == 1 and ms[0]["value"]["fax_container_id"].endswith("FX1")
+               and ms[0]["value"]["pair_id"] == ms[0]["queue_id"] and ms[0]["value"]["photo_container_id"].startswith("C-G-"), ms)
+            page.click(".c01-kinds [data-kind='done']")
+            di = page.locator(".c01-item.done", has_text="同一コンテナ候補")
+            ok("合わせた카드 = 完了 에", di.count() == 1, di.count())
+            if di.count():
+                di.first.click()
+                page.click("#q-undo")
+                page.wait_for_timeout(400)
+                un2 = [x for x in actions(root) if x["action"] == "undo" and x["value"]["action_id"] == (ms[0]["action_id"] if ms else None)]
+                ok("同一候補 「元に戻す」 → undo (merge_same)", len(un2) == 1, un2)
+            page.click(".c01-kinds [data-kind='同一候補']")
+            ok("元に戻す 뒤 同一候補 카드가 다시 나옴", page.locator(".c01-item", has_text="同一コンテナ候補").count() == 1)
             page.click("#tab-main")
             # _actions JSON = 엔진 스키마
             sys.path.insert(0, a.engine)

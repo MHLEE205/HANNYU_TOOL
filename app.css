@@ -245,3 +245,13 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-chip-done { margin-left: auto; }
 .c01-holdlink { white-space: nowrap; }
 
+
+/* v0.3.12 R7K Part G (#153): 作業日 = COMPASS 予定日 (灰 · 今日以前 = 太字赤 · 表示だけ) */
+.c01-wdplan { color: var(--text2); }
+.c01-wdplan.past { color: var(--danger); font-weight: 700; }
+/* v0.3.12 R7K Part C (#150): 同一コンテナ候補 */
+.c01-samebadge { margin-left: 4px; padding: 0 6px; border: 1px solid var(--c-photo); border-radius: 3px; background: none; color: var(--c-photo); font-size: 11px; cursor: pointer; font-family: inherit; }
+.c01-same { width: 100%; border-collapse: collapse; margin: 4px 0 8px; font-size: 13px; }
+.c01-same th, .c01-same td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+.c01-same thead th { color: var(--text2); font-weight: 600; }
+.c01-same tr.d td { color: var(--danger); font-weight: 700; }

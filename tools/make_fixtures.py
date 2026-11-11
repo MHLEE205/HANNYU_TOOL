@@ -213,6 +213,33 @@ def main():
         jik_ivs.append({"iv_no": iv, "booking_guid": guid, "bkg_no": bkg, "cy_cut": d(cyd), "cy_open": d(cyd - 6), "pol": pol, "state": "有効", "slots": slots,
                         "item": item, "incoterms": "CIF" if cond == "港" else "FOB", "packer": packer, "plant": plant, "slots_n": slots_n,
                         "containers_n": len(rows), "compass_input": [], "reminders": [], "rows": rows, "mail_missing": mm})
+    # v0.3.12 (R7K Part G · #153): 枠の COMPASS 予定日 (slots[].work_date · 表示だけ) · TST2611-03 の 搬入票待ち 行に枠 (予定日 = 昨日 → 赤)
+    # v0.3.12 (R7K Part C · #150): TST2611-03 = 写真の行 (1 行目) ↔ FAX の行 (足す · 写真なし) の 同一コンテナ候補 1 組
+    for ivd in jik_ivs:
+        for k, sl in enumerate(ivd["slots"]):
+            sl["work_date"] = d(-1 if ivd["iv_no"] == "TST2611-03" else 2)
+        if ivd["iv_no"] != "TST2611-03":
+            continue
+        used = {r["slot_guid"] for r in ivd["rows"]} | {m["slot_guid"] for m in ivd["mail_missing"]}
+        free = [sl["slot_guid"] for sl in ivd["slots"] if sl["slot_guid"] not in used]
+        r0 = ivd["rows"][0]
+        if free:
+            r0["slot_guid"] = free[0]
+        r0["work_date"] = None
+        serial += 7
+        fx_ct = r0["ct"][:-3] + ("1" if r0["ct"][-3] != "1" else "2") + r0["ct"][-2:]
+        no += 1
+        fx = dict(r0, no=no, container_id=f"C-D-{ivd['booking_guid'][:8]}-FX1", ct=fx_ct, seal=(r0["seal"] or "TS000001")[:-1] + "9", n_w=21500, t_w=3740, bales=24,
+                  work_date=d(-2), photos=0, status="受信中", engine_status="受信中", reasons=["MIN_SOURCES"], slot_guid=None, has_photos=False, has_docs=True,
+                  work_date_source="搬入票")
+        if not r0.get("seal"):
+            r0["seal"] = "TS000001"
+        pid = sha16("pair" + fx["container_id"] + r0["container_id"])
+        fx["same_cand"] = {"pair_id": pid, "partner": r0["container_id"], "role": "fax", "ct_diff": 1, "seal_diff": 1}
+        r0["same_cand"] = {"pair_id": pid, "partner": fx["container_id"], "role": "photo", "ct_diff": 1, "seal_diff": 1}
+        ivd["rows"].append(fx)
+        ivd["containers_n"] = len(ivd["rows"])
+        by_status["受信中"] = by_status.get("受信中", 0) + 1
     # 未分類 FAX
     faxrel = "_fax_unmatched/2026-11-08/FAX_0001.svg"
     put(faxrel, svg_doc("発行者 不明", {"bkg": ("BOOKING NO.", "BKG-TEST-00?2"), "ct": ("CONTAINER NO.", "TSTU 10?0?5"), "seal": ("SEAL NO.", "TS00?0?7"),
@@ -316,6 +343,9 @@ def main():
         ri = remind_draft.tool_index(drafts, today)
         # v0.3.11 (R7J Part H): 「候補あり」 で催促から外した行 (エンジン remind.index_for の cand と同じ形)
         ri["cand"] = {"TST2611-02": {"PACKER_B": {"ct": 1, "bkg": 0, "cts": [ct_no("TSTU", 352)]}}}
+        # v0.3.12 (R7K Part D ② · D-55 (나)): BKG だけ合う候補の行も催促の対象 — 下書きに cand_bkg · cand_note (エンジン remind.targets と同じ形)
+        for d_ in (ri["ivs"].get("TST2611-03") or [])[:1]:
+            d_.update(cand_bkg=1, cand_note="候補あり — 確認してから送信")
         (data / "remind.json").write_text(dump(ri), encoding="utf-8")
     for rel, text in files.items():
         p = out / rel
