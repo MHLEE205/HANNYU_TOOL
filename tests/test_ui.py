@@ -263,6 +263,36 @@ def rot_checks(page, shots):
 
 
 
+def r7v_side_checks(br, url, shots):
+    """v0.3.21 (R7V F-1): 실황표 옆 창 머리 (CT) 가 상단 공통 바에 가리지 않음 · 패널 안 스크롤에도 머리 고정.
+    넓이 1366 · 1600 · 1920 × 확대 100 % / 125 % (확대 = CSS 넓이 ÷ 1.25 + deviceScaleFactor 1.25 — 브라우저 확대와 같은 배치)."""
+    res = []
+    for w in (1366, 1600, 1920):
+        for z in (1.0, 1.25):
+            c = br.new_context(viewport={"width": int(w / z), "height": int(900 / z)}, device_scale_factor=z)
+            pg = c.new_page()
+            watch(pg, f"F1-{w}-{int(z*100)}")
+            open_local(pg, url)
+            pg.wait_for_selector("tr.c01-row[data-status]")
+            pg.evaluate("k => { C01.state.sel = k; C01.app.render(); }", pg.locator("tr.c01-row[data-status]").first.get_attribute("data-key"))
+            pg.wait_for_selector(".c01-side .c01-side-h .big")
+            pg.wait_for_timeout(150)
+            m = pg.evaluate("""() => { const h = document.querySelector('.ln-header').getBoundingClientRect(), s = document.querySelector('.c01-side'),
+                b = document.querySelector('.c01-side-h .big').getBoundingClientRect(), sr = s.getBoundingClientRect();
+                const hit = document.elementFromPoint(b.left + 4, b.top + b.height / 2);
+                return {hb: h.bottom, st: sr.top, sb: sr.bottom, vh: innerHeight, ct: b.top, hit: !!(hit && hit.closest('.c01-side-h'))}; }""")
+            pg.evaluate("document.querySelector('.c01-side').scrollTop = 10000")
+            pg.wait_for_timeout(100)
+            m2 = pg.evaluate("""() => { const b = document.querySelector('.c01-side-h .big').getBoundingClientRect();
+                const hit = document.elementFromPoint(b.left + 4, b.top + b.height / 2); return !!(hit && hit.closest('.c01-side-h')); }""")
+            good = m["st"] >= m["hb"] - 1 and m["ct"] >= m["hb"] and m["hit"] and m2 and abs(m["sb"] - m["vh"]) <= 1
+            res.append((w, z, good, m, m2))
+            pg.screenshot(path=str(shots / f"r7v_side_{w}_{int(z*100)}.png"))
+            c.close()
+    ok("F-1 옆 창 CT 줄 = 상단 바 밑 · 맨 위에서 보임 · 패널 안 스크롤에도 고정 · 패널 아래 = 화면 아래 (1366/1600/1920 × 100/125 %)",
+       all(x[2] for x in res), [x for x in res if not x[2]] or len(res))
+
+
 def r7u_checks(page, root, shots):
     """v0.3.20 (R7U): F-1 管理者 = 全港 (#201) · A-3 CT重複 / シール重複 · 再判読 표시 · A-4 手入力 CT 경고."""
     jp = root / "_data" / "jikkyou.json"
@@ -671,11 +701,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.20", page.title() == "LEENAI C-01 搬入票 v0.3.20", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.21", page.title() == "LEENAI C-01 搬入票 v0.3.21", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.20" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.21" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1127,6 +1157,7 @@ def main():
             r7n_checks(page, root, shots, a.engine)
             r7s_checks(page, root, shots)
             r7u_checks(page, root, shots)
+            r7v_side_checks(br, url, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

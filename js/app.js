@@ -71,6 +71,14 @@ window.C01 = window.C01 || {};
     return '<td><span class="c01-wdplan' + (past ? ' past' : '') + '" title="' + esc('COMPASS の予定日（表示のみ · 入力・判定には使いません）' + (past ? ' · 予定日を過ぎています' : '')) + '">' + esc(md(plan)) + '</span></td>';
   }
   function $(id) { return document.getElementById(id); }
+  /* v0.3.21 (R7V F-1): 상단 공통 바 (.ln-header · sticky z-index 50) 높이 → 옆 패널 top · height. 바가 없으면 0 */
+  function setHdrH() {
+    var h = document.querySelector('.ln-header'), b = 0;
+    if (h) { var rc = h.getBoundingClientRect(); b = Math.max(0, Math.round(rc.bottom)); }
+    document.documentElement.style.setProperty('--c01-hdr-h', b + 'px');
+    return b;
+  }
+  window.addEventListener('resize', function () { if (document.querySelector('.c01-side')) setHdrH(); });
   function jstNow() {
     var d = new Date(Date.now() + 9 * 3600 * 1000);
     return d.toISOString().slice(0, 19) + '+09:00';
@@ -1348,6 +1356,7 @@ window.C01 = window.C01 || {};
     var ready = needPick.length > 0 ? (needPick.every(function (fd) { return S.picks[fd]; }) || (needPick.length === 1 && S.panelInput.trim())) : !!psQ;
     var lostMsg = qs.some(function (q) { var s = queueState(q, ov); return s.mineLost; }) ? '<p class="c01-lost">他の人が先に確認しました</p>' : '';
     el.hidden = false;
+    setHdrH();                                                    /* v0.3.21 (R7V F-1): 패널 = 상단 공통 바 밑에서 시작 */
     var phtml = '<div class="c01-overlay" id="panel-bg"></div><aside class="c01-side" role="dialog" aria-label="要確認の詳細">' +
       '<div class="c01-side-h"><div><div class="k">要確認</div><div class="mono big">' + esc(r.ct || '（CT 不明）') + '</div><div class="t2">' +
       esc(iv.iv_no + ' · ' + (iv.pol || '') + ' · ' + rowVal(iv, r, 'packer').v + ' ' + rowVal(iv, r, 'plant').v) + '</div></div>' +

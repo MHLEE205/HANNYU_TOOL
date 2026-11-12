@@ -92,8 +92,8 @@
 
 /* 要確認 パネル */
 .c01-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 30; }
-.c01-side { position: fixed; top: 0; right: 0; width: 100%; max-width: 440px; height: 100%; overflow-y: auto; background: var(--read); box-shadow: -12px 0 40px rgba(0, 0, 0, .25); z-index: 31; color: var(--text); }
-.c01-side-h { display: flex; align-items: flex-start; gap: 10px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.c01-side { position: fixed; top: var(--c01-hdr-h, 52px); right: 0; width: 100%; max-width: 440px; height: calc(100% - var(--c01-hdr-h, 52px)); overflow-y: auto; background: var(--read); box-shadow: -12px 0 40px rgba(0, 0, 0, .25); z-index: 31; color: var(--text); }
+.c01-side-h { display: flex; align-items: flex-start; gap: 10px; padding: 18px 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; background: var(--read); }   /* v0.3.21 (R7V F-1): 패널 머리 (CT · IV · 업체) 항상 보임 */
 .c01-side-h > div { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
 .c01-side-h .k { font-size: 12px; color: var(--c-diff); font-weight: 600; } .big { font-size: 16px; }
 .c01-x { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--read); color: var(--text2); cursor: pointer; }
