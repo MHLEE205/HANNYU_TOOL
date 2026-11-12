@@ -171,14 +171,18 @@ def h4_checks(page, jj):
     over = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
         [tb.querySelectorAll('tr.c01-row.over').length, (tb.querySelector('.c01-overhead') || {}).textContent || '',
          [...tb.querySelectorAll('tr.c01-row')].map(tr => tr.classList.contains('over') ? 'o' : tr.classList.contains('unassigned') ? 'u' : 's').join('')]]))""")
-    want = {iv["iv_no"]: max(0, len(iv["rows"]) - len(iv["slots"])) for iv in jj["ivs"]}
-    ok("H-4 칸 넘는 줄 수 = 줄 − COMPASS 칸 (TST2611-02 = 4줄 · 3칸 → 1) · 다른 부킹 0", {k: v[0] for k, v in over.items()} == want and want["TST2611-02"] == 1, [over, want])
-    ok("H-4 머리 「枠外 1」 (그 부킹만)", over["TST2611-02"][1] == "枠外 1" and all(v[1] == "" for k, v in over.items() if k != "TST2611-02"), over)
-    ok("H-4 枠外 줄 = 그 부킹 맨 아래 · TST2611-04 (칸 남음) 未割当 2줄 = 빨강 아님", over["TST2611-02"][2].endswith("o") and over["TST2611-04"][2].count("u") == 2
-       and "o" not in over["TST2611-04"][2], over)
+    # v0.3.18 (R7S #15 · 결정 #182): 줄 (칸 있는 줄 + 칸 없는 줄) > COMPASS 칸 = 칸 없는 줄 (未割当) 전부 빨강 (빈 칸이 남아도) · 줄 ≤ 칸 = 枠外 없음
+    sg = lambda iv: {s["slot_guid"] for s in iv["slots"]}   # noqa: E731
+    want = {iv["iv_no"]: (sum(1 for r in iv["rows"] if r.get("slot_guid") not in sg(iv)) if len(iv["rows"]) > len(iv["slots"]) else 0) for iv in jj["ivs"]}
+    free02 = sum(1 for r in next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-02")["rows"] if not r.get("slot_guid"))
+    ok("#15 枠外 줄 수 = 줄 > 칸 이면 칸 없는 줄 전부 (TST2611-02 = 4줄 · 3칸 · 빈 칸 1 남음 → 未割当 2줄 모두) · 다른 부킹 0",
+       {k: v[0] for k, v in over.items()} == want and want["TST2611-02"] == 2 == free02, [over, want])
+    ok("#15 머리 「枠外 2」 (그 부킹만 · n = 칸 없는 줄 수)", over["TST2611-02"][1] == "枠外 2" and all(v[1] == "" for k, v in over.items() if k != "TST2611-02"), over)
+    ok("#15 TST2611-02 未割当 표시 0 (전부 枠外) · TST2611-04 (줄 4 ≤ 칸 4) 未割当 2줄 = 빨강 아님", "u" not in over["TST2611-02"][2] and over["TST2611-02"][2].endswith("oo")
+       and over["TST2611-04"][2].count("u") == 2 and "o" not in over["TST2611-04"][2], over)
     tr = page.locator("tbody[data-iv='TST2611-02'] tr.c01-row.over")
-    ok("H-4 枠外 줄 状況 칸 = 「COMPASS 枠外」 (未割当 표시 대신)", tr.locator(".c01-over").inner_text() == "COMPASS 枠外" and tr.locator(".c01-unassigned").count() == 0,
-       tr.inner_text())
+    ok("H-4 枠外 줄 状況 칸 = 「COMPASS 枠外」 (未割当 표시 대신)", tr.count() == 2 and tr.locator(".c01-over").all_inner_texts() == ["COMPASS 枠外"] * 2
+       and tr.locator(".c01-unassigned").count() == 0, tr.all_inner_texts())
     hd = page.locator("tbody[data-iv='TST2611-02'] .c01-ivhead").inner_text()
     ok("H-4 머리 n/N台 의 N = 3 (枠外 줄을 세지 않음)", re.search(r"[0-9]+/3台", hd) is not None, hd)
     ok("H-4 범례 「COMPASS 枠外」", "COMPASS 枠外" in page.locator(".c01-legend").inner_text())
@@ -192,6 +196,161 @@ def h4_checks(page, jj):
     page.evaluate("document.documentElement.setAttribute('data-theme','dark')")
     red = lambda c: len(c) >= 3 and c[0] > c[1] + 60 and c[0] > c[2] + 40   # noqa: E731
     ok("H-4 4테마 모두 빨강 배경 · 굵은 글씨 · 「枠外」 표 빨강 (보통 줄과 다름)", all(red(c[1]) and int(c[2]) >= 700 and c[1] != c[3] and red(c[4]) for c in cols), cols)
+
+
+def help_checks(page, shots):
+    """v0.3.17 (R7P · #175 · #176): 머리 「使い方」 → 1 화면 안내 (병행 기간 · 試験表示 · 이름·메일 0 · 4테마)."""
+    hb = page.locator("#c01-nav #help-open")
+    ok("v0.3.17 머리 「使い方」 버튼", hb.count() == 1 and hb.inner_text().strip() == "使い方", hb.count())
+    hb.click()
+    page.wait_for_selector("#help-body")
+    txt = page.locator("#help-body").inner_text()
+    need = ["並行期間", "これまでのシステム", "見る", "確認・入力", "試験表示", "催促", "Compass入力", "自分の担当", "自動OK", "再確認", "受信中",
+            "✎ 修正", "搬入票ではない", "元に戻す", "Ctrl+Shift+R", "気づいた点は担当の管理者へ（画面の写真と IV 番号）"]
+    ok("v0.3.17 使い方 창 열림 · 내용 (試験表示 · 상태 · 確認・入力 · Ctrl+Shift+R · 관리자)", all(w in txt for w in need), [w for w in need if w not in txt])
+    ok("v0.3.17 使い方 「\u78ba\u5b9a」 글자 0 · 메일·사람 이름 0", "\u78ba\u5b9a" not in txt and "@" not in txt and "\u674e" not in txt and "さんへ" not in txt)
+    fit = page.evaluate("""() => { const m = document.querySelector('.c01-modal-help'), b = document.getElementById('help-body'); const r = m.getBoundingClientRect();
+        return [r.top >= 0 && r.bottom <= innerHeight, b.scrollHeight <= b.clientHeight + 2, Math.round(r.height), b.scrollHeight, b.clientHeight]; }""")
+    ok("v0.3.17 使い方 = 1 화면 (1440×1000 · 창 안 스크롤 없음)", fit[0] and fit[1], fit)
+    cols = []
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(100)
+        cols.append(page.evaluate("""() => { const c = s => getComputedStyle(document.querySelector(s));
+            return [c('.c01-help').color, c('.c01-modal-help').backgroundColor, c('.c01-help .c01-trial').color, c('.c01-help-lead').backgroundColor]; }"""))
+        page.screenshot(path=str(shots / f"help_{th}.png"))
+    page.evaluate("document.documentElement.setAttribute('data-theme','dark')")
+    ok("v0.3.17 使い方 4테마 글자색 ≠ 배경색 (본문 · 試験表示)", len(cols) == 4 and all(c[0] != c[1] and c[2] != c[1] and c[2] != c[3] and c[0] != c[3] for c in cols), cols)
+    page.click("[data-close]")
+    ok("v0.3.17 使い方 닫기", page.locator("#c01-modal").is_hidden())
+
+
+ROT_MEASURE = """() => { const ob = document.querySelector('.c01-orig-b'), box = document.querySelector('.c01-orig .c01-doc.img'), im = box && box.querySelector('img.c01-docimg');
+  if (!ob || !im) return null;
+  ob.scrollTop = 0; ob.scrollLeft = 0;
+  const c = ob.getBoundingClientRect(), r = im.getBoundingClientRect(), b = box.getBoundingClientRect();
+  const out = { rot: box.dataset.rot, fit: box.dataset.fit, top: r.top - c.top, left: r.left - c.left, bottom: r.bottom - c.top, right: r.right - c.left,
+    sh: ob.scrollHeight, sw: ob.scrollWidth, w: r.width, h: r.height, bw: b.width, bh: b.height,
+    inBox: r.left >= b.left - 2 && r.top >= b.top - 2 && r.right <= b.right + 2 && r.bottom <= b.bottom + 2 };
+  ob.scrollTop = ob.scrollHeight; ob.scrollLeft = ob.scrollWidth;
+  const c2 = ob.getBoundingClientRect(), r2 = im.getBoundingClientRect();
+  out.endBottom = r2.bottom - c2.bottom; out.endRight = r2.right - c2.right;
+  ob.scrollTop = 0; ob.scrollLeft = 0;
+  return out; }"""
+
+
+def rot_checks(page, shots):
+    """v0.3.18 (R7S #3): 화상 원본 0 · 90 · 180 · 270 (엔진 180 + ⟳) × 확대 60 · 100 · 200 — 그린 화상이 스크롤 영역 안 (위 · 왼쪽이 잘리지 않음 ·
+    끝까지 스크롤하면 아래 · 오른쪽 끝이 보임) · 90 · 270 = 가로 ↔ 세로."""
+    res = {}
+    for zoom in (100, 200, 60):
+        for tgt in (0, 90, 180, 270):
+            page.evaluate(f"C01.state.zoom = {zoom}; C01.state.rot = {(tgt - 180) % 360}; C01.app.render()")
+            page.wait_for_function(f"""() => {{ const b = document.querySelector('.c01-orig .c01-doc.img'); const im = b && b.querySelector('img.c01-docimg');
+                return b && b.dataset.rot === '{tgt}' && im && im.complete && im.naturalWidth > 0 && (b.dataset.fit || '').startsWith('{tgt}:'); }}""", timeout=10000)
+            res[(zoom, tgt)] = page.evaluate(ROT_MEASURE)
+            if zoom == 100 and tgt == 90:
+                page.screenshot(path=str(shots / "r7s_rot90.png"))
+    inside = {k: v for k, v in res.items() if not (v and v["top"] >= -0.5 and v["left"] >= -0.5 and v["bottom"] <= v["sh"] + 0.5 and v["right"] <= v["sw"] + 0.5
+                                                    and v["endBottom"] <= 0.5 and v["endRight"] <= 0.5 and v["inBox"])}
+    ok("#3 화상 0/90/180/270 × 확대 60/100/200 = 그린 화상이 스크롤 영역 안 (스크롤 0 에서 위·왼쪽 안 잘림 · 끝까지 스크롤하면 아래·오른쪽 보임 · 상자 안)",
+       not inside, inside or [res[(100, 90)]])
+    sw = all(abs(res[(z, 90)]["w"] - res[(z, 0)]["h"]) <= 2 and abs(res[(z, 90)]["h"] - res[(z, 0)]["w"]) <= 2 and abs(res[(z, 270)]["w"] - res[(z, 0)]["h"]) <= 2
+             and abs(res[(z, 180)]["w"] - res[(z, 0)]["w"]) <= 2 and abs(res[(z, 90)]["bw"] - res[(z, 0)]["bh"]) <= 2 for z in (60, 100, 200))
+    ok("#3 90° · 270° = 가로 ↔ 세로 (화상 · 상자 둘 다) · 180° = 그대로", sw, {f"{k[0]}:{k[1]}": [round(v["w"]), round(v["h"]), round(v["bw"]), round(v["bh"])] for k, v in res.items()})
+    ok("#3 확대 200% = 1280px 폭 (90° 면 높이 1280px)", abs(res[(200, 0)]["w"] - 1280) <= 2 and abs(res[(200, 90)]["h"] - 1280) <= 2, [res[(200, 0)]["w"], res[(200, 90)]["h"]])
+    page.evaluate("C01.state.zoom = 100; C01.state.rot = 90; C01.app.render()")
+
+
+def r7s_checks(page, root, shots):
+    """v0.3.18 (R7S): #4 シール 후보 형식 · #5 同一コンテナ候補 원본 + 사진 · #13 옆 창 행 서류."""
+    jp, qp = root / "_data" / "jikkyou.json", root / "_data" / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    jj, qj = json.loads(jt0), json.loads(qt0)
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    iv4 = next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-04")
+    r42 = iv4["rows"][2]                           # 自動OK 줄 (다른 항목 없음) 에 シール 値の違い 1 개를 붙임
+    docrel = next(x for x in qj["items"] if x["iv_no"] == "TST2611-04" and x["files"])["files"][0]
+    base = {"queue_id": "5ea1f0000000000a", "kind": "値の違い", "iv_no": "TST2611-04", "ct": r42["ct"], "field": "seal", "container_id": r42["container_id"],
+            "values": {"写真": ["XS00001234", "TS0001234"], "搬入票": ["TS00001234"]}, "candidates": [], "files": [docrel], "note": "seal", "resolved": None, "superseded": [],
+            "cy_cut": iv4["cy_cut"], "cy_open": None, "issuer": None, "field_sources": {}, "field_source_text": {}}
+
+    def show(item):
+        q2 = json.loads(qt0)
+        q2["items"].append(item)
+        qp.write_text(dump(q2), encoding="utf-8")
+        page.evaluate("C01.app.tick()")
+        page.evaluate(f"C01.state.qvals = {{}}; C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = '{item['queue_id']}'; C01.app.render()")
+        page.wait_for_selector(f".c01-field[data-vq='{item['queue_id']}']", timeout=5000)
+        fld = page.locator(f".c01-field[data-vq='{item['queue_id']}']")
+        alts = fld.locator(".c01-alt2")
+        return {"vals": [alts.nth(i).locator(".mono").inner_text() for i in range(alts.count())],
+                "ng": [("c01-fmtng" in (alts.nth(i).get_attribute("class") or "")) for i in range(alts.count())],
+                "tag": [alts.nth(i).locator(".c01-fmttag").count() for i in range(alts.count())],
+                "input": fld.locator("input").input_value(), "pick": fld.locator("[data-fmtpick]").count(), "busy": page.evaluate("C01.app.busy()"),
+                "submit": page.locator("#q-submit").is_enabled()}
+
+    g = show(dict(base, seal_format={"prefixes": ["TS"], "digits": 8, "prefix_required": True}))
+    ok("#4 seal_format = 형식에 맞는 후보 먼저 · 안 맞는 후보 회색 「形式不一致」 · 맞는 후보 1개 = 처음부터 선택 (입력 칸 · 안내) · 자동 갱신 막지 않음",
+       g["vals"] == ["TS00001234", "XS00001234", "TS0001234"] and g["ng"] == [False, True, True] and g["tag"] == [0, 1, 1] and g["input"] == "TS00001234"
+       and g["pick"] == 1 and g["busy"] is False and g["submit"], g)
+    page.screenshot(path=str(shots / "r7s_seal_fmt.png"))
+    cols = []
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        cols.append(page.evaluate("""() => { const n = document.querySelector('.c01-alt2.c01-fmtng'), o = document.querySelector('.c01-alt2:not(.c01-fmtng)'), t = n.querySelector('.c01-fmttag');
+            const c = e => getComputedStyle(e); return [c(n).color, c(o).color, c(t).color, c(n).backgroundColor, c(n).opacity]; }"""))
+    page.evaluate("document.documentElement.setAttribute('data-theme','dark')")
+    ok("#4 4테마 「形式不一致」 = 보통 후보와 다른 색 (회색 · 흐림) · 글자색 ≠ 배경", all(c[0] != c[1] and c[2] != c[3] and float(c[4]) < 1 for c in cols), cols)
+    g = show(dict(base, queue_id="5ea1f0000000000b", seal_fmt_ok={"TS00001234": True, "TS0001234": True, "XS00001234": False}))
+    ok("#4 seal_fmt_ok (엔진 판정 맵) · 맞는 후보 2개 = 미리 선택 안 함 · 안 맞는 것만 「形式不一致」", g["vals"] == ["TS0001234", "TS00001234", "XS00001234"]
+       and g["ng"] == [False, False, True] and g["input"] == "" and g["pick"] == 0, g)
+    g = show(dict(base, queue_id="5ea1f0000000000c"))
+    ok("#4 형식 정보 없음 = 지금까지 그대로 (순서 · 회색 0 · 선택 0)", g["vals"] == ["XS00001234", "TS0001234", "TS00001234"] and not any(g["ng"]) and g["input"] == "" and g["pick"] == 0, g)
+    g = show(dict(base, queue_id="5ea1f0000000000d", seal_format={"regex": "TS[0-9]{8}$"}))
+    ok("#4 seal_format.regex 도 (엔진 seal_ok 와 같은 규칙)", g["ng"] == [False, True, True] and g["input"] == "TS00001234", g)
+    qp.write_text(qt0, encoding="utf-8")
+    # ── #5 同一コンテナ候補: FAX 줄의 서류 (엔진 rows[].docs · 다음 판) = 원본 (그 쪽) + 오른쪽에 사진 줄의 扉 · シール 사진 · 없으면 「原本ファイルがありません」 아님
+    iv3 = next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-03")
+    fx = next(r for r in iv3["rows"] if (r.get("same_cand") or {}).get("role") == "fax")
+    pid = fx["same_cand"]["pair_id"]
+    page.evaluate("C01.app.tick()")
+    page.evaluate(f"C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = '{pid}'; C01.app.render()")
+    page.wait_for_selector(".c01-same", timeout=5000)
+    to = page.locator(".c01-orig").inner_text()
+    ok("#5 同一候補 · FAX 줄 서류 정보 없음 = 「FAX の行の原本がまだ分かりません」 (「原本ファイルがありません」 아님) · 사진 줄 사진은 보임",
+       "原本ファイルがありません" not in to and page.locator("#q-samenodoc").count() == 1 and page.locator("#q-samephs .c01-sameph").count() >= 1, to[:200])
+    ph3 = json.loads((root / "_data" / "photos" / "TST2611-03.json").read_text(encoding="utf-8"))
+    drel = ph3["docs"][0]["path"]
+    fx["docs"] = [{"path": drel, "name": drel.split("/")[-1], "page": None, "sha16": "f" * 16}]
+    jp.write_text(dump(jj), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.evaluate(f"C01.state.qsel = '{pid}'; C01.app.render()")
+    page.wait_for_selector(".c01-orig img.c01-docimg", timeout=5000)
+    kinds = page.locator("#q-samephs .c01-sameph span").all_inner_texts()
+    lay = page.evaluate("""() => { const d = document.querySelector('.c01-orig .c01-doc').getBoundingClientRect(), p = document.querySelector('#q-samephs').getBoundingClientRect();
+        return [p.left >= d.right - 1, Math.abs(p.top - d.top) < 40]; }""")
+    ok("#5 同一候補 · rows[].docs = FAX 원본 (왼쪽) + 사진 줄의 扉 · シール 사진 (오른쪽 · 나란히)", page.locator("#q-samenodoc").count() == 0
+       and drel.split("/")[-1] in page.locator(".c01-orig-h").inner_text() and "扉" in kinds and "シール" in kinds and all(lay), [kinds, lay])
+    page.screenshot(path=str(shots / "r7s_same_side.png"))
+    with page.context.expect_page(timeout=10000) as pi:
+        page.locator("#q-samephs .c01-sameph").first.click()
+    t = pi.value
+    t.wait_for_selector(".c01-pv-th", timeout=10000)
+    ok("#5 사진 클릭 = 사진 줄의 사진 탭 (그 사진부터)", fx["same_cand"]["partner"] and t.locator("#pv-head").inner_text().find(next(r["ct"] for r in iv3["rows"] if r["container_id"] == fx["same_cand"]["partner"])) >= 0,
+       t.locator("#pv-head").inner_text())
+    t.close()
+    # ── #13 옆 창: 確認・入力 항목 없는 줄도 rows[].docs 가 있으면 「原本」 (썸네일 · 별 탭)
+    page.click("#tab-main")
+    page.evaluate("k => { C01.state.sel = k; C01.app.render(); }", f"TST2611-03|{fx['ct']}|{fx['packer']}")
+    page.wait_for_selector(".c01-side", timeout=5000)
+    pd = page.locator("#panel-doc")
+    ok("#13 옆 창 = 행 서류 (rows[].docs) 썸네일 · 「原本なし」 아님", pd.is_enabled() and "原本なし" not in pd.inner_text() and drel.split("/")[-1] in pd.inner_text(), pd.inner_text())
+    page.evaluate("C01.state.sel = null; C01.app.render()")
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
 
 
 def r7n_checks(page, root, shots, engine):
@@ -272,13 +431,16 @@ def r7n_checks(page, root, shots, engine):
     sel(fq["queue_id"], "done")
     if page.locator(".c01-orig .c01-doc").count() == 0:
         sel(fq["queue_id"], "all")
-    tf = page.get_attribute(".c01-orig .c01-doc", "style") or ""
-    ok("G-3 뒤집힌 FAX (rotation 180) = 처음부터 180° · 「向き補正 180°」", "rotate(180deg)" in tf and page.locator("#q-autorot").inner_text() == "向き補正 180°", tf)
+    # v0.3.18 (R7S #3): 화상 회전 = 안쪽 .c01-docrot (左上 축 + translate) · 상자 data-rot
+    tf = page.get_attribute(".c01-orig .c01-docrot", "style") or ""
+    ok("G-3 뒤집힌 FAX (rotation 180) = 처음부터 180° · 「向き補正 180°」", "rotate(180deg)" in tf and page.get_attribute(".c01-orig .c01-doc", "data-rot") == "180"
+       and page.locator("#q-autorot").inner_text() == "向き補正 180°", tf)
     page.screenshot(path=str(shots / "r7n_g3_rot.png"))
     page.click("#rot")
     page.wait_for_timeout(200)
-    tf2 = page.get_attribute(".c01-orig .c01-doc", "style") or ""
-    ok("G-3 ⟳ = 엔진 각도 위에 90° 더함 (270°)", "rotate(270deg)" in tf2, tf2)
+    tf2 = page.get_attribute(".c01-orig .c01-docrot", "style") or ""
+    ok("G-3 ⟳ = 엔진 각도 위에 90° 더함 (270°)", "rotate(270deg)" in tf2 and page.get_attribute(".c01-orig .c01-doc", "data-rot") == "270", tf2)
+    rot_checks(page, shots)
     rots = page.evaluate("""() => [180, -90, 450, 45, '90'].map(v => C01.app._rot({rotation: v, page: null}))""")
     rmap = page.evaluate("""() => [C01.app._rot({rotation: {'4': 180, '2': 90}, page: 1}), C01.app._rot({rotation: 270, page: 3})]""")
     ok("G-3 rotation 형식 (수 · {쪽: 각도} · 90 배수만 · 음수/360 넘음 정리)", rots == [{"*": 180}, {"*": 270}, {"*": 90}, {}, {"*": 90}] and rmap == [{"4": 180, "2": 90}, {"3": 270}], [rots, rmap])
@@ -419,11 +581,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.16", page.title() == "LEENAI C-01 搬入票 v0.3.16", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.18", page.title() == "LEENAI C-01 搬入票 v0.3.18", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.16" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.18" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -480,6 +642,7 @@ def main():
             ok("メール未着も表示 끄기 → 줄 없음", page.locator("tr.missing").count() == 0)
             page.check("#show-unarrived")
             page.screenshot(path=str(shots / "jikkyou_dark_all.png"), full_page=True)
+            help_checks(page, shots)
             # ── v0.2.0 Compass入力 DRY 창 ──
             sys.path.insert(0, a.engine)
             from engine.compass_input.rules import compare_iv  # noqa: E402
@@ -494,6 +657,8 @@ def main():
             ok("경고 표시 (EXISTING_DIFF · TYPE_42_22 · CT_DUP)", {"EXISTING_DIFF", "TYPE_42_22", "CT_DUP"} <= warns, sorted(warns))
             sb = page.locator("#compass-send")
             ok("送信 비활성 「DRY — 送信しません」", sb.is_disabled() and "DRY" in sb.inner_text(), sb.inner_text())
+            tb = page.locator(".c01-mh [data-trial]")
+            ok("v0.3.17 Compass入力 창 「試験表示（並行期間中は送信・入力しません）」", tb.count() == 1 and tb.inner_text() == "試験表示（並行期間中は送信・入力しません）")
             got = page.evaluate("JSON.stringify(C01.state.modal.res)")
             iv1 = next(x for x in jik["ivs"] if x["iv_no"] == "TST2611-01")
             snap = json.loads((root / "_data" / "compass_now" / "TST2611-01.json").read_text(encoding="utf-8"))
@@ -520,6 +685,8 @@ def main():
                and "回目" in page.locator(".c01-rmeta").first.inner_text() and page.locator(".c01-rpast").count() == 1, subj)
             ok("催促 본문 끝 = ✦ Powered by LEENAI Automation System", body.strip().endswith("✦ Powered by LEENAI Automation System"))
             ok("催促 送信 비활성 「下書きのみ」", rs.is_disabled() and "下書き" in rs.inner_text())
+            tb = page.locator(".c01-mh [data-trial]")
+            ok("v0.3.17 催促 창 「試験表示（並行期間中は送信・入力しません）」", tb.count() == 1 and tb.inner_text() == "試験表示（並行期間中は送信・入力しません）")
             ok("v0.3.11 催促 미리보기 「候補書類あり — 催促前に確認」 (엔진 remind.json cand)",
                page.locator(".c01-rcand").count() == 1 and "催促前に確認" in page.locator(".c01-rcand").inner_text())
             page.screenshot(path=str(shots / "remind_preview.png"))
@@ -868,6 +1035,7 @@ def main():
                and un[-1]["value"]["slot_before"] == free_guid, un[-1:])
             page.screenshot(path=str(shots / "slot_change.png"))
             r7n_checks(page, root, shots, a.engine)
+            r7s_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

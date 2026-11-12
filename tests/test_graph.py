@@ -137,6 +137,12 @@ def main():
     diff_q["files"].append({"path": "TST2611-02/搬入票/no_such_r7c.pdf", "name": "no_such_r7c.pdf", "page": 1, "bbox": None, "sha16": "0" * 16})
     man_q = next(x for x in qj["items"] if x["kind"] == "手入力")
     man_q["files"] = []
+    # v0.3.18 (R7S #1 · #2): 1 개 PDF 에 여러 컨테이너 — 다른 컨테이너 (같은 IV 自動OK 줄) 의 항목 = 같은 PDF 2쪽 → 2쪽으로 열림
+    jd = json.loads((root / "_data" / "jikkyou.json").read_text(encoding="utf-8"))
+    r02 = next(iv for iv in jd["ivs"] if iv["iv_no"] == "TST2611-02")["rows"][0]
+    pg2_q = dict(json.loads(json.dumps(diff_q)), queue_id="d2pdfpage2000001", field="n_w", container_id=r02["container_id"], ct=r02["ct"],
+                 values={"搬入票": [21000], "写真": [21010]}, files=[dict(diff_q["files"][0], page=2, sha16="2" * 16)], resolved=None, superseded=[])
+    qj["items"].append(pg2_q)
     old_q = json.loads(json.dumps(fax_q))
     old_q["queue_id"] = "f0ldfax000000001"
     old_q["received_at"] = "2026-10-20T09:00:00+09:00"
@@ -163,7 +169,7 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.16", page.title() == "LEENAI C-01 搬入票 v0.3.16", page.title())
+            ok("탭 제목 v0.3.18", page.title() == "LEENAI C-01 搬入票 v0.3.18", page.title())
             ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
@@ -244,6 +250,24 @@ def main():
             page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
             ok("확대 120% → canvas 768px", page.evaluate("document.querySelector('.c01-orig [data-pdf] canvas').style.width") == "768px")
             page.screenshot(path=str(shots / "graph_pdf.png"))
+            # v0.3.18 (R7S #1 · #2): 같은 PDF 의 다른 컨테이너 항목 (page 2) = 2쪽으로 열림 (전에는 파일별 기억 → 앞에서 본 1쪽) · 다른 쪽도 넘김
+            page.click("#z-out")
+            page.click(f'[data-q="{pg2_q["queue_id"]}"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='2:0']", timeout=15000)
+            ink5 = page.evaluate(INK, ".c01-orig [data-pdf] canvas")
+            ok("v0.3.18 #2 여러 컨테이너 PDF = 항목의 쪽 (files[].page 2) 으로 열림 · p.2 / 2 (앞에서 같은 PDF 1쪽을 봤어도)",
+               page.locator("#pdf-pg").inner_text() == "p.2 / 2" and ink5["R"] > 50 and ink5["L"] < ink5["R"] / 10, [page.locator("#pdf-pg").inner_text(), ink5])
+            page.click("#pdf-prev")
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
+            ok("v0.3.18 #2 다른 쪽도 넘김 (‹ → p.1 / 2)", page.locator("#pdf-pg").inner_text() == "p.1 / 2")
+            page.click(f'[data-q="{diff_q["queue_id"]}"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
+            page.click(f'[data-q="{pg2_q["queue_id"]}"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn]", timeout=15000)
+            page.wait_for_timeout(300)
+            ok("v0.3.18 #2 쪽 기억 = 항목마다 (다시 열면 그 항목에서 본 쪽 p.1)", page.locator("#pdf-pg").inner_text() == "p.1 / 2", page.locator("#pdf-pg").inner_text())
+            page.click(f'[data-q="{diff_q["queue_id"]}"]')
+            page.wait_for_selector(".c01-orig [data-pdf][data-drawn='1:0']", timeout=15000)
             # ── v0.3.3 (R7C) 파일 열기 ──
             with page.context.expect_page(timeout=15000) as pinfo:
                 page.click("#pdf-open")
@@ -336,6 +360,50 @@ def main():
                     cond = cond and "c01-warn" in (p3.locator("#me-name").get_attribute("class") or "")
                 ok(f"v0.3.16 担当者 = 職員マスター ({case}) · pol_staff staff/assist", cond, [me, body[:200]])
                 p3.close()
+            # v0.3.18 (R7S #16): pol_staff 担当・補助 칸 = 직원 코드 · 메일 (대문자 · 공백) · 이름 (전각 · 공백) · 여러 값 (; , 、 / 줄바꿈 공백) 모두 맞음 ·
+            #                   맞는 것 없음 = 「なし」 + 「担当港マスターに該当なし」 · 마스터를 못 읽음 = 「担当港マスターを読めません」 (全港 표시)
+            staff_rows = [{"code": "STAFF_A", "name_ja": "職員A", "name_en": "STAFF A", "email": "staff.a@example.invalid", "active": True},
+                          {"code": "STAFF_B", "name_ja": "職員 ビー", "name_en": "STAFF B", "email": "Staff.B@example.invalid", "active": True},
+                          {"code": "STAFF_C", "name_ja": "職員C", "name_en": "STAFF C", "email": "staff.c@example.invalid", "active": True}]
+            cases16 = {
+                "code": ([{"pol": "TOKYO", "staff": "STAFF_B", "assist": ""}, {"pol": "YOKOHAMA", "staff": "STAFF_A", "assist": "STAFF_C"}], "（TOKYO）", ""),
+                "email": ([{"pol": "TOKYO", "staff": "STAFF_A", "assist": "  STAFF.B@EXAMPLE.INVALID "}, {"pol": "YOKOHAMA", "staff": "STAFF_A", "assist": ""}], "（TOKYO）", ""),
+                "name": ([{"pol": "TOKYO", "staff": "STAFF_A", "assist": ""}, {"pol": "YOKOHAMA", "staff": "職員\u3000ビー", "assist": ""}], "（YOKOHAMA）", ""),
+                "name_nospace": ([{"pol": "KOBE", "staff": "職員ビー", "assist": ""}], "（KOBE）", ""),
+                "multi": ([{"pol": "TOKYO", "staff": "STAFF_A; STAFF_B", "assist": ""}, {"pol": "YOKOHAMA", "staff": "STAFF_C、職員 ビー", "assist": ""},
+                           {"pol": "KOBE", "staff": "STAFF_A / STAFF_C", "assist": "STAFF_C\nSTAFF_B"}, {"pol": "HAKATA", "staff": "STAFF_A STAFF_B", "assist": ""},
+                           {"pol": "*", "staff": "", "assist": ["STAFF_C", "staff.b@example.invalid"]}], "（TOKYO · YOKOHAMA · KOBE · HAKATA · *）", ""),
+                "nohit": ([{"pol": "TOKYO", "staff": "STAFF_A", "assist": "STAFF_C"}, {"pol": "YOKOHAMA", "staff": "STAFF_BB", "assist": "staff.bb@example.invalid"}],
+                          "（なし）", "担当港マスターに該当なし"),
+                "unreadable": (None, "（なし）", "担当港マスターを読めません"),
+            }
+            for case, (pol_rows, want_lab, want_why) in cases16.items():
+                p4 = page.context.new_page()
+                p4.route("https://graph.microsoft.com/**", make_handler(root))
+                p4.goto(f"http://127.0.0.1:{port}/")
+                p4.wait_for_selector("#ln-splash", timeout=20000)
+                p4.evaluate(STUB, staff)
+                p4.evaluate("""([pol, rows]) => {
+                  Object.defineProperty(LEENAI, 'user', { get: () => ({ name: 'MS DISPLAY NAME', email: 'staff.b@example.invalid', staffCode: '' }), configurable: true });
+                  LEENAI.master.get = async (n) => {
+                    if (n === 'pol_staff') { if (!pol) throw new Error('403'); return pol; }
+                    if (n === 'staff') return rows;
+                    throw new Error('x');
+                  };
+                }""", [pol_rows, staff_rows])
+                p4.evaluate("localStorage.removeItem('c01_ports'); document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
+                            "C01.app.start(new C01.sources.Graph())")
+                p4.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
+                lab = p4.locator("[data-port='mine']").inner_text()
+                why = p4.locator("#mp-why").inner_text() if p4.locator("#mp-why").count() else ""
+                n_iv4 = p4.locator("tbody[data-iv]").count()
+                cond = lab.startswith("自分の担当" + want_lab) and (why.startswith(want_why) if want_why else why == "") and "職員 ビー" in p4.locator("#me-name").inner_text()
+                if case == "unreadable":
+                    cond = cond and n_iv4 == 5                       # 못 읽음 = 지금까지처럼 全港
+                if case == "nohit":
+                    cond = cond and n_iv4 == 0
+                ok(f"v0.3.18 #16 自分の担当 ({case}) = {want_lab} {want_why}".strip(), cond, [lab, why, n_iv4])
+                p4.close()
             errs = [e for e in RES["console_errors"] if not ("Failed to load resource" in e and ("404" in e or "409" in e or "ERR_FAILED" in e))]
             ok("콘솔 오류 0 (예상한 404 · 409 제외)", not errs, errs[:5])
             br.close()

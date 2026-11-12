@@ -121,6 +121,10 @@ window.C01 = window.C01 || {};
   }
   function hydrate(root) {
     (root || document).querySelectorAll('[data-pdf]').forEach(function (el) { if (el._hyd) return; el._hyd = 1; drawPdf(el); });
+    (root || document).querySelectorAll('.c01-doc.img').forEach(function (box) {        /* v0.3.18: 読み済みの画像 (キャッシュ) は今 合わせる */
+      var im = box.querySelector('img.c01-docimg');
+      if (im && im.complete && im.naturalWidth) docFit(box);
+    });
     if (!isFolder()) return;
     (root || document).querySelectorAll('[data-rel]').forEach(function (el) {
       if (el._hyd) return;
@@ -195,9 +199,29 @@ window.C01 = window.C01 || {};
     return m;
   }
   function rotOf(m, page) { return m[String(page || 1)] !== undefined ? m[String(page || 1)] : (m['*'] || 0); }
-  function pdfTag(rel, page, thumb, rots) {
+  /* v0.3.18 (R7S #1 · #2): 見ているページの記憶 = 項目 + ファイル + 項目のページ ごと (前は ファイルごと → 1 つの PDF に何台もある搬入票で
+     別のコンテナの項目を開いても 前に見たページ (1 ページ目) のまま)。項目のページ (files[].page) で開き、ほかのページも ‹ › で見られる */
+  function pdfKey(q, f) { return (q && q.queue_id ? q.queue_id : '') + '|' + (f && f.path || '') + '#' + (f && f.page || ''); }
+  /* v0.3.18 (R7S #3): 画像の回転 (左上を軸に回して 箱の左上へ戻す) — 0 · 90 · 180 · 270 */
+  var DOC_TF = { 0: 'none', 90: 'rotate(90deg) translateY(-100%)', 180: 'rotate(180deg) translate(-100%, -100%)', 270: 'rotate(270deg) translateX(-100%)' };
+  function docFit(box) {
+    if (!box || !box.classList || !box.classList.contains('img')) return;
+    var inner = box.querySelector('.c01-docrot'), img = box.querySelector('img.c01-docimg');
+    if (!inner || !img) return;
+    var r = +box.getAttribute('data-rot') || 0, w = +box.getAttribute('data-w') || inner.offsetWidth;
+    var h = img.style.display === 'none' ? 0 : inner.offsetHeight;      /* 回す前の高さ (transform は offset に入らない) */
+    if (!h) return;
+    if (r % 180) { box.style.width = h + 'px'; box.style.height = w + 'px'; } else { box.style.width = w + 'px'; box.style.height = h + 'px'; }
+    box.setAttribute('data-fit', r + ':' + w + 'x' + h);
+  }
+  document.addEventListener('load', function (e) {
+    var t = e.target;
+    if (t && t.tagName === 'IMG' && t.classList.contains('c01-docimg')) docFit(t.closest('.c01-doc'));
+  }, true);
+  function pdfTag(rel, page, thumb, rots, pkey, bw) {
     var rj = rots && Object.keys(rots).length ? JSON.stringify(rots) : '';
     return '<div class="c01-pdf' + (thumb ? ' thumb' : '') + '" data-pdf="' + esc(rel) + '" data-page="' + (+page || 1) + '"' + (thumb ? ' data-thumb="1"' : '') +
+      (pkey ? ' data-pkey="' + esc(pkey) + '"' : '') + (bw && bw !== 640 ? ' data-bw="' + (+bw) + '"' : '') +
       (rj ? ' data-rots="' + esc(rj) + '"' : '') + (thumb ? '' : ' data-view="' + S.zoom + ':' + S.rot + '"') +
       '><canvas></canvas><span class="c01-pdfmsg">' + (thumb ? '' : '読み込み中…') + '</span></div>';
   }
@@ -209,14 +233,14 @@ window.C01 = window.C01 || {};
     pdfDoc(rel).then(function (doc) {
       var n = doc.numPages, pg = Math.min(Math.max(1, want), n);
       el.setAttribute('data-pages', n);
-      if (!thumb) { S.pdfPage[rel] = pg; var lab = $('pdf-pg'); if (lab) lab.textContent = 'p.' + pg + ' / ' + n; }
+      if (!thumb) { S.pdfPage[el.getAttribute('data-pkey') || rel] = pg; var lab = $('pdf-pg'); if (lab) lab.textContent = 'p.' + pg + ' / ' + n; }
       return doc.getPage(pg).then(function (page) {
         var base = rotOf(rots, pg);
         var rot = (thumb ? 0 : S.rot) + base;
         el.setAttribute('data-base-rot', base);
         var r = (page.rotate + rot) % 360;
         var v1 = page.getViewport({ scale: 1, rotation: r });
-        var cssW = thumb ? 150 : Math.round(640 * S.zoom / 100);
+        var cssW = thumb ? 150 : Math.round((+el.getAttribute('data-bw') || 640) * S.zoom / 100);
         var dpr = window.devicePixelRatio || 1;
         var vp = page.getViewport({ scale: cssW / v1.width * dpr, rotation: r });
         var cv = el.querySelector('canvas');
@@ -251,18 +275,58 @@ window.C01 = window.C01 || {};
     var m = S.staff || {};
     return m.staff || [];
   }
+  /* v0.3.18 (R7S #16): pol_staff の 担当・補助 の値 = 職員コード · メール · 名前 (name_ja) のどれでも · 1 つの欄に複数 (; , 、 / 改行 空白) でも合う。
+     比べる形 = NFKC (全角 → 半角) · 空白 (全角空白も) を除く · 大文字小文字を区別しない */
+  function normWho(s) {
+    s = String(s == null ? '' : s);
+    if (s.normalize) s = s.normalize('NFKC');
+    return s.replace(/[\s\u3000]+/g, '').toLowerCase();
+  }
+  function whoTokens(v) {
+    var out = {};
+    var add = function (x) { var n = normWho(x); if (n) out[n] = 1; };
+    [].concat(v == null ? [] : v).forEach(function (cell) {
+      if (cell == null || typeof cell === 'object') return;
+      var s = String(cell);
+      if (s.normalize) s = s.normalize('NFKC');
+      add(s);                                                          /* 欄全体 (名前の中の空白は除いて比べる) */
+      s.split(/[;,、，；\/／\r\n]+/).forEach(function (part) {
+        add(part);
+        var w = part.split(/[\s\u3000]+/).filter(Boolean);
+        w.forEach(add);                                                /* 空白区切りの複数 */
+        for (var i = 0; i + 1 < w.length; i++) add(w[i] + w[i + 1]);   /* 姓 名 の間に空白がある名前 */
+      });
+    });
+    return out;
+  }
+  function myIds() {
+    var ids = {};
+    var add = function (x) { var n = normWho(x); if (n && n !== normWho('職員マスター未登録')) ids[n] = 1; };
+    var me = S.me || {};
+    add(me.code); add(me.email); if (!me.unregistered) add(me.name);
+    var em = String(me.email || '').toLowerCase();
+    staffList().forEach(function (s) {
+      if ((me.code && s.code === me.code) || (em && String(s.email || '').toLowerCase() === em)) { add(s.code); add(s.email); add(s.name); add(s.name_ja); add(s.name_en); }
+    });
+    ((window.LEENAI && LEENAI.STAFF) || []).forEach(function (s) {               /* 共通ファイルの職員一覧の名前でも */
+      if (s && ((me.code && s.staffCode === me.code) || (em && String(s.email || '').toLowerCase() === em))) { add(s.name); add(s.staffCode); add(s.email); }
+    });
+    return ids;
+  }
   function myPorts() {
-    if (!S.me || !S.staff) return null;
+    if (!S.me) return null;
+    if (!S.staff || S.staff.polError) return { ports: [], star: false, known: [], why: 'read', all: true };   /* 読めない = これまでどおり全港 */
     var items = S.staff.items || [];
-    var mine = [], star = false;
+    var mine = [], star = false, ids = myIds();
     items.forEach(function (it) {
       /* v0.3.16 (R7O Part D): 共通マスター pol_staff の列 = staff (担当) · assist (補助) — 前は main/sub だけ見ていて 「自分の担当（なし）」 */
-      var who = [].concat(it.staff || it.main || it['担当'] || [], it.assist || it.sub || it['補助'] || []);
-      var hit = who.some(function (x) { return x && (x === S.me.code || x === S.me.email); });
+      var who = whoTokens([].concat(it.staff || it.main || it['担当'] || [], it.assist || it.sub || it['補助'] || []));
+      var hit = Object.keys(who).some(function (x) { return ids[x]; });
       if (!hit) return;
-      if (it.pol === '*') star = true; else mine.push(it.pol);
+      if (it.pol === '*') star = true; else if (mine.indexOf(it.pol) < 0) mine.push(it.pol);
     });
-    return { ports: mine, star: star, known: items.map(function (it) { return it.pol; }).filter(function (p) { return p !== '*'; }) };
+    return { ports: mine, star: star, known: items.map(function (it) { return it.pol; }).filter(function (p) { return p !== '*'; }),
+      why: mine.length || star ? '' : (items.length ? 'nohit' : 'empty') };
   }
   /* v0.3.7 (R7D Part U-2): 担当港 = 複数選択 (港ボタンをトグル) · 「全港」 = 全部 · 「自分の担当」 = マスター 担当・補助 ·
      選んだ組み合わせはブラウザに記憶 (localStorage c01_ports · 使えない環境では記憶しないだけ) */
@@ -297,7 +361,7 @@ window.C01 = window.C01 || {};
     if (S.port === 'set') return (S.ports || []).indexOf(pol) >= 0;
     if (S.port === 'mine') {
       var mp = myPorts();
-      if (!mp) return true;
+      if (!mp || mp.all) return true;
       if (mp.ports.indexOf(pol) >= 0) return true;
       return mp.star && mp.known.indexOf(pol) < 0;
     }
@@ -516,14 +580,11 @@ window.C01 = window.C01 || {};
       rows.forEach(function (x) { (x.r.slot_guid && seqOf[x.r.slot_guid] !== undefined ? slotted : free).push(x); });
       free.forEach(function (x) { x.unassigned = true; });
       /* v0.3.15 (R7N Part H-4 · 決定 #166): 台数 N = COMPASS の枠の数そのまま (エンジン slots = booking_cache の枠 · TOOL で増やさない)。
-         行が枠より多い = 枠の外の行 (間違って作られた行 · 割り当ての間違い) → その数だけ 未割当 の行を 「COMPASS 枠外」 (赤) にする。
-         選ぶ順 = CT なし → 自動OK・確認済 でない → 下の行。枠が残っている 未割当 (まだ入れていないだけ) は これまでどおり */
+         v0.3.18 (R7S #15 · 決定 #182): 表示する行 (枠のある行 + 枠のない行) が COMPASS の枠の数より多い = 枠のない行 (未割当) を 全部 「COMPASS 枠外」 (赤) ·
+         空き枠が残っていても同じ (前の 「空き枠があれば 未割当 は赤にしない · 超えた数だけ赤」 はやめた)。行 ≤ 枠 = 枠外なし */
       var nSlots = (iv.slots && iv.slots.length) || iv.slots_n || 0;
-      var over = nSlots ? Math.min(free.length, Math.max(0, rows.length - nSlots)) : 0;
-      if (over) {
-        free.map(function (x, i) { return { x: x, i: i, s: (x.r.ct ? 2 : 0) + (isOk(x) ? 1 : 0) }; })
-          .sort(function (a, b) { return a.s - b.s || b.i - a.i; }).slice(0, over).forEach(function (e) { e.x.over = true; });
-      }
+      var over = nSlots && rows.length > nSlots ? free.length : 0;
+      if (over) free.forEach(function (x) { x.over = true; });
       var freeIn = free.filter(function (x) { return !x.over; }), freeOver = free.filter(function (x) { return x.over; });
       /* v0.3.11 (R7J Part C-2): 同じブッキングに枠の決まっていない行があれば、空き枠は「未着」ではなく「割当待ち」 (行の数まで · 枠外の行は数えない) */
       unarr.slice(0, freeIn.length).forEach(function (x) { x.st = '割当待ち'; x.wait = '割当待ち'; x.waitTitle = 'このブッキングに枠の決まっていない行（未割当）があります — メールは届いている可能性'; });
@@ -556,6 +617,7 @@ window.C01 = window.C01 || {};
       '</nav>' +
       '<span class="c01-sub">' + esc(t) + ' 時点 · 最終更新 <span id="c01-upd">' + upd + '</span>（自動更新）</span>' +
       '<span class="c01-flex"></span>' +
+      '<button id="help-open" class="c01-btn-sub c01-helpbtn" title="この TOOL の使い方（並行期間中の注意）">使い方</button>' +
       (graphMode()
         ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spRoot) + '</span>' +
           '<span class="c01-me' + (S.me && S.me.unregistered ? ' c01-warn' : '') + '" id="me-name"' + (S.me && S.me.unregistered ? ' title="ログインしたメール (' + esc(S.me.email) + ') が職員マスター (staff) にありません — マスターの確認が必要"' : '') + '>担当者 ' + esc(S.me ? S.me.name : '?') + '</span>'
@@ -563,6 +625,7 @@ window.C01 = window.C01 || {};
           '<label class="c01-me">担当者 <select id="me-select" aria-label="担当者">' + staffOpts + '</select></label>'), 3);
     $('tab-main').onclick = function () { S.view = 'main'; render(); };
     $('tab-input').onclick = function () { S.view = 'input'; if (!S.qsel) { var f = openQueue()[0]; S.qsel = f ? f.queue_id : null; } render(); };
+    $('help-open').onclick = openHelp;
     if ($('me-select')) $('me-select').onchange = function (e) {
       var s = staffList().filter(function (x) { return x.code === e.target.value; })[0] || null;
       S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
@@ -587,6 +650,9 @@ window.C01 = window.C01 || {};
     var b = buildGroups();
     var mp = myPorts();
     var ports = [['mine', '自分の担当' + (mp ? '（' + (mp.ports.join(' · ') || 'なし') + (mp.star ? ' · *' : '') + '）' : '（担当者未選択）')], ['all', '全港']];
+    /* v0.3.18 (R7S #16): 「なし」 の理由 (小さく) — マスターに該当なし / マスターを読めない (この時は これまでどおり全港を表示) */
+    var MP_WHY = { nohit: '担当港マスターに該当なし', empty: '担当港マスターが空です', read: '担当港マスターを読めません（全港を表示）' };
+    var mpWhy = mp && mp.why ? MP_WHY[mp.why] : '';
     var pols = {};
     ((S.jik && S.jik.ivs) || []).forEach(function (iv) { if (iv.pol) pols[iv.pol] = 1; });
     /* 港チップの順: pol_staff に順番の列 (order) があればその順、無ければ名前順 (v0.2.0 — 今のマスターには順番の列なし) */
@@ -598,7 +664,10 @@ window.C01 = window.C01 || {};
     }).forEach(function (p) { ports.push([p, p]); });
     var html = '<div class="c01-bar">' +
       '<span class="c01-lab">担当港</span>' +
-      ports.map(function (p) { return '<button class="c01-chip' + (portOn(p[0]) ? ' on' : '') + '" data-port="' + esc(p[0]) + '" aria-pressed="' + (portOn(p[0]) ? 'true' : 'false') + '">' + esc(p[1]) + '</button>'; }).join('') +
+      ports.map(function (p) {
+        return '<button class="c01-chip' + (portOn(p[0]) ? ' on' : '') + '" data-port="' + esc(p[0]) + '" aria-pressed="' + (portOn(p[0]) ? 'true' : 'false') + '">' + esc(p[1]) +
+          (p[0] === 'mine' && mpWhy ? ' <small class="c01-mpwhy" id="mp-why" title="' + esc(mpWhy + ' — ⚙ マスター「POL 担当」の 担当・補助 に 職員コード · メール · 名前 のどれかが必要') + '">' + esc(mpWhy) + '</small>' : '') + '</button>';
+      }).join('') +
       '<span class="c01-hint">（港は複数選べます · 自分の担当 = ⚙ マスター「POL 担当」の 担当・補助 · 選んだ組み合わせは記憶）</span>' +
       '<span class="c01-flex"></span>' +
       '<div class="c01-filters">' +
@@ -622,7 +691,7 @@ window.C01 = window.C01 || {};
         '<span class="mono">' + esc(iv.iv_no) + '</span>' +
         '<span class="t2">BKG ' + esc(iv.bkg_no || '') + '</span>' +
         '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
-        (g.over ? '<span class="c01-overhead" title="COMPASS の枠 ' + g.total + ' より行が ' + g.over + ' 行多い — 間違って作られた行 · 割り当ての間違いの可能性（赤の行）">枠外 ' + g.over + '</span>' : '') +
+        (g.over ? '<span class="c01-overhead" title="行が COMPASS の枠 ' + g.total + ' より多い — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違いの可能性（赤の行）">枠外 ' + g.over + '</span>' : '') +
         '<span class="c01-flex"></span>' +
         (iv.hold_docs ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + (+iv.hold_docs) + ')</button>' : '') +
         (g.remind ? '<button class="c01-btn-sub" data-remind="' + esc(iv.iv_no) + '">✉ 催促</button>' : '') +
@@ -646,7 +715,7 @@ window.C01 = window.C01 || {};
         var stCell = x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
           x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
             '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>';
-        if (x.over) stCell = '<span class="c01-over" title="COMPASS の枠の数を超えた行です — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
+        if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
         else if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         if (r.same_cand && !sameDone(r.same_cand.pair_id, b.ov)) stCell += ' <button class="c01-samebadge" data-same="' + esc(r.same_cand.pair_id) + '" title="' +
           esc(r.same_cand.role === 'fax' ? '写真の行と同じコンテナかもしれません（FAX の CT・シールの読み違い）— クリックで確認' : 'FAX の行と同じコンテナかもしれません — クリックで確認') + '">同一候補</button>';
@@ -664,7 +733,7 @@ window.C01 = window.C01 || {};
     if (!b.groups.length) html += '<tbody><tr><td colspan="15" class="c01-empty">表示する IV がありません（担当港・絞り込みを確認してください）</td></tr></tbody>';
     html += '</table></div>';
     html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK / 確認済</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
-      (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠の数より多い行）</span>' : '') +
+      (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（行が枠の数より多い時の 枠のない行）</span>' : '') +
       '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった行だけ差し替え (スクロール位置そのまま) */
     var root = $('c01-main');
@@ -718,9 +787,9 @@ window.C01 = window.C01 || {};
     });
   }
   function closeModal() { var m = $('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } S.modal = null; }
-  function showModal(html) {
+  function showModal(html, cls) {
     var m = $('c01-modal');
-    m.innerHTML = '<div class="c01-mbg" id="m-bg"></div><div class="c01-modal" role="dialog" aria-modal="true">' + html + '</div>';
+    m.innerHTML = '<div class="c01-mbg" id="m-bg"></div><div class="c01-modal' + (cls ? ' ' + cls : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
     m.hidden = false;
     $('m-bg').onclick = closeModal;
     m.querySelectorAll('[data-close]').forEach(function (el) { el.onclick = closeModal; });
@@ -732,6 +801,7 @@ window.C01 = window.C01 || {};
     S.src.getJson('compass_now/' + ivNo + '.json').then(function (snap) { return snap; }).catch(function () { return null; }).then(function (snap) {
       if (!S.modal || S.modal.iv !== ivNo) return;
       var html = '<div class="c01-mh"><b>Compass入力 — 比較表</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(md(iv.cy_cut)) + '</span>' +
+        '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>' +
         '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>';
       if (!snap) {
         html += '<div class="c01-mb"><p class="c01-err">COMPASS の今の値がありません（ローカルプレビュー: compass_now/' + esc(ivNo) + '.json なし）</p></div>';
@@ -954,6 +1024,7 @@ window.C01 = window.C01 || {};
     S.modal = { kind: 'remind', iv: ivNo };
     var STAGE = { d2: 'CY カット 2 営業日前', d1: 'CY カット 前営業日', workdate_passed: '作業日を過ぎて未着', overdue: '期限超過' };
     var html = '<div class="c01-mh"><b>催促メール — プレビュー</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
+      '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">';
     var cand = ((S.remind && S.remind.cand) || {})[ivNo] || {};
     Object.keys(cand).forEach(function (pk) {
@@ -982,6 +1053,32 @@ window.C01 = window.C01 || {};
     showModal(html);
   }
 
+  /* ── v0.3.17 (R7P · 決定 #175 · #176): 使い方 (1 画面) — 並行期間 (2026-11-16〜11-22) の職員向け。人の名前・メールは書かない ── */
+  function openHelp() {
+    S.modal = { kind: 'help' };
+    var html = '<div class="c01-mh"><b>使い方</b><span class="t2">並行期間 2026-11-16〜11-22</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
+      '<p class="c01-help-lead">並行期間中は <b>これまでのシステムで仕事を続けてください</b>。この TOOL で使うのは <b>「見る」（実況表）</b> と <b>「確認・入力」</b> だけです。<br>' +
+      '<span class="c01-trial">試験表示</span> 「催促」 と 「Compass入力」 は試験表示です — ここから送信・COMPASS 入力はしません（これまでどおりの方法で）。</p>' +
+      '<div class="c01-help-grid">' +
+      '<section><h4>1. 自分の担当を見る</h4><p>実況表の 「担当港」 で <b>「自分の担当」</b> を押すと、自分の港の IV だけが出ます。「全港」 = 全部。港の名前を押すとその港だけ（複数選べます）。</p></section>' +
+      '<section><h4>2. 状況の意味</h4><ul>' +
+      '<li><span class="st-ok">自動OK</span> — エンジンの値がそろっています（手で確かめる必要なし）</li>' +
+      '<li><span class="st-ok">確認済</span> — 人が確認した値です</li>' +
+      '<li><span class="c01-help-chk">再確認</span> — 「⚠ 要確認」 を押して値を確かめてください</li>' +
+      '<li><span class="st-wait">受信中</span> / <span class="st-wait">メール未着</span> — 書類・写真がまだそろっていません（待ち）</li></ul></section>' +
+      '<section><h4>3. 確認・入力</h4><ul>' +
+      '<li>タブの数字 = 残りの枚数（コンテナ 1 台 = 1 枚）。原本を見て正しい値を選び 「確認して次へ」。</li>' +
+      '<li>どの値も違う時は <b>「✎ 修正」</b> で入力 — 人が入れた値が優先されます。</li>' +
+      '<li>搬入票でない書類は <b>「搬入票ではない」</b>（ファイルは消えません）。</li>' +
+      '<li>間違えた時は <b>「元に戻す」</b>。わからない時は 「スキップ（あとで）」。</li></ul></section>' +
+      '<section><h4>4. 更新・困った時</h4><ul>' +
+      '<li>データは 30 秒ごとに自動で更新されます。TOOL が新しくなった時は <b>Ctrl+Shift+R</b> で読み直してください。</li>' +
+      '<li>気づいた点は担当の管理者へ（画面の写真と IV 番号）。</li></ul></section>' +
+      '</div></div>';
+    showModal(html, 'c01-modal-help');
+  }
+
   function findRow(key) {
     var found = null;
     ((S.jik && S.jik.ivs) || []).forEach(function (iv) { iv.rows.forEach(function (r) { if (rowKey(iv, r) === key) found = { iv: iv, r: r }; }); });
@@ -998,7 +1095,7 @@ window.C01 = window.C01 || {};
     var qs = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id; });
     var diffQ = {};
     qs.forEach(function (q) { if (q.field) diffQ[q.field] = q; });
-    var doc = qs.map(function (q) { return (q.files || [])[0]; }).filter(Boolean)[0];
+    var doc = qs.map(function (q) { return (q.files || [])[0]; }).filter(Boolean)[0] || rowDocs(r)[0];     /* v0.3.18 (R7S #13): 項目が無くても 行の書類 (rows[].docs) */
     var ph = (S.photos[iv.iv_no] && (S.photos[iv.iv_no].containers || []).filter(function (c) { return c.container_id === r.container_id; })[0]) || null;
     var firstPhoto = ph && ph.photos && ph.photos[0];
     var fields = VALUE_FIELDS.map(function (fd) {
@@ -1043,7 +1140,10 @@ window.C01 = window.C01 || {};
     hydrate(el);
     bindEdits(el, iv, r);
     $('panel-close').onclick = $('panel-later').onclick = $('panel-bg').onclick = function () { S.sel = null; render(); };
-    if (doc) $('panel-doc').onclick = function () { S.view = 'input'; S.qsel = qs[0].queue_id; S.sel = null; render(); };
+    if (doc) $('panel-doc').onclick = function () {
+      if (!qs.length) { openTab(doc.path); return; }                 /* 確認・入力 の項目が無い行 = 原本を別タブで */
+      S.view = 'input'; S.qsel = qs[0].queue_id; S.sel = null; render();
+    };
     if (firstPhoto) $('panel-photo').onclick = function (ev) { openPhotos(ev, S.sel, 0); };
     el.querySelectorAll('[data-pick]').forEach(function (b2) {
       b2.onclick = function () {
@@ -1268,7 +1368,41 @@ window.C01 = window.C01 || {};
     }) : [];
     return { list: list, n: left.length };
   }
+  /* v0.3.18 (R7S #1 · #5 · #13): 行の書類 — エンジンの rows[].docs (次の版 · [{path, name, page, sha16, rotation}]) があればそれ ·
+     無ければ その行 (container_id) の 確認・入力 項目のファイル。同一コンテナ候補 · 要確認の横パネル · 実況表の 「原本」 で使う */
+  function rowDocs(r) {
+    var out = [], seen = {};
+    var add = function (f) {
+      if (!f || !f.path) return;
+      var k = f.path + '#' + (f.page || '');
+      if (seen[k]) return;
+      seen[k] = 1;
+      out.push(f.name ? f : Object.assign({}, f, { name: String(f.path).split('/').pop() }));
+    };
+    if (!r) return out;
+    (Array.isArray(r.docs) ? r.docs : []).forEach(add);
+    if (r.container_id) qItems().forEach(function (y) { if (y.container_id === r.container_id && DOC_KINDS[y.kind]) (y.files || []).forEach(add); });
+    return out;
+  }
+  /* 同一コンテナ候補の 写真の行 の写真から 扉 · 側面 CT · シール を (無ければ先頭から) 最大 4 枚 */
+  var SAME_PH = [[/^(door|closed|door_closed)$|扉|ドア/i, '扉'], [/^side_ct$|側面/i, '側面 CT'], [/^seal$|シール|seal/i, 'シール']];
+  function samePhotos(q) {
+    var ph = q && q.same && S.photos[q.iv_no];
+    if (!ph) return [];
+    var c = (ph.containers || []).filter(function (x) { return x.container_id === q.same.photo.container_id; })[0];
+    var list = (c && c.photos) || [];
+    var out = [];
+    SAME_PH.forEach(function (k) {
+      list.forEach(function (p, i) {
+        if (out.length >= 4 || out.some(function (o) { return o.i === i; })) return;
+        if (k[0].test(String(p.kind || p.label || '')) || (k[1] === '扉' && /^door_closed$/.test(String(p.fill || '')))) out.push({ p: p, i: i, kind: k[1] });
+      });
+    });
+    if (!out.length) list.slice(0, 3).forEach(function (p, i) { out.push({ p: p, i: i, kind: '' }); });
+    return out;
+  }
   function qFilesInfo(q) {
+    if (q.kind === SAME) return { files: q.same ? rowDocs(q.same.fax) : [], cands: 0 };
     var own = (q.files || []).filter(function (f) { return f && f.path; });
     if (q.kind === '写真のCT' || q.kind === PHOTO_SET || q.kind === '未分類FAX' || q.kind === HOLD || !q.iv_no) return { files: own, cands: 0 };
     var ov = overlay();
@@ -1351,10 +1485,10 @@ window.C01 = window.C01 || {};
       var qrow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
       var qph = qrow ? (qrow.photos || 0) : null;
       var isPdfF = !isPhotos && /\.pdf$/i.test(f.path || '');
-      var pdfPg = isPdfF ? (S.pdfPage[f.path] || f.page || 1) : 0;
+      var pdfPg = isPdfF ? (S.pdfPage[pdfKey(q, f)] || f.page || 1) : 0;
       var rots = isPhotos ? {} : rotMap(f);
       var baseRot = isPhotos ? 0 : rotOf(rots, isPdfF ? pdfPg : f.page);
-      html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : q.kind === HOLD ? '保留中の書類' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
+      html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : q.kind === HOLD ? '保留中の書類' : q.kind === SAME ? 'FAX の行の搬入票' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
         (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph, rowVal(iv, qrow, 'packer').v) ? ' c01-ph-alert' : '') + '" title="' + esc('このコンテナの写真枚数（' + photoRangeText(rowVal(iv, qrow, 'packer').v) + 'は色付き）') + '">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
         (baseRot ? '<span class="c01-autorot" id="q-autorot" title="エンジンが判読の時に見つけたページの向きで表示しています（⟳ でさらに回せます）">向き補正 ' + baseRot + '°</span>' : '') +
         (!isPhotos && f.path ? '<button class="c01-tool" id="z-out" aria-label="縮小">−</button><span class="z">' + S.zoom + '%</span><button class="c01-tool" id="z-in" aria-label="拡大">+</button>' +
@@ -1370,27 +1504,50 @@ window.C01 = window.C01 || {};
         }).join('') + '</div>';
       }
       if (!isPhotos && f.cand) html += '<p class="c01-candnote" id="q-candnote">候補 — ' + esc(f.candWhy) + '。この行の書類とは決まっていません。違う時は 「スキップ」 で 搬入票を待ってください。</p>';
-      html += '<div class="c01-orig-b">';
+      var isSame = q.kind === SAME && q.same;
+      html += (isSame ? '<div class="c01-samerow">' : '') + '<div class="c01-orig-b">';
       if (isPhotos) {
         html += '<div class="c01-grid">' + files.map(function (pf, k) { return '<button class="c01-gph" data-gph="' + k + '">' + imgTag(pf.path, 'c01-gimg', pf.name) + '<span>' + esc(pf.name || '') + '</span></button>'; }).join('') + '</div>';
       } else if (f.path) {
         var isPdf = /\.pdf$/i.test(f.path), isImg = /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(f.path);
-        var w = Math.round(640 * S.zoom / 100);
-        html += isPdf ? '<div class="c01-doc pdf">' : '<div class="c01-doc" data-base-rot="' + baseRot + '" style="width:' + w + 'px;transform:rotate(' + ((S.rot + baseRot) % 360) + 'deg)">';
-        if (isImg) html += imgTag(f.path, 'c01-docimg', f.name);
-        else if (isPdf) html += pdfTag(f.path, pdfPg, false, rots);   /* v0.3.2: 回転・拡大は pdf.js の描画で (CSS 回転なし) · v0.3.15: エンジンの向き */
-        else html += '<p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）— 上の「別タブで開く」で SharePoint で開けます' + (/\.xls[xm]?$/i.test(f.path) ? ' (Excel)' : '') + '</p>';
-        if (f.bbox && f.bbox.length === 4 && isImg) {
-          var bb = f.bbox;
-          html += '<div class="c01-bbox" style="left:' + (bb[0] * 100) + '%;top:' + (bb[1] * 100) + '%;width:' + ((bb[2] - bb[0]) * 100) + '%;height:' + ((bb[3] - bb[1]) * 100) + '%"></div>';
+        var bw = isSame ? 440 : 640;                                  /* 同一候補 = 右に写真の列があるので 原本は少し小さく */
+        var w = Math.round(bw * S.zoom / 100);
+        if (isImg) {
+          /* v0.3.18 (R7S #3): 画像の回転 — 前は 箱ごと CSS rotate だけで 90° · 270° の時 箱が回す前の大きさのまま (上が切れてスクロールできない · 下が空く)。
+             いまは 箱 = 回した後の大きさ (90° · 270° = 幅 ↔ 高さ · 画像を読んだ後に合わせる docFit) · 中の画像 = 左上を軸に回して箱の中へ (translate) ·
+             エンジンの向き (data-base-rot) + ⟳ · 拡大縮小も同じ */
+          var tr = (S.rot + baseRot) % 360;
+          html += '<div class="c01-doc img" data-base-rot="' + baseRot + '" data-rot="' + tr + '" data-w="' + w + '" style="width:' + w + 'px' + (tr % 180 ? ';height:' + w + 'px' : '') + '">' +
+            '<div class="c01-docrot r' + tr + '" style="width:' + w + 'px;transform:' + DOC_TF[tr] + '">' + imgTag(f.path, 'c01-docimg', f.name);
+          if (f.bbox && f.bbox.length === 4) {
+            var bb = f.bbox;
+            html += '<div class="c01-bbox" style="left:' + (bb[0] * 100) + '%;top:' + (bb[1] * 100) + '%;width:' + ((bb[2] - bb[0]) * 100) + '%;height:' + ((bb[3] - bb[1]) * 100) + '%"></div>';
+          }
+          html += '</div></div>';
+        } else if (isPdf) {
+          html += '<div class="c01-doc pdf">' + pdfTag(f.path, pdfPg, false, rots, pdfKey(q, f), bw) + '</div>';   /* v0.3.2: 回転・拡大は pdf.js の描画で (CSS 回転なし) · v0.3.15: エンジンの向き */
+        } else {
+          html += '<div class="c01-doc"><p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）— 上の「別タブで開く」で SharePoint で開けます' + (/\.xls[xm]?$/i.test(f.path) ? ' (Excel)' : '') + '</p></div>';
         }
-        html += '</div>';
+      } else if (q.kind === SAME) {
+        html += '<p class="c01-note2 c01-nodoc" id="q-samenodoc">FAX の行の原本がまだ分かりません（エンジンの出力に この行の書類がありません）— 写真と 下の値で確認してください</p>';
       } else if (DOC_KINDS[q.kind] && q.kind !== '未分類FAX' && q.kind !== HOLD) {
         html += '<p class="c01-note2 c01-nodoc" id="q-nodoc">搬入票なし（待ち）' + (fInfo.cands > CAND_MAX ? ' — この IV に行の決まっていない書類が ' + fInfo.cands + '件あります（候補にしません）' : '') + '</p>';
       } else {
         html += '<p class="c01-note2">原本ファイルがありません</p>';
       }
-      html += '</div>';
+      /* v0.3.18 (R7S #5): 同一コンテナ候補 = 左 FAX の原本 (そのページ) · 右 写真の行の 扉 · 側面 CT · シール の写真 (並べて見る) */
+      if (isSame) {
+        html += '</div>';                                           /* 原本 (スクロール) の右に 写真の列 (いつも見える) */
+        if (!S.photos[q.iv_no]) { if (!S.qload) S.qload = {}; if (!S.qload[q.iv_no]) { S.qload[q.iv_no] = 1; loadPhotos(q.iv_no).then(function () { render(); }); } }
+        var sps = samePhotos(q);
+        html += '<div class="c01-samephs" id="q-samephs" aria-label="写真の行の写真"><div class="t2">写真の行 · ' + esc(q.same.photo.ct || '') + '</div>' +
+          (sps.length ? sps.map(function (e) {
+            return '<button class="c01-sameph" data-sameph="' + e.i + '" title="' + esc((e.kind || e.p.label || '写真') + ' — クリックで大きく') + '">' + imgTag(e.p.path, 'c01-samephimg', e.kind || e.p.label || '') +
+              '<span>' + esc(e.kind || e.p.label || '') + '</span></button>';
+          }).join('') : '<p class="c01-note2">写真がありません</p>') + '</div>';
+      }
+      html += '</div>';                                             /* .c01-orig-b (同一候補 = .c01-samerow) */
     }
     html += '</section>';
     /* 入力 */
@@ -1435,16 +1592,26 @@ window.C01 = window.C01 || {};
         (vOpen.length ? vOpen : vItems).forEach(function (y, yi) {
           var fd = y.field;
           editing[fd] = 1;
-          var vals = S.qvals[y.queue_id] || {};
-          var cur = vals[fd] !== undefined ? vals[fd] : '';
           var alts = [];
           Object.keys(y.values || {}).forEach(function (src) { (y.values[src] || []).forEach(function (v) { alts.push([src, v]); }); });
+          /* v0.3.18 (R7S #4): シール = 形式に合う候補を先 · 合わない候補は灰色 「形式不一致」 · 合う候補が 1 つだけなら 最初から選んでおく (_auto = 人が触っていない) */
+          var sa = y.kind === '値の違い' ? sealAlts(y, alts) : { list: alts.map(function (a, i) { return { a: a, i: i, ok: null }; }), fmt: false, pick: null };
+          if (sa.pick && S.qvals[y.queue_id] === undefined && !queueState(y, ov).done) {
+            S.qvals[y.queue_id] = { _src: sa.pick.a[0], _auto: 1 };
+            S.qvals[y.queue_id][fd] = String(sa.pick.a[1]);
+          }
+          var vals = S.qvals[y.queue_id] || {};
+          var cur = vals[fd] !== undefined ? vals[fd] : '';
           html += '<div class="c01-field' + (queueState(y, ov).done ? ' ro' : '') + '" data-vq="' + esc(y.queue_id) + '"><label for="q-in-' + yi + '"><b>' + FIELD_LABEL[fd] + '</b> <span class="t2">' + esc(kindLabel(y.kind)) + '</span><span class="c01-flex"></span><span class="hint">' + esc(hintOf(fd)) + '</span></label>' +
             '<input id="q-in-' + yi + '" data-vin="' + esc(y.queue_id) + '" class="q-in' + (cur ? '' : ' need') + '" value="' + esc(cur) + '" placeholder="' + (y.kind === '手入力' ? '原本を見て入力' : '選ぶか入力') + '" aria-label="' + FIELD_LABEL[fd] + '">' +
-            (alts.length && y.kind === '値の違い' ? '<div class="c01-alts2">' + alts.map(function (a, i) {
+            (alts.length && y.kind === '値の違い' ? '<div class="c01-alts2">' + sa.list.map(function (e) {
+              var a = e.a, i = e.i;
               var bad = fd === 'ct' && C01.validate && !C01.validate.ctCheckOk(String(a[1]).replace(/[\s-]/g, '').toUpperCase());
-              return '<button class="c01-alt2' + (String(cur) === String(a[1]) ? ' on' : '') + '" data-alt="' + esc(y.queue_id) + '|' + i + '"' + (bad ? ' title="チェックデジットが合いません"' : '') + '>' + esc(a[0]) + ' <span class="mono">' + esc(a[1]) + '</span>' + (bad ? ' <span class="c01-bad">✗</span>' : '') + '</button>';
-            }).join('') + '</div>' : '') +
+              var ng = e.ok === false;
+              return '<button class="c01-alt2' + (String(cur) === String(a[1]) ? ' on' : '') + (ng ? ' c01-fmtng' : e.ok === true ? ' c01-fmtok' : '') + '" data-alt="' + esc(y.queue_id) + '|' + i + '"' +
+                (bad ? ' title="チェックデジットが合いません"' : ng ? ' title="船会社のシール番号の形式に合いません"' : '') + '>' + esc(a[0]) + ' <span class="mono">' + esc(a[1]) + '</span>' +
+                (bad ? ' <span class="c01-bad">✗</span>' : '') + (ng ? ' <span class="c01-fmttag">形式不一致</span>' : '') + '</button>';
+            }).join('') + (sa.pick && String(cur) === String(sa.pick.a[1]) && (S.qvals[y.queue_id] || {})._auto ? '<span class="c01-fmtpick t2" data-fmtpick="1">形式に合う候補が 1 つ — 選んであります（確かめてから確認）</span>' : '') + '</div>' : '') +
             '</div>';
         });
         var row = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
@@ -1512,7 +1679,7 @@ window.C01 = window.C01 || {};
     if (ro) ro.onclick = function () { S.rot = (S.rot + 90) % 360; render(); };
     var pel = root.querySelector('.c01-orig [data-pdf]');
     if (pel) {
-      var prel = pel.getAttribute('data-pdf');
+      var prel = pel.getAttribute('data-pkey') || pel.getAttribute('data-pdf');
       var turn = function (d) {
         var n = +pel.getAttribute('data-pages') || 1, cur = S.pdfPage[prel] || +pel.getAttribute('data-page') || 1, nx = Math.min(Math.max(1, cur + d), n);
         if (nx !== cur) { S.pdfPage[prel] = nx; render(); }
@@ -1528,7 +1695,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-vin]').forEach(function (el) {
       var qid = el.getAttribute('data-vin');
       var y = vItems.filter(function (z) { return z.queue_id === qid; })[0];
-      el.oninput = function () { var o = {}; o[y.field] = el.value; S.qvals[qid] = Object.assign({}, S.qvals[qid], o); delete S.qmsg[q.queue_id]; refreshSubmit(q); };
+      el.oninput = function () { var o = {}; o[y.field] = el.value; S.qvals[qid] = Object.assign({}, S.qvals[qid], o); delete S.qvals[qid]._auto; delete S.qmsg[q.queue_id]; refreshSubmit(q); };
     });
     root.querySelectorAll('[data-alt]').forEach(function (el) {
       el.onclick = function () {
@@ -1555,6 +1722,9 @@ window.C01 = window.C01 || {};
     if (ud) ud.onclick = function () { undoAction(q); };
     var ns = $('q-notsame');
     if (ns) ns.onclick = function () { sameAction(q, 'not_same'); };
+    root.querySelectorAll('[data-sameph]').forEach(function (el) {
+      el.onclick = function (ev) { var ivx = ivById(q.iv_no); if (ivx && q.same) openPhotos(ev, rowKey(ivx, q.same.photo), +el.getAttribute('data-sameph')); };
+    });
     var sph = $('same-ph');
     if (sph && q.same) sph.onclick = function (ev) { var ivx = ivById(q.iv_no); if (ivx) openPhotos(ev, rowKey(ivx, q.same.photo), 0); };
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
@@ -1610,6 +1780,48 @@ window.C01 = window.C01 || {};
     if (q.kind === HOLD) return '受信したメールの書類ですが、どの業者・インボイスか判定できず保留になっています。';
     if (q.kind === SAME) return '写真のない FAX の行と、搬入票のない写真の行が 同じコンテナかもしれません（CT・シールの読み違い）。原本と写真を見て決めてください。';
     return 'どのインボイスの搬入票か判定できませんでした。';
+  }
+  /* v0.3.18 (R7S #4): シール候補の 船会社の形式 — エンジンが項目に付けた時だけ (無い時は これまでどおり)。
+     ① seal_fmt_ok = { "候補の値": true | false } (エンジン Rules.seal_ok の結果そのまま · あればこれを使う)
+     ② seal_format = { regex, prefixes: [..] または "A;B", digits: 8 または "6~7", prefix_required } (carrier マスターの列 · エンジン seal_ok と同じ規則で TOOL が判定)
+     戻り = 関数 (値 → true 合う · false 合わない · null 分からない) · 形式の情報が無い = null */
+  function sealFmtOf(y) {
+    if (!y || y.field !== 'seal') return null;
+    var mp = y.seal_fmt_ok && typeof y.seal_fmt_ok === 'object' ? y.seal_fmt_ok : null;
+    var sf = y.seal_format && typeof y.seal_format === 'object' ? y.seal_format : null;
+    if (!mp && !sf) return null;
+    return function (v) {
+      var raw = String(v == null ? '' : v);
+      if (mp && Object.prototype.hasOwnProperty.call(mp, raw)) return mp[raw] === true ? true : mp[raw] === false ? false : null;
+      if (!sf) return null;
+      var t = raw.toUpperCase().replace(/[\s\-]/g, '');
+      if (!t) return null;
+      if (sf.regex) {
+        try { return new RegExp('^(?:' + sf.regex + ')').test(t); } catch (e) { return null; }
+      }
+      var pre = (Array.isArray(sf.prefixes) ? sf.prefixes : String(sf.prefixes || '').split(/[;\/]/))
+        .map(function (x) { return String(x || '').replace(/-/g, '').toUpperCase(); }).filter(Boolean);
+      var dig = String(sf.digits == null ? '' : sf.digits);
+      if (!pre.length && !dig) return null;
+      var onlyDigits = /^\d+$/.test(t);
+      if (pre.length && !pre.some(function (x) { return t.indexOf(x) === 0; }) && !(onlyDigits && sf.prefix_required === false)) return false;
+      var nd = t.replace(/\D/g, '').length;
+      if (/^\d+$/.test(dig) && nd !== +dig) return false;
+      var m = /^(\d+)~(\d+)$/.exec(dig);
+      if (m && !(+m[1] <= nd && nd <= +m[2])) return false;
+      return true;
+    };
+  }
+  /* 候補の並び (形式に合うものを先 · 同じなら元の順) と 印 — 元の番号 (i) はそのまま (クリックの data-alt · data-i) */
+  function sealAlts(y, alts) {
+    var fm = sealFmtOf(y);
+    var list = alts.map(function (a, i) { return { a: a, i: i, ok: fm ? fm(a[1]) : null }; });
+    if (!fm) return { list: list, fmt: false, pick: null };
+    list.sort(function (p, q2) { var sp = p.ok === true ? 0 : p.ok === false ? 2 : 1, sq = q2.ok === true ? 0 : q2.ok === false ? 2 : 1; return sp - sq || p.i - q2.i; });
+    var okVals = {};
+    list.forEach(function (e) { if (e.ok === true) okVals[String(e.a[1])] = okVals[String(e.a[1])] || e; });
+    var ks = Object.keys(okVals);
+    return { list: list, fmt: true, pick: ks.length === 1 ? okVals[ks[0]] : null };
   }
   function hintOf(fd) {
     return fd === 'ct' ? '英字4 + 数字7 · チェックデジット' : fd === 'seal' ? '英数字（空白なし）' : fd === 'work_date' ? 'YYYY-MM-DD' : '正の整数';
@@ -1771,6 +1983,7 @@ window.C01 = window.C01 || {};
     return its.some(function (y) {
       if (queueState(y, ov).done) return false;
       var v = S.qvals[y.queue_id];
+      if (v && v._auto) return false;                         /* v0.3.18: TOOL が選んでおいただけ (人の入力ではない) */
       return S.qchoice[y.queue_id] !== undefined || !!(v && Object.keys(v).some(function (k) { return k !== '_src' && String(v[k] == null ? '' : v[k]).trim(); }));
     });
   }

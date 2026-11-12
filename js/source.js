@@ -234,16 +234,18 @@ C01.sources = (function () {
        職員 = 共通マスター staff (code · email · name_ja) — v0.3.16 (R7O Part D): LEENAI.STAFF (共通ファイルに書かれた一覧) ではなくマスター。
        staff マスターが読めないときだけ LEENAI.STAFF */
     if (!(LEENAI.master && LEENAI.master.get)) return Promise.reject(new Error('マスターなし'));
-    var pol = LEENAI.master.get('pol_staff');
+    /* v0.3.18 (R7S #16): pol_staff が読めなくても 職員マスター (担当者の名前) は使う · 読めなかったことは polError で画面に出す */
+    var pol = LEENAI.master.get('pol_staff').then(function (x) { return x; }, function () { return null; });
     var sm = LEENAI.master.get('staff').then(function (x) { return x; }, function () { return null; });
     return Promise.all([pol, sm]).then(function (r) {
-      var items = r[0] || [], rows = r[1];
+      var items = Array.isArray(r[0]) ? r[0] : [], rows = r[1];
+      var polError = !Array.isArray(r[0]);
       var staff = (rows && rows.length)
         ? rows.filter(function (s) { return s && s.code && s.active !== false; }).map(function (s) {
           return { code: s.code, name: s.name_ja || s.name_en || s.code, name_en: s.name_en || '', email: s.email || '' };
         })
         : (LEENAI.STAFF || []).map(function (s) { return { code: s.staffCode, name: s.name, email: s.email }; });
-      return { staff: staff, items: items, from: (rows && rows.length) ? 'master' : 'common' };
+      return { staff: staff, items: items, from: (rows && rows.length) ? 'master' : 'common', polError: polError };
     });
   };
   Graph.prototype.me = function (staff) {
