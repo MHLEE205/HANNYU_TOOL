@@ -63,7 +63,10 @@ window.C01 = window.C01 || {};
   /* v0.3.12 (R7K Part G · 決定 #153): 作業日 — 搬入票の値はそのまま (黒) · 無い時 (メール未着の枠 · 搬入票待ちの行) は 枠の COMPASS 予定日を 灰色 ·
      今日以前は 太字の赤 (旧 実況表と同じ)。予定日は表示だけ — Compass入力 · 判定 · 値の比較には使わない (#103) */
   function slotPlan(iv, guid) { var sl = (iv.slots || []).filter(function (x) { return guid && x.slot_guid === guid; })[0]; return sl && sl.work_date ? sl.work_date : null; }
-  function wdCell(v, plan) {
+  /* v0.3.22 (R7V F-2 · 決定 #188): エンジン info 「作業日要確認」 = 枠は作業日なしで決まった行 — 作業日はカードにせず 灰色 「?」 だけ */
+  function wdDoubt(r) { return ((r && r.info) || []).filter(function (x) { return String(x).indexOf('作業日要確認') === 0; })[0] || ''; }
+  function wdCell(v, plan, doubt) {
+    if (v && doubt) return '<td><span class="c01-wddoubt" title="' + esc('作業日が読み違いの可能性があります（枠は作業日なしで決まっています · 入力・判定には使いません） · ' + doubt) + '">' + esc(md(v)) + '?</span></td>';
     if (v) return '<td>' + esc(md(v)) + '</td>';
     if (!plan) return '<td></td>';
     var today = (S.info && S.info.today) || jstNow().slice(0, 10);
@@ -558,7 +561,7 @@ window.C01 = window.C01 || {};
     var ov = overlay();
     var out = [], cnt = { check: 0, compass: 0, remind: 0 }, no = 0;
     var today = (S.info && S.info.today) || '';
-    var ivs = ((S.jik && S.jik.ivs) || []).filter(function (iv) { return portOk(iv.pol); })
+    var ivs = ((S.jik && S.jik.ivs) || []).filter(function (iv) { return portOk(iv.pol) && ivLive(iv); })
       .slice().sort(function (a, b) { return (a.cy_cut || '') < (b.cy_cut || '') ? -1 : (a.cy_cut || '') > (b.cy_cut || '') ? 1 : (a.iv_no < b.iv_no ? -1 : 1); });
     ivs.forEach(function (iv) {
       var rows = iv.rows.map(function (r) {
@@ -757,7 +760,7 @@ window.C01 = window.C01 || {};
         html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over ? ' over' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
-          '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null) +
+          '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r)) +
           cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
           (photoAlert(photos, rowVal(iv, r, 'packer').v) ? ' class="c01-ph-alert" title="' + esc(photoAlertText(photos, rowVal(iv, r, 'packer').v)) + '"' : '') + '>' +
           (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '" title="新しいタブで写真を表示 (Shift+クリック = この画面で表示)">📷 ' + photos + '枚</button>' : '0枚') + '</td><td class="c-st">' + stCell + '</td></tr>';
@@ -1258,7 +1261,8 @@ window.C01 = window.C01 || {};
     S.modal = { kind: 'remind', iv: ivNo };
     var STAGE = { d2: 'CY カット 2 営業日前', d1: 'CY カット 前営業日', workdate_passed: '作業日を過ぎて未着', overdue: '期限超過' };
     var html = '<div class="c01-mh"><b>催促メール — プレビュー</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
-      '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>' +
+      (remindTest() ? '<span class="c01-trial" data-trial>試験送信（[test] · 試験用アドレスだけ · 業者には送りません）</span>' :
+        '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>') +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">';
     var cand = ((S.remind && S.remind.cand) || {})[ivNo] || {};
     Object.keys(cand).forEach(function (pk) {
@@ -1276,15 +1280,68 @@ window.C01 = window.C01 || {};
         '<div><span class="k">回数</span><span>' + esc(d.round) + ' 回目 · ' + esc(STAGE[d.stage] || d.stage) + ' · ' + esc(d.packer) + '</span></div></div>' +
         /* v0.3.12 (R7K Part D ② · D-55 (나)): BKG だけ合う候補がある行も催促の対象 — 送る前に確認 */
         (d.cand_note ? '<p class="c01-note2 c01-rcand c01-rcand-bkg">' + esc(d.cand_note) + '（BKG ' + (+d.cand_bkg || 0) + '台）</p>' : '') +
-        '<pre class="c01-rbody">' + esc(signed(d.body_text || '')) + '</pre></section>';
+        '<pre class="c01-rbody">' + esc(signed(d.body_text || '')) + '</pre>' + remindSendRow(iv, d, i) + '</section>';
     });
     var past = (iv && iv.reminders) || [];
     html += '<div class="c01-rpast"><b>これまでの催促</b>' + (past.length ? '<ul>' + past.map(function (p) {
       return '<li>' + esc(String(p.at || '').slice(0, 16).replace('T', ' ')) + ' · ' + esc(p.by || '') + (p.value && p.value.round ? ' · ' + esc(p.value.round) + '回目' : '') + '</li>';
     }).join('') + '</ul>' : '<span class="t2"> なし</span>') + '</div></div>' +
       '<div class="c01-mf"><span class="t2">送信は押した職員本人のメールから（決定 #97）· 回数・送信者を記録</span><span class="c01-flex"></span>' +
-      '<button id="remind-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 は下書きだけ">下書きのみ</button></div>';
+      (remindTest() ? '<span class="c01-trial" id="remind-testmode">試験モード: 件名に [test] · 宛先は試験用アドレスだけ（業者 · CC には送りません）</span>' :
+        '<button id="remind-send" class="c01-btn-pri" disabled aria-disabled="true" title="試験モードではありません — 送信できません">送信できません</button>') + '</div>';
     showModal(html);
+    $('c01-modal').querySelectorAll('[data-rsend]').forEach(function (b) {
+      b.onclick = function () { sendRemindTest(ivNo, ds[+b.getAttribute('data-rsend')], b); };
+    });
+    $('c01-modal').querySelectorAll('[data-rskip]').forEach(function (c) {
+      c.onchange = function () { var b = $('c01-modal').querySelector('[data-rsend="' + c.getAttribute('data-rskip') + '"]'); if (b && !b.hasAttribute('data-done')) b.disabled = c.checked || !remindCanSend(); };
+    });
+  }
+  /* ── v0.3.22 (R7V Part B · 決定 #191 · #135): 催促 = エンジンの下書き → 担当者が「送信」。
+     試験モード (11/16〜22 · 2 重の鍵): ① C01.SEND.remindTest (この画面のコード) ② エンジン remind.json send_mode.test。
+     どちらかが試験でなければ 送信ボタンは出さない (実際の宛先へ送るコードはこの版に無い)。試験の宛先 = send_mode.to 1 件だけ · 件名の前に [test] · CC 0。
+     送ったら _actions reminder_sent (誰 · いつ · 業者 · 回数 · 試験) · 同じ IV · 業者 · 回数 はもう送れない */
+  function remindMode() { return (S.remind && S.remind.send_mode) || null; }
+  function remindTest() {
+    var m = remindMode();
+    return !!(C01.SEND && C01.SEND.remind && C01.SEND.remindTest !== false && m && m.test === true && typeof m.to === 'string' && /^[^@\s]+@[^@\s]+$/.test(m.to));
+  }
+  function remindCanSend() { return remindTest() && graphMode() && !!(S.me && S.me.email); }
+  function remindSent(iv, d) {
+    var xs = ((iv && iv.reminders) || []).map(function (x) { return x.value || {}; });
+    (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'reminder_sent' && a.iv === d.iv_no) xs.push(a.value || {}); });
+    return xs.filter(function (v) { return v.packer === d.packer && +v.round === +d.round; })[0] || null;
+  }
+  function remindSendRow(iv, d, i) {
+    if (!remindTest()) return '';
+    var sent = remindSent(iv, d);
+    var ready = !d.ready_at || jstNow() >= d.ready_at;
+    var why = sent ? '送信済（' + (sent.test ? '試験 · ' : '') + d.round + '回目）' : !ready ? String(d.ready_at).slice(11, 16) + ' から送信できます' :
+      !remindCanSend() ? 'ログインした職員だけ送信できます' : '';
+    return '<div class="c01-rsendrow"><label class="t2"><input type="checkbox" data-rskip="' + i + '"' + (sent ? ' disabled' : '') + '> この業者には送らない</label>' +
+      '<span class="c01-flex"></span><span class="t2">' + esc(why) + '</span>' +
+      '<button class="c01-btn-pri" data-rsend="' + i + '"' + (sent ? ' data-done disabled' : (!ready || !remindCanSend() ? ' disabled' : '')) + '>送信（試験）</button></div>';
+  }
+  function sendRemindTest(ivNo, d, btn) {
+    var m = remindMode();
+    var iv = ivById(ivNo);
+    if (!remindCanSend() || !d || remindSent(iv, d)) return;
+    var subj = '[test] ' + d.subject;
+    var orig = '[test] 実際の宛先 To ' + (d.to || []).length + '件 · CC ' + (d.cc || []).length + '件（試験送信 · 業者には送っていません）';
+    var html = '<p style="color:#888">' + esc(orig) + '</p>' + signed(d.body_html || ('<pre>' + esc(d.body_text || '') + '</pre>'));
+    btn.disabled = true;
+    btn.textContent = '送信中…';
+    S.src.sendMailTest({ subject: subj, html: html, to: m.to }).then(function () {
+      return writeAction(mkAction('reminder_sent', { iv: ivNo, ct: null, field: null, source: null,
+        value: { packer: d.packer, round: +d.round, stage: d.stage, subject: subj, to: [m.to], cc: [], test: true } }));
+    }).then(function () {
+      toast('試験送信しました（' + d.packer + ' · ' + d.round + '回目 · 試験用アドレス）', 'ok');
+      openRemind(ivNo);
+    }).catch(function (e) {
+      btn.disabled = false;
+      btn.textContent = '送信（試験）';
+      toast('送信できませんでした: ' + e.message, 'error');
+    });
   }
 
   /* ── v0.3.17 (R7P · 決定 #175 · #176): 使い方 (1 画面) — 並行期間 (2026-11-16〜11-22) の職員向け。人の名前・メールは書かない ── */
@@ -1293,7 +1350,7 @@ window.C01 = window.C01 || {};
     var html = '<div class="c01-mh"><b>使い方</b><span class="t2">並行期間 2026-11-16〜11-22</span>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
       '<p class="c01-help-lead">並行期間中は <b>これまでのシステムで仕事を続けてください</b>。この TOOL で使うのは <b>「見る」（実況表）</b> と <b>「確認・入力」</b> だけです。<br>' +
-      '<span class="c01-trial">試験表示</span> 「催促」 は試験表示です — ここから送信しません（これまでどおりの方法で）。 ' +
+      '<span class="c01-trial">試験表示</span> 「催促」 は試験表示です — 業者には送りません（「送信（試験）」は試験用アドレスにだけ届きます · 業者への催促はこれまでどおりの方法で）。 ' +
       '「Compass入力」 は <span class="c01-trial">試験運用中</span> — ボタンを押すと COMPASS に入力します（試験用 · 職員の業務はこれまでどおりの方法で）。</p>' +
       '<div class="c01-help-grid">' +
       '<section><h4>1. 自分の担当を見る</h4><p>実況表の 「担当港」 で <b>「自分の担当」</b> を押すと、自分の港の IV だけが出ます。「全港」 = 全部。港の名前を押すとその港だけ（複数選べます）。</p></section>' +
@@ -1351,6 +1408,9 @@ window.C01 = window.C01 || {};
       var note = st && st.done ? '確認済' + (st.by ? ' · ' + st.by : '') : '';
       return '<div class="c01-pf c01-pf-edit">' + editCell(iv, r, fd, note, ov) + '</div>';     /* v0.3.15 (R7N G-4): ✎ 修正 */
     }).join('');
+    /* v0.3.22 (R7V F-2): 作業日の理由 (WORK_DATE) がある行 · 作業日要確認 の行 = 作業日 ✎ 修正 (他の値と同じ · 人の値が優先 #109 · 学習の記録) */
+    var wdNeed = (r.reasons || []).indexOf('WORK_DATE') >= 0 || !!wdDoubt(r);
+    if (wdNeed) fields += '<div class="c01-pf c01-pf-edit">' + editCell(iv, r, 'work_date', '', ov) + '</div>';
     var needPick = Object.keys(diffQ).filter(function (fd) { return diffQ[fd].kind === '値の違い' && !queueState(diffQ[fd], ov).done; });
     var psQ = qs.filter(function (q) { return q.kind === PHOTO_SET && !queueState(q, ov).done && r.ct; })[0] || null;
     var ready = needPick.length > 0 ? (needPick.every(function (fd) { return S.picks[fd]; }) || (needPick.length === 1 && S.panelInput.trim())) : !!psQ;
@@ -1367,7 +1427,7 @@ window.C01 = window.C01 || {};
       '<button id="panel-photo" class="c01-thumb"' + (firstPhoto ? '' : ' disabled') + '>' + (firstPhoto ? imgTag(firstPhoto.path, 'c01-thimg', '写真') : '') + '<span>' + (firstPhoto ? esc('写真 ' + (firstPhoto.label || '')) : '写真なし') + '</span></button></div>' +
       fields +
       (needPick.length === 1 ? '<label class="c01-direct">どちらも違う場合は直接入力<input id="panel-input" type="text" placeholder="正しい値" value="' + esc(S.panelInput) + '"></label>' : '') +
-      (needPick.length || psQ ? '' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
+      (needPick.length || psQ ? '' : wdNeed ? '<p class="c01-note2">作業日を原本で確認し、違っていれば ✎ 修正 で直してください</p>' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
       '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
       '<button id="panel-later" class="c01-btn-ghost2">あとで</button></div>' +
       '<p class="c01-foot">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</p>' +
@@ -1539,7 +1599,19 @@ window.C01 = window.C01 || {};
   function queuePortOk(q) {
     if (!q.iv_no) return true;
     var iv = ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0];
-    return !iv || portOk(iv.pol);
+    return !iv || (portOk(iv.pol) && ivLive(iv));
+  }
+  /* v0.3.22 (R7V Part 0-2 · 決定 #194): 実況表 · 確認・入力 · 件数 = CY CUT ≥ 今日 (JST) の IV だけ (過ぎた IV は隠すだけ · データはそのまま)。
+     今日 = _data info.today (エンジンが書いた日) · 無ければ この端末の JST 日付。旧 phase4_report.py:569 (cy_cut < today → 表示しない) と同じ。
+     CY CUT が無い IV は表示 (旧は外す — 作業が残っている行を隠さないため) */
+  function todayJst() {
+    var t = (S.info && S.info.today) || (S.jik && S.jik.today);
+    if (t) return String(t).slice(0, 10);
+    return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+  function ivLive(iv) {
+    var c = iv && iv.cy_cut ? String(iv.cy_cut).slice(0, 10) : '';
+    return !c || c >= todayJst();
   }
   /* 写真枚数の色 (v0.3.10 · 決定 #143 · 表示だけ): 業者ごとの通常範囲 (エンジン meta.photo_range = 10〜90% の 下 −2 · 上 +3 · 週 1 回計算) の外。
      範囲のない業者 (台数 10 未満) · meta がない時 = 旧 実況表 (phase4_report.py · photo_count < 6 or >= 15) と同じ基準 */

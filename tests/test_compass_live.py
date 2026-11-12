@@ -91,8 +91,8 @@ def main():
             page.route(DV + "/**", dv_handler(cells, state))
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("v0.3.19 config: Compass入力 = 실제 입력 (SEND.compass · dvUrl · 試験運用中)",
-               page.evaluate("C01.SEND.compass === true && C01.COMPASS.dvUrl === '%s' && C01.COMPASS.trial === true && C01.SEND.remind === false" % DV))
+            ok("v0.3.19 config: Compass入力 = 실제 입력 (SEND.compass · dvUrl · 試験運用中) · v0.3.22 催促 = 試験送信만 (remindTest)",
+               page.evaluate("C01.SEND.compass === true && C01.COMPASS.dvUrl === '%s' && C01.COMPASS.trial === true && C01.SEND.remind === true && C01.SEND.remindTest === true" % DV))   # v0.3.22 (R7V B): 催促 = 試験送信만
             page.evaluate(G.STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
                           "C01.app.start(new C01.sources.Graph())")

@@ -344,3 +344,4 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-cres.ng { color: var(--c-diff); font-weight: 700; }
 .c01-chist { margin-top: 8px; font-size: 12px; color: var(--text2); }
 .c01-chist b { display: block; margin-bottom: 2px; }
+.c01-wddoubt { color: var(--text2); }   /* v0.3.22 (R7V F-2): 作業日要確認 = 灰色 「?」 */

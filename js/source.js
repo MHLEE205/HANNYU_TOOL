@@ -35,6 +35,7 @@ C01.sources = (function () {
       .then(function (r) { if (!r.ok) throw new Error('書き込み失敗 (' + r.status + ')'); return r.json(); });
   };
   LocalServer.prototype.getStaff = function () { return jget('/api/staff'); };
+  LocalServer.prototype.sendMailTest = function () { return Promise.reject(new Error('ローカルプレビューでは送信しません')); };   /* v0.3.22 (R7V Part B) */
 
   /* ── local ②: フォルダ選択 (File System Access API · Chrome/Edge) ── */
   function Folder(handle) { this.root = handle; this.urls = {}; }
@@ -227,6 +228,21 @@ C01.sources = (function () {
       if (r.status === 409) throw new Error('同じ記録がすでにあります (409)');
       if (!r.ok) throw new Error('書き込み失敗 (' + r.status + ')');
       return { file: day + '/' + a.action_id + '.json' };
+    });
+  };
+  /* v0.3.22 (R7V Part B · 決定 #191 · #135): 催促の試験送信 — Graph /me/sendMail (ログインした職員のメール)。2 番目の鍵: 宛先は 1 件 = 試験用アドレス
+     (エンジン remind.json send_mode.to) · 件名は [test] で始まる · CC · BCC なし。それ以外は送らない (実際の宛先へ送るコードは無い) */
+  Graph.prototype.sendMailTest = function (m) {
+    var mode = (C01.state && C01.state.remind && C01.state.remind.send_mode) || {};
+    if (!(C01.SEND && C01.SEND.remindTest !== false) || mode.test !== true || !m || m.to !== mode.to || !/^\[test\] /.test(m.subject || '')) {
+      return Promise.reject(new Error('試験モードの宛先ではありません — 送信しません'));
+    }
+    var body = { message: { subject: m.subject, body: { contentType: 'HTML', content: m.html || '' }, toRecipients: [{ emailAddress: { address: mode.to } }] },
+      saveToSentItems: true };
+    return this._fetch(GRAPH + 'me/sendMail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) {
+      if (r.status === 403) throw new Error('メール送信の権限がありません (403)');
+      if (r.status !== 202 && !r.ok) throw new Error('送信失敗 (' + r.status + ')');
+      return { ok: true };
     });
   };
   Graph.prototype.getStaff = function () {

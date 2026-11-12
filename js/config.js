@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.21',
+  version: '0.3.22',
   date: '2026-11-12',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
@@ -37,7 +37,10 @@ C01.SEND = {
   /* v0.3.19 (R7T 決定 #190): Compass入力 = 実際に入力 (graph モード · ログインした人のトークン = その人の権限 · 記録 + 元に戻す)。
      false = 比較表だけ (DRY · 送信ボタン無効) */
   compass: true,
-  remind: false
+  /* v0.3.22 (R7V Part B · 決定 #191): 催促 = 下書き → 担当者が「送信」。remindTest = 試験モード (件名 [test] · 宛先 = エンジン remind.json send_mode.to 1 件だけ)。
+     11/24 の実際の送信への切り替えは 形님 確認の後 (この版には 実際の宛先へ送るコードが無い — remindTest: false にすると 送信ボタンが消えるだけ) */
+  remind: true,
+  remindTest: true
 };
 
 /* v0.2.1 (R6.6): Compass入力 比較の規則 — 決定 D-11 待ち。ここだけ変える (エンジン設定 compass_follow_same_cond_slot と同じ名前・同じ規則)

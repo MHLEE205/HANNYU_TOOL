@@ -2,6 +2,12 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.22 (2026-11-12) — R7V: CY CUT 지난 IV 숨김 · 作業日 「?」 · 作業日 修正 · 催促 試験送信
+- Part 0-2 (#194): 実況表 · 確認・入力 · 건수 = CY CUT ≥ 오늘 (JST · `_data` today) 인 IV 만 (지난 IV 는 숨김만 · 데이터 그대로). 옛 `phase4_report.py:569` 와 같음. CY CUT 없는 IV 는 표시 (옛 엔진은 뺌 — 일이 남은 줄을 숨기지 않으려고)
+- F-2 (#188): 엔진 info 「作業日要確認」 줄 = 작업일 칸 회색 「?」 (카드 아님) · WORK_DATE 사유 줄 옆 창 = 作業日 ✎ 修正 (다른 값과 같은 방식 · 人の値が優先)
+- Part B (#191 · #135): 催促 창 「送信（試験）」 — 두 겹 잠금 (`config.js` `SEND.remindTest` · 엔진 `remind.json` `send_mode.test`) · 받는 곳 = `send_mode.to` 1개 · 제목 앞 `[test]` · CC 0 · 본문 앞 「実際の宛先 To n件 · CC n件」 · `reminder_sent` 기록 (test true) · 같은 업체 · 회차 다시 못 보냄 · 「この業者には送らない」. 실제 받는 곳으로 보내는 코드는 이 판에 없음
+- 시험 `r7v_checks` · `r7v_remind_checks` (가짜 Graph) — ui 180
+
 ## 0.3.21 (2026-11-12) — R7V F-1: 実況表 옆 창 위쪽 잘림 고침
 - 원인: 옆 창 `.c01-side` 가 `top: 0` · z-index 31 — 상단 공통 바 (`.ln-header` sticky · z-index 50) 가 패널 맨 위 (CT · IV · 업체) 를 덮음
 - 고침: 패널 top = 상단 바 아래 (`--c01-hdr-h` · 패널 열 때 · 창 크기 바뀔 때 다시 잼) · 높이 = 화면 − 바 · 패널 머리 sticky (패널 안 스크롤에도 CT 보임)

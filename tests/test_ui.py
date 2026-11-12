@@ -293,6 +293,127 @@ def r7v_side_checks(br, url, shots):
        all(x[2] for x in res), [x for x in res if not x[2]] or len(res))
 
 
+def r7v_checks(page, root, shots):
+    """v0.3.22 (R7V): Part 0-2 #194 CY CUT ≥ 오늘 IV 만 (실황표 · 確認・入力 · 건수) · F-2 作業日要確認 = 회색 「?」 · WORK_DATE 줄 옆 창 = 作業日 ✎ 修正."""
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    ivs_of = lambda: sorted(page.eval_on_selector_all("tbody[data-iv]", "els => els.map(e => e.getAttribute('data-iv'))"))   # noqa: E731
+    before = ivs_of()
+    j2 = json.loads(jt0)
+    today = j2.get("today") or "2026-11-08"
+    past = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-02")
+    past["cy_cut"] = "2026-01-02"                     # 지난 IV
+    nocut = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-05")
+    nocut["cy_cut"] = None                            # CY CUT 없음 = 표시
+    iv1 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    r0 = next(r for r in iv1["rows"] if r.get("work_date") and not (r.get("human") or {}).get("work_date"))
+    r0["info"] = (r0.get("info") or []) + ["作業日要確認(too_old)"]
+    jp.write_text(dump(j2), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    after = ivs_of()
+    ok("0-2 #194 CY CUT 지난 IV 숨김 · CY CUT 없는 IV 표시 · 나머지 그대로", "TST2611-02" in before and "TST2611-02" not in after and "TST2611-05" in after
+       and sorted(set(before) - {"TST2611-02"}) == after, [before, after, today])
+    page.click("#tab-input")
+    page.wait_for_timeout(300)
+    txt = page.locator("body").inner_text()
+    ok("0-2 確認・入力 에도 지난 IV 항목 없음", "TST2611-02" not in txt, "")
+    page.click("#tab-main")
+    page.wait_for_timeout(200)
+    wd = page.locator("tbody[data-iv='TST2611-01'] .c01-wddoubt")
+    ok("F-2 作業日要確認 줄 = 작업일 칸 회색 「?」 (title 설명)", wd.count() == 1 and wd.inner_text().endswith("?") and "読み違い" in (wd.get_attribute("title") or ""),
+       [wd.count(), wd.count() and wd.inner_text()])
+    # WORK_DATE 줄 → 옆 창 作業日 ✎ 修正
+    j3 = json.loads(jp.read_text(encoding="utf-8"))
+    iv3 = next(x for x in j3["ivs"] if x["iv_no"] == "TST2611-01")
+    r3 = next(r for r in iv3["rows"] if r.get("ct") and r.get("work_date"))
+    r3["status"] = "再確認"
+    r3["reasons"] = ["WORK_DATE"]
+    r3["info"] = ["WORK_DATE(too_old)"]
+    jp.write_text(dump(j3), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(400)
+    key = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{r3['ct']}')").first.get_attribute("data-key")
+    page.evaluate("k => { C01.state.sel = k; C01.app.render(); }", key)
+    page.wait_for_selector(".c01-side")
+    ed = page.locator(".c01-side [data-ef='work_date'] .c01-edit")
+    ok("F-2 WORK_DATE 줄 옆 창 = 作業日 ✎ 修正 + 안내", ed.count() == 1 and "作業日を原本で確認" in page.locator(".c01-side").inner_text(), ed.count())
+    page.screenshot(path=str(shots / "r7v_wd_panel.png"))
+    page.evaluate("C01.state.sel = null; C01.app.render()")
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
+def r7v_remind_checks(page, root, shots):
+    """v0.3.22 (R7V Part B · #191 · #135): 催促 送信 = 시험 모드만 — 두 겹 잠금 (config remindTest · 엔진 send_mode.test) · 받는 곳 = 시험 주소 1개 ·
+    제목 [test] · CC 0 · reminder_sent 기록 · 같은 업체·회차 다시 못 보냄 · 실제 받는 곳 (d.to · d.cc) 으로 가는 호출 0."""
+    rp = root / "_data" / "remind.json"
+    rt0 = rp.read_text(encoding="utf-8")
+    TEST_TO = "test.box@example.invalid"
+    r2 = json.loads(rt0)
+    r2["send_mode"] = {"test": True, "to": TEST_TO, "tag": "[test]"}
+    for ds in r2["ivs"].values():
+        for d in ds:
+            d["body_html"] = "<p>" + d["body_text"].replace(chr(10), "<br>") + "</p>"
+    rp.write_text(json.dumps(r2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("""() => { C01.app.tick(); }""")
+    page.wait_for_timeout(500)
+    page.evaluate("""() => { window.__sent = []; C01.state.info.mode = 'graph';
+        C01.state.src.sendMailTest = function (m) { window.__sent.push(m); return C01.sources.Graph.prototype.sendMailTest.call({ _fetch: function (u, o) {
+            window.__sent.push({ url: u, body: JSON.parse(o.body) }); return Promise.resolve({ status: 202, ok: true }); } }, m); }; }""")
+    page.click("tbody[data-iv='TST2611-02'] [data-remind]")
+    page.wait_for_selector("[data-rsend]")
+    bt = page.locator("[data-rsend]").first
+    ok("B 催促 창 = 試験モード 표시 · 送信（試験） 버튼", page.locator("#remind-testmode").count() == 1 and bt.is_enabled() and "試験" in bt.inner_text(), bt.inner_text())
+    page.locator("[data-rskip='0']").check()
+    ok("B 「この業者には送らない」 = 버튼 꺼짐", page.locator("[data-rsend='0']").is_disabled())
+    page.locator("[data-rskip='0']").uncheck()
+    page.locator("[data-rsend='0']").click()
+    for _ in range(30):
+        if any(x["action"] == "reminder_sent" for x in actions(root)):
+            break
+        time.sleep(0.1)
+    sent = page.evaluate("window.__sent")
+    post = [x for x in sent if isinstance(x, dict) and x.get("url")]
+    msg = post[0]["body"]["message"] if post else {}
+    rec = [x for x in actions(root) if x["action"] == "reminder_sent"]
+    ok("B 송신 = /me/sendMail 1번 · 받는 곳 = 시험 주소 1개 · CC 0 · 제목 [test] · 본문 앞 「実際の宛先」",
+       len(post) == 1 and post[0]["url"].endswith("/me/sendMail") and [r["emailAddress"]["address"] for r in msg.get("toRecipients", [])] == [TEST_TO]
+       and not msg.get("ccRecipients") and not msg.get("bccRecipients") and msg.get("subject", "").startswith("[test] ")
+       and "実際の宛先" in msg.get("body", {}).get("content", ""), [len(post), msg.get("subject")])
+    allr = json.dumps(sent, ensure_ascii=False)
+    ok("B 실제 받는 곳 (초안 to · cc) 주소가 보낸 내용에 0", not any(a in allr for d in r2["ivs"]["TST2611-02"] for a in (d.get("to") or []) + (d.get("cc") or [])), "")
+    ok("B reminder_sent 기록 (업체 · 회차 · test true · to = 시험 주소)", len(rec) == 1 and rec[0]["value"]["test"] is True and rec[0]["value"]["to"] == [TEST_TO]
+       and rec[0]["iv"] == "TST2611-02", rec)
+    page.wait_for_selector("[data-rsend][data-done]", timeout=5000)
+    ok("B 보낸 뒤 = 「送信済」 · 같은 업체·회차 다시 못 보냄", page.locator("[data-rsend='0']").is_disabled() and "送信済" in page.locator(".c01-rsendrow").first.inner_text())
+    page.screenshot(path=str(shots / "r7v_remind_test.png"))
+    page.click("[data-close]")
+    bad = page.evaluate("""() => C01.sources.Graph.prototype.sendMailTest.call({ _fetch: function () { return Promise.resolve({ status: 202, ok: true }); } },
+        { subject: '[test] x', html: '', to: 'other@example.invalid' }).then(() => 'sent', e => 'blocked')""")
+    bad2 = page.evaluate("""() => C01.sources.Graph.prototype.sendMailTest.call({ _fetch: function () { return Promise.resolve({ status: 202, ok: true }); } },
+        { subject: 'no tag', html: '', to: '%s' }).then(() => 'sent', e => 'blocked')""" % TEST_TO)
+    ok("B source 두 번째 잠금: 시험 주소 아님 / [test] 없음 = 보내지 않음", bad == "blocked" and bad2 == "blocked", [bad, bad2])
+    r3 = json.loads(rp.read_text(encoding="utf-8"))
+    r3["send_mode"]["test"] = False
+    rp.write_text(json.dumps(r3, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    page.click("tbody[data-iv='TST2611-02'] [data-remind]")
+    page.wait_for_selector(".c01-rmd")
+    ok("B 엔진 send_mode.test false = 送信 버튼 0 (실제 송신 코드 없음)", page.locator("[data-rsend]").count() == 0 and page.locator("#remind-send").is_disabled())
+    page.click("[data-close]")
+    rp.write_text(rt0, encoding="utf-8")
+    page.evaluate("C01.state.info.mode = 'local'; C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r7u_checks(page, root, shots):
     """v0.3.20 (R7U): F-1 管理者 = 全港 (#201) · A-3 CT重複 / シール重複 · 再判読 표시 · A-4 手入力 CT 경고."""
     jp = root / "_data" / "jikkyou.json"
@@ -701,11 +822,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.21", page.title() == "LEENAI C-01 搬入票 v0.3.21", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.22", page.title() == "LEENAI C-01 搬入票 v0.3.22", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.21" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.22" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -804,7 +925,8 @@ def main():
             ok("催促 미리보기 (받는 사람 · 제목 · 본문 · 회차 · 지난 기록)", "BKG-TEST-0002" in subj and "example.invalid" in page.locator(".c01-rmeta").first.inner_text()
                and "回目" in page.locator(".c01-rmeta").first.inner_text() and page.locator(".c01-rpast").count() == 1, subj)
             ok("催促 본문 끝 = ✦ Powered by LEENAI Automation System", body.strip().endswith("✦ Powered by LEENAI Automation System"))
-            ok("催促 送信 비활성 「下書きのみ」", rs.is_disabled() and "下書き" in rs.inner_text())
+            ok("催促 送信 비활성 (엔진 send_mode 없음 = 「送信できません」 · 送信 버튼 0)", rs.is_disabled() and "送信できません" in rs.inner_text()
+               and page.locator("[data-rsend]").count() == 0, rs.inner_text())
             tb = page.locator(".c01-mh [data-trial]")
             ok("v0.3.17 催促 창 「試験表示（並行期間中は送信・入力しません）」", tb.count() == 1 and tb.inner_text() == "試験表示（並行期間中は送信・入力しません）")
             ok("v0.3.11 催促 미리보기 「候補書類あり — 催促前に確認」 (엔진 remind.json cand)",
@@ -1158,6 +1280,8 @@ def main():
             r7s_checks(page, root, shots)
             r7u_checks(page, root, shots)
             r7v_side_checks(br, url, shots)
+            r7v_checks(page, root, shots)
+            r7v_remind_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
