@@ -16,6 +16,12 @@
    "code": "STAFF_C",
    "name": "STAFF C",
    "email": "staff.c@example.invalid"
+  },
+  {
+   "code": "STAFF_D",
+   "name": "STAFF D",
+   "email": "staff.d@example.invalid",
+   "admin": true
   }
  ],
  "items": [

@@ -242,7 +242,7 @@ C01.sources = (function () {
       var polError = !Array.isArray(r[0]);
       var staff = (rows && rows.length)
         ? rows.filter(function (s) { return s && s.code && s.active !== false; }).map(function (s) {
-          return { code: s.code, name: s.name_ja || s.name_en || s.code, name_en: s.name_en || '', email: s.email || '' };
+          return { code: s.code, name: s.name_ja || s.name_en || s.code, name_en: s.name_en || '', email: s.email || '', admin: s.portal_admin === true };
         })
         : (LEENAI.STAFF || []).map(function (s) { return { code: s.staffCode, name: s.name, email: s.email }; });
       return { staff: staff, items: items, from: (rows && rows.length) ? 'master' : 'common', polError: polError };
@@ -256,7 +256,7 @@ C01.sources = (function () {
     var list = (staff && staff.staff) || [];
     var s = list.filter(function (x) { return em && String(x.email || '').toLowerCase() === em; })[0] ||
       list.filter(function (x) { return u.staffCode && x.code === u.staffCode; })[0];
-    if (s) return { code: s.code, name: s.name || s.code, email: s.email || u.email };
+    if (s) return { code: s.code, name: s.name || s.code, email: s.email || u.email, admin: !!s.admin };   /* v0.3.20 (#201): 職員マスター portal_admin */
     return u.email ? { code: u.staffCode || u.email, name: '職員マスター未登録', email: u.email, unregistered: true } : null;
   };
 

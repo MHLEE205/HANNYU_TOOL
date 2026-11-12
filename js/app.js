@@ -23,15 +23,23 @@ window.C01 = window.C01 || {};
     '未分類FAX': { key: 'fax', color: 'var(--c-fax)', label: '未分類 FAX' },
     '写真不足': { key: 'photo', color: 'var(--c-photo)' },    /* R6M13 (エンジン out_queue_photo_set): 理由 29 の行 — 写真を見て 確認する */
     '業者・IV未定': { key: 'hold', color: 'var(--c-fax)', label: '業者・IV 未定' },   /* v0.3.11 (R7J Part C · エンジン out_queue_hold): 保留中のメールの書類 */
+    '他社搬入票候補': { key: 'foreign', color: 'var(--c-fax)', label: '他社搬入票候補' },   /* v0.3.20 (R7U Part D · 決定 #202 · エンジン s3_foreign_doc_v2): 他の会社の書類らしい */
     '同一候補': { key: 'same', color: 'var(--c-photo)', label: '同一コンテナ候補' }   /* v0.3.12 (R7K Part C · 決定 #150): FAX の行 ↔ 写真の行 (エンジン same_cand) */
   };
   var SAME = '同一候補';
   var HOLD = '業者・IV未定';
+  var FOREIGN = '他社搬入票候補';
+  var FOREIGN_WHY = { '荷主': '荷主がリニアではない', '船社': '船社がこのブッキングと違う', '品目': '品目が古紙ではない', 'シール形式': 'シールの形がこの船社と違う' };
+  function foreignWhy(q) {
+    var s = String(q.note || ''), i = s.indexOf(':');
+    var ws = (i >= 0 ? s.slice(i + 1) : s).split('・').filter(Boolean);
+    return 'BKG が当社のどのブッキングにもない' + (ws.length ? ' · ' + ws.map(function (w) { return FOREIGN_WHY[w] || w; }).join(' · ') : '');
+  }
   var HOLD_TEXT = { PACKER_MISMATCH: '業者が合いません', PACKER_MULTI: '業者が複数', BKG_MULTI: 'BKG が複数', BKG_UNKNOWN: 'BKG が見つかりません',
     NO_BKG: 'BKG が読めません', UNREGISTERED_SENDER: '送信元が未登録' };
   /* v0.3.11 (R7J Part A): 確認・入力 = コンテナ 1 台 = 1 枚 (CT が分からない項目は 書類 1 つ = 1 枚) */
   var VALUE_KINDS = { '値の違い': 1, '手入力': 1 };
-  var DOC_KINDS = { '値の違い': 1, '手入力': 1, '未分類FAX': 1, '業者・IV未定': 1 };
+  var DOC_KINDS = { '値の違い': 1, '手入力': 1, '未分類FAX': 1, '業者・IV未定': 1, '他社搬入票候補': 1 };
   var PHOTO_SET = '写真不足';
   function photoSetAction(q, ct) {     /* R6M13: 値はそのまま (CT を確認) — エンジンが「写真不足 OK」実績を記録 (#131 ③) */
     return mkAction('confirm_value', { iv: q.iv_no, ct: ct, field: 'ct', value: ct, source: '写真', queue_id: q.queue_id });
@@ -299,6 +307,12 @@ window.C01 = window.C01 || {};
     });
     return out;
   }
+  function isAdmin() {
+    if (!S.me) return false;
+    if (S.me.admin) return true;
+    var me = S.me;
+    return staffList().some(function (s) { return s.admin && ((me.code && s.code === me.code) || (me.email && String(s.email || '').toLowerCase() === String(me.email).toLowerCase())); });
+  }
   function myIds() {
     var ids = {};
     var add = function (x) { var n = normWho(x); if (n && n !== normWho('職員マスター未登録')) ids[n] = 1; };
@@ -315,6 +329,8 @@ window.C01 = window.C01 || {};
   }
   function myPorts() {
     if (!S.me) return null;
+    /* v0.3.20 (R7U Part F-1 · 決定 #201): 管理者 (職員マスター portal_admin) = 「自分の担当」 の代わりに全港 · 職員は今までどおり */
+    if (isAdmin()) return { ports: [], star: false, known: [], why: '', all: true, admin: true };
     if (!S.staff || S.staff.polError) return { ports: [], star: false, known: [], why: 'read', all: true };   /* 読めない = これまでどおり全港 */
     var items = S.staff.items || [];
     var mine = [], star = false, ids = myIds();
@@ -425,6 +441,7 @@ window.C01 = window.C01 || {};
     return fs.every(function (f) { return ov.excl[f.sha16] && ov.excl[f.sha16].queue_id !== q.queue_id; });
   }
   function cardKey(q) {
+    if (q.kind === FOREIGN) return 'q:' + q.queue_id;
     if (q.container_id) return 'c:' + q.container_id;
     if (q.kind === '未分類FAX' || q.kind === HOLD) return 'q:' + q.queue_id;
     var f0 = (q.files || [])[0];
@@ -582,6 +599,13 @@ window.C01 = window.C01 || {};
       /* v0.3.15 (R7N Part H-4 · 決定 #166): 台数 N = COMPASS の枠の数そのまま (エンジン slots = booking_cache の枠 · TOOL で増やさない)。
          v0.3.18 (R7S #15 · 決定 #182): 表示する行 (枠のある行 + 枠のない行) が COMPASS の枠の数より多い = 枠のない行 (未割当) を 全部 「COMPASS 枠外」 (赤) ·
          空き枠が残っていても同じ (前の 「空き枠があれば 未割当 は赤にしない · 超えた数だけ赤」 はやめた)。行 ≤ 枠 = 枠外なし */
+      /* v0.3.20 (R7U Part A-3 · 決定 #195): 同じ IV で同じ CT · 同じシールの行 = 赤 「CT重複」 · 「シール重複」 (人の値を含む · 空は数えない) */
+      var dupOf = function (f) {
+        var m = {};
+        rows.forEach(function (x) { var k = String(x.vals[f] || '').replace(/[\s-]/g, '').toUpperCase(); if (k) (m[k] = m[k] || []).push(x); });
+        Object.keys(m).forEach(function (k) { if (m[k].length > 1) m[k].forEach(function (x) { x['dup_' + f] = m[k].filter(function (y) { return y !== x; }); }); });
+      };
+      dupOf('ct'); dupOf('seal');
       var nSlots = (iv.slots && iv.slots.length) || iv.slots_n || 0;
       var over = nSlots && rows.length > nSlots ? free.length : 0;
       if (over) free.forEach(function (x) { x.over = true; });
@@ -649,7 +673,7 @@ window.C01 = window.C01 || {};
   function renderMain() {
     var b = buildGroups();
     var mp = myPorts();
-    var ports = [['mine', '自分の担当' + (mp ? '（' + (mp.ports.join(' · ') || 'なし') + (mp.star ? ' · *' : '') + '）' : '（担当者未選択）')], ['all', '全港']];
+    var ports = [['mine', '自分の担当' + (mp ? (mp.admin ? '（全港 · 管理者）' : '（' + (mp.ports.join(' · ') || 'なし') + (mp.star ? ' · *' : '') + '）') : '（担当者未選択）')], ['all', '全港']];
     /* v0.3.18 (R7S #16): 「なし」 の理由 (小さく) — マスターに該当なし / マスターを読めない (この時は これまでどおり全港を表示) */
     var MP_WHY = { nohit: '担当港マスターに該当なし', empty: '担当港マスターが空です', read: '担当港マスターを読めません（全港を表示）' };
     var mpWhy = mp && mp.why ? MP_WHY[mp.why] : '';
@@ -715,6 +739,8 @@ window.C01 = window.C01 || {};
         var stCell = x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
           x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
             '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>';
+        if (x.dup_seal) stCell = '<span class="c01-over" title="' + esc('同じシール番号の行があります（' + x.dup_seal.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 入力の間違い · 読み違いの可能性') + '">シール重複</span> ' + stCell;
+        if (x.dup_ct) stCell = '<span class="c01-over" title="' + esc('同じ CT 番号の行があります（' + x.dup_ct.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 同じコンテナの再送 · 読み違いの可能性') + '">CT重複</span> ' + stCell;
         if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
         else if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         if (r.same_cand && !sameDone(r.same_cand.pair_id, b.ov)) stCell += ' <button class="c01-samebadge" data-same="' + esc(r.same_cand.pair_id) + '" title="' +
@@ -1106,6 +1132,23 @@ window.C01 = window.C01 || {};
     if ($('edit-save')) $('edit-save').onclick = function () { saveEdit(iv, row); };
     if ($('edit-cancel')) $('edit-cancel').onclick = function () { S.qedit = null; render(); };
   }
+  /* v0.3.20 (R7U Part A-4): 入れる CT が同じ IV の別の行にある → 保存前に 「このCTは n行目にあります」 (止めない · OK で保存) */
+  function ctDupWarn(ivNo, ct, selfCid) {
+    var k = String(ct || '').replace(/[\s-]/g, '').toUpperCase();
+    if (!k) return true;
+    var b = buildGroups(), hit = null;
+    b.groups.forEach(function (g) {
+      if (g.iv.iv_no !== ivNo) return;
+      g.rows.forEach(function (x) { if (!hit && x.kind === 'row' && x.r.container_id !== selfCid && String(x.vals.ct || '').toUpperCase() === k) hit = x; });
+    });
+    if (!hit) {
+      var iv = ((S.jik && S.jik.ivs) || []).filter(function (y) { return y.iv_no === ivNo; })[0];
+      var r2 = iv && iv.rows.filter(function (y) { return y.container_id !== selfCid && String(y.ct || '').toUpperCase() === k; })[0];
+      if (!r2) return true;
+      return window.confirm('このCTは同じ IV の別の行にあります（' + (r2.packer || '') + '）。同じコンテナの再送かもしれません。このまま保存しますか？');
+    }
+    return window.confirm('このCTは' + hit.no + '行目にあります（' + (hit.r.packer || '') + ' · ' + hit.st + '）。同じコンテナの再送かもしれません。このまま保存しますか？');
+  }
   function saveEdit(iv, row) {
     if (!S.qedit || S.qedit.key.indexOf(row.container_id + '|') !== 0) return;
     if (!S.me) { S.qedit.err = '担当者を選んでください（右上）'; render(); return; }
@@ -1113,12 +1156,25 @@ window.C01 = window.C01 || {};
     var v = C01.validate.field(fd, S.qedit.value);
     if (!v.ok) { S.qedit.err = FIELD_LABEL[fd] + ': ' + v.error; render(); return; }
     if (v.warn && !window.confirm(v.warn)) { S.qedit.err = v.warn; render(); return; }   /* #109 ③ と同じ確認窓 */
+    if (fd === 'ct' && !ctDupWarn(iv.iv_no, v.value, row.container_id)) { S.qedit.err = 'このCTは同じ IV の別の行にあります'; render(); return; }
     var x = statusOf(row, iv, overlay());
     var old = x.human[fd] ? x.human[fd].value : row[fd];
     if (String(old == null ? '' : old) === String(v.value)) { S.qedit = null; render(); toast('値は変わっていません', 'info'); return; }
     var a = mkAction('manual_input', { iv: iv.iv_no, ct: row.ct, field: fd, value: v.value, source: '手入力', queue_id: editQid(row, fd), override: v.override });
     S.qedit = null;
     writeAction(a).then(function () { render(); toast(FIELD_LABEL[fd] + ' を修正しました（人の値が優先）', 'success'); });
+  }
+  var REREAD_TEXT = { '再判読(CT):候補外': 'CT を原本からもう一度読みました — 候補のどれとも違います',
+    '再判読(CT):読めず': 'CT を原本からもう一度読みましたが読めませんでした', '再判読(CT):候補重複': 'CT をもう一度読みました — 同じ候補に 2 行が当たるため合わせていません',
+    'REREAD_MERGE(写真のみ行)': '搬入票の CT をもう一度読み、写真の行と同じ CT だったので 1 行に合わせました',
+    'REREAD_SEAL(搬入票シール→写真シール)': '搬入票のシールをもう一度読むと写真のシールと同じでした（値はそのまま — シールを確認してください）',
+    'REREAD_MERGE(CT重複・再送)': '再送の搬入票（同じ CT · シール · 正味）を 1 行に合わせました（値は変わりません）' };
+  function rereadText(s) {
+    if (REREAD_TEXT[s]) return REREAD_TEXT[s];
+    if (/^CT重複候補/.test(s)) return 'CT が同じ行の再送かもしれません — もう一度読んだ ' + (s.indexOf('seal') >= 0 ? 'シール' : '正味重量') + ' が違うため合わせていません';
+    if (/^再判読\(写真CT\)/.test(s)) return '写真の CT をもう一度読みました — ' + (s.slice(-1) === '≠' ? '違う番号' : '読めず');
+    if (/^再判読\(書類CT\)/.test(s)) return '搬入票の CT をもう一度読みました — ' + (s.slice(-1) === '≠' ? '違う番号' : '読めず');
+    return s;
   }
   function rowInfo(iv, r, x, ov) {
     var out = '';
@@ -1131,6 +1187,9 @@ window.C01 = window.C01 || {};
     if (ovr) out += ' <span class="c01-ibadge" data-info="CT_CHECKDIGIT_OVERRIDE" title="' + esc(INFO_TEXT.CT_CHECKDIGIT_OVERRIDE) + '">CD</span>';
     if ((r.info || []).indexOf('AI_GROUP_DIFF') >= 0)        /* v0.3.8 (R7D Part A · 決定 #139 ①): 構造 (フォルダ · ファイル名 · 業者ルール) でまとめた写真 — AI の写真区分とは違う (情報だけ) */
       out += ' <span class="c01-ibadge" data-info="AI_GROUP_DIFF" title="' + esc(INFO_TEXT.AI_GROUP_DIFF) + '">AI区分</span>';
+    /* v0.3.20 (R7U Part A · F-2): エンジンの再判読 (候補から選ぶ) の結果 · 合わせた行 */
+    var rr = (r.info || []).filter(function (s) { return /^(再判読|REREAD_MERGE|REREAD_SEAL|CT重複候補)/.test(s); });
+    if (rr.length) out += ' <span class="c01-ibadge" data-info="reread" title="' + esc(rr.map(rereadText).join(' / ')) + '">再判読</span>';
     var si = slotInfo(iv, r, ov);
     if (si) out += ' <span class="c01-ibadge" data-info="slot_change" title="' + esc(slotInfoText(iv, si)) + '">⇄ 枠変更</span>';
     return out;
@@ -1616,6 +1675,7 @@ window.C01 = window.C01 || {};
     var iv = q && q.iv_no ? ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0] : null;
     var html = '<div class="c01-input">';
     var kindKeys = Object.keys(KIND).filter(function (k) {
+      if (k === FOREIGN) return all.some(function (y) { return y.kind === FOREIGN; });     /* v0.3.20: 他社搬入票候補 = ある時だけ */
       return (k !== PHOTO_SET && k !== HOLD && k !== SAME) || ((S.queue && S.queue.kinds) || []).indexOf(k) >= 0 || (k === SAME && all.some(function (y) { return y.kind === SAME; }));
     });
     html += '<aside class="c01-list" aria-label="作業リスト"><div class="c01-kinds">' +
@@ -1810,6 +1870,9 @@ window.C01 = window.C01 || {};
           }).join('') +
           '<tr><th>写真</th><td>0枚</td><td>' + (sp.photos ? '<button class="c01-phbtn" id="same-ph">📷 ' + sp.photos + '枚</button>' : '0枚') + '</td></tr></tbody></table>' +
           '<p class="c01-note2">CT ' + (+q.same.ct_diff) + '字 · シール ' + (+q.same.seal_diff) + '字の違い。合わせると 写真の行の CT を使い、FAX の値は搬入票の出典になります（エンジンが次の判定で値をもう一度確かめます · 確認済にはなりません）。</p>';
+      } else if (q.kind === FOREIGN) {
+        html += '<div class="c01-hold"><div><span class="k">根拠</span> ' + esc(foreignWhy(q)) + '</div>' +
+          '<p class="c01-note2">他の会社の搬入票なら「他社の書類」（この書類の値を使いません · ファイルは消しません · 元に戻せます）。当社の書類なら「当社の書類」（値をもう一度使います）。写真はそのままです。</p></div>';
       } else if (q.kind === HOLD) {
         html += '<div class="c01-hold"><div><span class="k">保留の理由</span> ' + esc(String(q.hold_code || q.note || '').split(',').map(function (c) { return HOLD_TEXT[c] || c; }).join(' · ')) + '</div>' +
           '<div><span class="k">候補の IV</span> <span class="mono">' + esc((q.candidates || []).join(' / ') || '—') + '</span></div>' +
@@ -1820,10 +1883,12 @@ window.C01 = window.C01 || {};
       /* v0.3.7 (R7D Part U-3): 判断ボタン = 右パネルの一番上 · v0.3.11 (R7J Part B): 「搬入票ではない」 = 書類のある全種類 · 完了 = 「元に戻す」 */
       var ready = readyOf(q);
       var canNot = DOC_KINDS[q.kind] && !st.done && (q.kind === '未分類FAX' || (curF && (curF.sha16 || (q.files || []).some(function (x) { return x.sha16; }))));
-      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same') && st.aid;
+      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc') && st.aid;
+      if (q.kind === FOREIGN) canNot = false;              /* v0.3.20: 他社搬入票候補 = 「他社の書類」 · 「当社の書類」 の 2 つだけ */
       var acts = '<div class="c01-form-a"><button id="q-submit" class="c01-btn-big' + (ready || st.done ? ' ready' : '') + '"' + (ready || st.done ? '' : ' disabled') + '>' +
-        (st.done ? '完了しました — 次へ' : q.kind === SAME ? '同じコンテナとして合わせる' : ready ? '確認して次へ' : submitLabel(q)) + '</button>' +
+        (st.done ? '完了しました — 次へ' : q.kind === SAME ? '同じコンテナとして合わせる' : q.kind === FOREIGN ? '他社の書類' : ready ? '確認して次へ' : submitLabel(q)) + '</button>' +
         '<div class="row"><button id="q-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
+        (q.kind === FOREIGN && !st.done ? '<button id="q-ours" class="c01-btn-ghost2" title="当社の書類です（値をもう一度使います · 元に戻せます）">当社の書類</button>' : '') +
         (q.kind === SAME && !st.done ? '<button id="q-notsame" class="c01-btn-ghost2" title="この 2 行は別のコンテナです（候補を出さなくなります · 元に戻せます）">別のコンテナ</button>' : '') +
         (canNot ? '<button id="q-notours" class="c01-btn-ghost2 danger" title="この書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
         (canUndo ? '<button id="q-undo" class="c01-btn-ghost2">元に戻す</button>' : '') + '</div></div>';
@@ -1888,6 +1953,8 @@ window.C01 = window.C01 || {};
     if (no) no.onclick = function () { notHannyuhyo(q, curF); };
     var ud = $('q-undo');
     if (ud) ud.onclick = function () { undoAction(q); };
+    var qo = $('q-ours');
+    if (qo) qo.onclick = function () { foreignAction(q, 'ours_doc'); };
     var ns = $('q-notsame');
     if (ns) ns.onclick = function () { sameAction(q, 'not_same'); };
     root.querySelectorAll('[data-sameph]').forEach(function (el) {
@@ -1937,6 +2004,7 @@ window.C01 = window.C01 || {};
     if (q.kind === PHOTO_SET) return !!q.ct;
     if (q.kind === '未分類FAX') return S.qchoice[q.queue_id] !== undefined || !!String(v.iv || '').trim();
     if (q.kind === SAME) return !!q.same;
+    if (q.kind === FOREIGN) return (q.files || []).some(function (f) { return f.sha16; });
     return false;
   }
   function noteOf(q, nv) {
@@ -2009,6 +2077,17 @@ window.C01 = window.C01 || {};
     return n ? (n.open[0] || n.items[0]).queue_id : q.queue_id;
   }
   /* v0.3.11 (R7J Part B): 「搬入票ではない」 — ファイルは消さない · エンジンが その書類を出典から外す · 元に戻せる */
+  /* v0.3.20 (R7U Part D): 他社搬入票候補 — 「他社の書類」 = not_hannyuhyo (その書類だけ使わない) · 「当社の書類」 = ours_doc (値をもう一度使う · 学習の記録) */
+  function foreignAction(q, act) {
+    if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
+    var hs = (q.files || []).filter(function (x) { return x.sha16; }).map(function (x) { return x.sha16; });
+    if (!hs.length) return;
+    var a = mkAction(act, { iv: q.iv_no || null, ct: q.ct || null, field: null, value: { sha16: hs.filter(function (h, i) { return hs.indexOf(h) === i; }) }, source: null, queue_id: q.queue_id });
+    writeAction(a).then(function () {
+      S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; render();
+      toast(act === 'ours_doc' ? '「当社の書類」にしました（完了 から 元に戻せます）' : '「他社の書類」にしました — この書類の値を使いません（完了 から 元に戻せます）', 'success');
+    });
+  }
   function notHannyuhyo(q, f) {
     if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
     if (!window.confirm('この書類を「搬入票ではない」にしますか？\n（ファイルは消しません · 同じファイルは確認リストに出なくなります · 完了 から 元に戻せます）')) return;
@@ -2042,6 +2121,7 @@ window.C01 = window.C01 || {};
     var acts = [];
     if (special === 'not_ours') { notHannyuhyo(q, null); return; }
     if (q.kind === SAME) { sameAction(q, 'merge_same'); return; }
+    if (q.kind === FOREIGN) { foreignAction(q, 'not_hannyuhyo'); return; }
     if (VALUE_KINDS[q.kind]) {
       var its = openValueItems(q);
       for (var k = 0; k < its.length; k++) {
@@ -2050,6 +2130,7 @@ window.C01 = window.C01 || {};
         var v = C01.validate.field(y.field, vals[y.field]);
         if (!v.ok) { S.qmsg[q.queue_id] = FIELD_LABEL[y.field] + ': ' + v.error; render(); return; }
         if (v.warn && !window.confirm(v.warn)) { S.qmsg[q.queue_id] = v.warn; render(); return; }   /* #109 ③ 確認窓 (文言そのまま) → OK なら保存 */
+        if (y.field === 'ct' && !ctDupWarn(y.iv_no, v.value, y.container_id)) { S.qmsg[q.queue_id] = 'このCTは同じ IV の別の行にあります'; render(); return; }
         var src = y.kind === '手入力' ? '手入力' : (vals._src && String(vals[y.field]) === String(((y.values || {})[vals._src] || []).filter(function (x) { return String(x) === String(vals[y.field]); })[0]) ? vals._src : '手入力');
         acts.push(mkAction(y.kind === '手入力' ? 'manual_input' : 'confirm_value', { iv: y.iv_no, ct: y.ct, field: y.field, value: v.value, source: src, queue_id: y.queue_id, override: v.override }));
       }
@@ -2221,5 +2302,5 @@ window.C01 = window.C01 || {};
       $('c01-main').innerHTML = '<div class="c01-fatal"><b>データを読めませんでした</b><p>' + esc(e.message) + '</p><p>_data フォルダ (jikkyou.json · queue.json) があるフォルダを選んでください。</p></div>';
     });
   }
-  C01.app = { start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap };
+  C01.app = { start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn };
 })();

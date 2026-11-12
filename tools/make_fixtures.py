@@ -323,7 +323,8 @@ def main():
     staff = {"schema_version": 1, "note": "가명 — 시험용 (실제 마스터는 LEENAI.master pol_staff)",
              "staff": [{"code": "STAFF_A", "name": "STAFF A", "email": "staff.a@example.invalid"},
                        {"code": "STAFF_B", "name": "STAFF B", "email": "staff.b@example.invalid"},
-                       {"code": "STAFF_C", "name": "STAFF C", "email": "staff.c@example.invalid"}],
+                       {"code": "STAFF_C", "name": "STAFF C", "email": "staff.c@example.invalid"},
+                       {"code": "STAFF_D", "name": "STAFF D", "email": "staff.d@example.invalid", "admin": True}],
              "items": [{"pol": "TOKYO", "main": "STAFF_A", "sub": "STAFF_B"}, {"pol": "YOKOHAMA", "main": "STAFF_B", "sub": "STAFF_A"},
                        {"pol": "KOBE", "main": "STAFF_C", "sub": ""}, {"pol": "*", "main": "STAFF_C", "sub": ""}]}
     data = out / "_data"

@@ -262,6 +262,96 @@ def rot_checks(page, shots):
     page.evaluate("C01.state.zoom = 100; C01.state.rot = 90; C01.app.render()")
 
 
+
+def r7u_checks(page, root, shots):
+    """v0.3.20 (R7U): F-1 管理者 = 全港 (#201) · A-3 CT重複 / シール重複 · 再判読 표시 · A-4 手入力 CT 경고."""
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    jj = json.loads(jt0)
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
+    page.click("#tab-main")
+    ivs_of = lambda: sorted(page.eval_on_selector_all("tbody[data-iv]", "els => els.map(e => e.getAttribute('data-iv'))"))   # noqa: E731
+    page.select_option("#me-select", "STAFF_D")
+    page.wait_for_timeout(200)
+    page.click("[data-port='mine']")
+    lab = page.locator("[data-port='mine']").inner_text()
+    ok("F-1 #201 관리자 (portal_admin) = 自分の担当 대신 全港 (5 IV) · 「全港 · 管理者」", ivs_of() == ["TST2611-01", "TST2611-02", "TST2611-03", "TST2611-04", "TST2611-05"]
+       and "全港 · 管理者" in lab, [ivs_of(), lab])
+    page.select_option("#me-select", "STAFF_A")
+    page.wait_for_timeout(200)
+    page.click("[data-port='mine']")
+    ok("F-1 직원 = 지금대로 (STAFF_A = TOKYO · YOKOHAMA)", ivs_of() == ["TST2611-01", "TST2611-02", "TST2611-03"], ivs_of())
+    page.click("[data-port='all']")
+    # A-3 CT重複 · シール重複 (같은 IV 두 줄에 같은 CT / 같은 seal)
+    j2 = json.loads(jt0)
+    iv = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-04")
+    a, b2, c = iv["rows"][0], iv["rows"][1], iv["rows"][2]
+    b2["ct"] = a["ct"]
+    c["seal"] = a["seal"] = a.get("seal") or "TS00009999"
+    c["info"] = (c.get("info") or []) + ["REREAD_MERGE(写真のみ行)"]
+    jp.write_text(dump(j2), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(400)
+    tb = "tbody[data-iv='TST2611-04']"
+    nct = page.locator(tb + " .c01-over:has-text('CT重複')").count()
+    nsl = page.locator(tb + " .c01-over:has-text('シール重複')").count()
+    t1 = page.locator(tb + " .c01-over:has-text('CT重複')").first.get_attribute("title") or ""
+    ok("A-3 같은 IV 같은 CT 2줄 = 두 줄 모두 빨간 「CT重複」 (몇 행째 안내) · 같은 seal = 「シール重複」", nct == 2 and nsl == 2 and "行目" in t1, [nct, nsl, t1])
+    rr = page.locator(tb + " [data-info='reread']")
+    ok("再判読 결과 배지 (엔진 info REREAD_MERGE → 일본어 설명)", rr.count() == 1 and "1 行に合わせました" in (rr.get_attribute("title") or ""), rr.count())
+    w = page.evaluate("getComputedStyle(document.querySelector('#jikkyou-table col.w-st')).width")
+    page.screenshot(path=str(shots / "r7u_dup.png"))
+    # A-4 手入力 CT 경고: 다른 줄 CT 를 넣으면 저장 전 확인창 · 취소 = 기록 0
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+    j3 = json.loads(jt0)
+    iv3 = next(x for x in j3["ivs"] if x["iv_no"] == "TST2611-04")
+    other_ct = iv3["rows"][0]["ct"]
+    msgs = []
+    page.once("dialog", lambda d: (msgs.append(d.message), d.dismiss()))
+    res = page.evaluate("(a) => C01.app.ctDupWarn(a[0], a[1], a[2])", ["TST2611-04", other_ct, iv3["rows"][1]["container_id"]])
+    ok("A-4 다른 줄에 있는 CT = 「このCTは n行目にあります」 확인창 · 취소 = 저장 안 함", res is False and msgs and "行目にあります" in msgs[0], msgs)
+    res2 = page.evaluate("(a) => C01.app.ctDupWarn(a[0], a[1], a[2])", ["TST2611-04", "TSTU0000000", iv3["rows"][1]["container_id"]])
+    ok("A-4 없는 CT = 확인창 없음", res2 is True)
+    ok("칸 폭 그대로 (#193 · 상태 칸 col 폭 변화 없음)", bool(w), w)
+    # Part D 他社搬入票候補 카드 — 「他社の書類」 = not_hannyuhyo · 「当社の書類」 = ours_doc (1 書類 = 1 枚)
+    qp = root / "_data" / "queue.json"
+    qt0 = qp.read_text(encoding="utf-8")
+    qj = json.loads(qt0)
+    used = {h for a_ in actions(root) if a_["action"] in ("not_hannyuhyo", "not_ours") for h in ((a_.get("value") or {}).get("sha16") or [])}
+    src = next(x for x in qj["items"] if x["iv_no"] == "TST2611-04" and x["files"] and x["files"][0].get("sha16") and x["files"][0]["sha16"] not in used)
+    fx = [dict(src["files"][0])]
+    it1 = {**src, "queue_id": "f0e1a0000000000a", "kind": "他社搬入票候補", "field": None, "values": {}, "candidates": [], "files": fx,
+           "note": "hannyuhyo:荷主・船社", "resolved": None, "superseded": []}
+    src2 = next(x for x in qj["items"] if x["files"] and x["files"][0].get("sha16") and x["files"][0]["sha16"] not in used | {fx[0]["sha16"]})
+    it2 = {**it1, "queue_id": "f0e1a0000000000b", "files": [dict(src2["files"][0])], "iv_no": src2["iv_no"]}
+    q2 = json.loads(qt0)
+    q2["items"] += [it1, it2]
+    qp.write_text(dump(q2), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.evaluate("C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = 'f0e1a0000000000a'; C01.app.render()")
+    page.wait_for_selector("#q-ours", timeout=5000)
+    body = page.locator(".c01-hold").first.inner_text()
+    lab = page.locator("#q-submit").inner_text()
+    ok("D 他社搬入票候補 카드 = 근거 1줄 (BKG · 荷主 · 船社) · 「他社の書類」 · 「当社の書類」 · 搬入票ではない 버튼 없음",
+       "当社のどのブッキングにもない" in body and "荷主がリニアではない" in body and "船社" in body and lab == "他社の書類"
+       and page.locator("#q-notours").count() == 0, [body, lab])
+    page.screenshot(path=str(shots / "r7u_foreign.png"))
+    n0 = len(actions(root))
+    page.click("#q-submit")
+    page.wait_for_timeout(500)
+    a1 = [x for x in actions(root) if x.get("queue_id") == "f0e1a0000000000a"]
+    ok("D 「他社の書類」 → not_hannyuhyo (그 파일 sha16)", len(a1) == 1 and a1[0]["action"] == "not_hannyuhyo" and a1[0]["value"]["sha16"] == [fx[0]["sha16"]], a1)
+    page.evaluate("C01.state.qsel = 'f0e1a0000000000b'; C01.app.render()")
+    page.wait_for_selector("#q-ours", timeout=5000)
+    page.click("#q-ours")
+    page.wait_for_timeout(500)
+    a2 = [x for x in actions(root) if x.get("queue_id") == "f0e1a0000000000b"]
+    ok("D 「当社の書類」 → ours_doc (학습 기록)", len(a2) == 1 and a2[0]["action"] == "ours_doc" and len(actions(root)) == n0 + 2, a2)
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("C01.state.view = 'main'; C01.app.render()")
+
 def r7s_checks(page, root, shots):
     """v0.3.18 (R7S): #4 シール 후보 형식 · #5 同一コンテナ候補 원본 + 사진 · #13 옆 창 행 서류."""
     jp, qp = root / "_data" / "jikkyou.json", root / "_data" / "queue.json"
@@ -581,11 +671,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.19", page.title() == "LEENAI C-01 搬入票 v0.3.19", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.20", page.title() == "LEENAI C-01 搬入票 v0.3.20", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.19" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.20" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1036,6 +1126,7 @@ def main():
             page.screenshot(path=str(shots / "slot_change.png"))
             r7n_checks(page, root, shots, a.engine)
             r7s_checks(page, root, shots)
+            r7u_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
