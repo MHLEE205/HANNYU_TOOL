@@ -38,7 +38,7 @@ C01.SEND = {
      false = 比較表だけ (DRY · 送信ボタン無効) */
   compass: true,
   /* v0.3.22 (R7V Part B · 決定 #191): 催促 = 下書き → 担当者が「送信」。remindTest = 試験モード (件名 [test] · 宛先 = エンジン remind.json send_mode.to 1 件だけ)。
-     11/24 の実際の送信への切り替えは 形님 確認の後 (この版には 実際の宛先へ送るコードが無い — remindTest: false にすると 送信ボタンが消えるだけ) */
+     11/24 の実際の送信への切り替えは 管理者の確認の後 (この版には 実際の宛先へ送るコードが無い — remindTest: false にすると 送信ボタンが消えるだけ) */
   remind: true,
   remindTest: true
 };
