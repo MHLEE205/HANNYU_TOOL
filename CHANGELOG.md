@@ -2,6 +2,16 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.19 (2026-11-12) — Compass入力 = 실제 입력 (결정 #190 · 試験運用中)
+- **Compass入力 열림 (#190 · #134 단계 대체):** graph 모드에서 창을 열면 COMPASS (Dataverse) 칸을 **로그인한 사람의 토큰**으로 GET (그 부킹 칸 전부) →
+  비교표 (규칙 #1~#3 · #116 · 작업일 안 넣음 · 같은 값 건너뜀) → **행 체크** (경고 있는 행 = 처음 체크 없음) → 「Compass に入力 (n行)」 →
+  행마다 `js/compass.js` Writer (GET → If-Match PATCH → 다시 GET 확인) · 실패 (412 다른 사람이 먼저 변경 · 오류 · 다시 읽은 값 다름) = 그 행만 빨강 · 다른 행 계속.
+- **기록:** `_actions/{날짜}/{id}.json` `compass_done` (행마다 전 값 · 후 값 · 누가 · 언제 · 실패 행 `failed` · `trial`) — 엔진이 이미 읽는 기록 (実況表 「✓ 入力済」).
+- **元に戻す:** 「✓ 入力済」 을 누르면 창 (기록 5개 · 「元に戻す」) — 그 IV 의 마지막 입력을 전 값으로 (지금 값 = 그때 넣은 값인 항목만 · 다른 사람이 바꾼 항목은 안 돌림) ·
+  기록 `compass_done` + `undo_of` · 마지막 기록이 되돌림이면 実況表 다시 「Compass入力」.
+- 설정 `C01.SEND.compass: true` · `C01.COMPASS.dvUrl` (LEENAI_COMMON 과 같은 환경) · `C01.COMPASS.trial: true` (창 「試験運用中」 · 使い方 안내). 催促 은 그대로 試験表示.
+- 시험 `tests/test_compass_live.py` (22 · 가짜 Dataverse · 가짜 Graph) · test_ui 157 · test_graph 47 · layout 32 · photoset 16 · rules_cross 15 · compass_cross 43 · prepush 0.
+
 ## 0.3.18 (2026-11-12) — 自分の担当 맞추기 · 화상 회전 · COMPASS 枠外 (#182) · シール 형식 · 同一コンテナ候補 원본+사진 · PDF 쪽 (R7S #16 · #3 · #15 · #4 · #1 · #2 · #5 · #13)
 - **自分の担当 (#16):** pol_staff `staff` (担当) · `assist` (補助) 칸이 로그인한 사람의 직원 코드 · 메일과 **똑같을 때만** 맞던 것 고침.
   칸 값 = 직원 코드 · 메일 (대소문자 · 앞뒤 공백 무시) · 이름 (職員マスター `name_ja` · `name_en` · 공통 `LEENAI.STAFF` 이름 — NFKC (전각 → 반각) · 공백 (전각 포함) 무시) 어느 것이든 ·

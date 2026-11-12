@@ -2,7 +2,7 @@
 
 ✦ Powered by LEENAI Automation System
 
-- 버전: **0.3.18** (2026-11-12) — 표기는 `js/config.js` `C01.TOOL_INFO` 한 곳 (LEENAI.init 이 탭 제목·헤더·로그인 카드에 표시)
+- 버전: **0.3.19** (2026-11-12) — 표기는 `js/config.js` `C01.TOOL_INFO` 한 곳 (LEENAI.init 이 탭 제목·헤더·로그인 카드에 표시)
 - 화면: 実況表 · 確認・入力 · 사진 보기 (시안 `relay\design\시안_実況表_Main.dc.html` · `시안_確認入力_Input.dc.html` 기준)
 - 공통: LEENAI_COMMON v1 (`https://mhlee205.github.io/LEENAI_COMMON/v1/`) — **읽기만**, 기본 DARK · 4테마 · 하단 표기
 - **이 레포 = 화면 코드만.** 실제 데이터·번호·메일은 레포에 없음 — 직원이 로그인한 뒤 SharePoint (PHOTO_V2 `_data`) 에서 읽음 (R7 · 그 전에는 로컬 미리보기 = 고른 폴더에서 읽음)

@@ -564,7 +564,7 @@ window.C01 = window.C01 || {};
       var hasCheck = rows.some(function (x) { return x.st === '再確認'; });
       /* v0.2.0: 催促 = エンジンの催促下書き (remind.json — 現行リマインダーの基準) がある IV。remind.json が無い時は R5 と同じ (受信中・メール未着) */
       var remind = S.remind ? (remindsOf(iv.iv_no).length > 0 || !!((S.remind.cand || {})[iv.iv_no])) : (rows.some(function (x) { return x.st === '受信中'; }) || unarr.length > 0);
-      var compassDone = (iv.compass_input || []).length > 0;
+      var compassDone = compassIsDone(iv);                  /* v0.3.19: 最後の記録が「元に戻す」なら未入力 */
       cnt.check += rows.filter(function (x) { return x.st === '再確認'; }).length;
       if (allOk && !compassDone) cnt.compass += 1;
       if (remind) cnt.remind += 1;
@@ -695,7 +695,7 @@ window.C01 = window.C01 || {};
         '<span class="c01-flex"></span>' +
         (iv.hold_docs ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + (+iv.hold_docs) + ')</button>' : '') +
         (g.remind ? '<button class="c01-btn-sub" data-remind="' + esc(iv.iv_no) + '">✉ 催促</button>' : '') +
-        (g.compassDone ? '<span class="c01-done">✓ 入力済</span>' :
+        (g.compassDone ? '<button class="c01-done" data-compass="' + esc(iv.iv_no) + '" title="Compass入力の記録 · 元に戻す">✓ 入力済</button>' :
           g.allOk ? '<button class="c01-btn-pri" data-compass="' + esc(iv.iv_no) + '">⬇ Compass入力</button>' :
             (!g.onlyUn ? '<button class="c01-blocked" data-compass="' + esc(iv.iv_no) + '" title="全台が 自動OK / 確認済 になると入力できます（比較表だけ見られます）">Compass入力（未完了あり）</button>' : '')) +
         '</div></td></tr>';
@@ -794,31 +794,96 @@ window.C01 = window.C01 || {};
     $('m-bg').onclick = closeModal;
     m.querySelectorAll('[data-close]').forEach(function (el) { el.onclick = closeModal; });
   }
+  /* ── v0.3.19 (R7T 決定 #190): Compass入力 = 実際に入力 (ログインした人の権限 · 試験運用中)。
+     graph モード + C01.SEND.compass + C01.COMPASS.dvUrl の時だけ COMPASS (Dataverse) を職員トークンで GET → 比較表 → チェックした行だけ
+     If-Match PATCH → もう一度 GET で確認 (js/compass.js Writer) → _actions に compass_done (前の値 · 後の値 · 誰 · いつ)。
+     「元に戻す」 = その IV の最後の入力を 前の値 に戻す (今の値 = その時入れた値 の項目だけ · 他の人が変えた項目は戻さない)。
+     警告のある行は最初チェックなし。失敗 (412 他の人が先に変更 · エラー · 読み直しが違う) は その行だけ赤 · 他の行は続ける。作業日は入れない。 ── */
+  function compassLiveOn() {
+    var C = C01.COMPASS || {};
+    return graphMode() && !!(C01.SEND && C01.SEND.compass) && !!C.dvUrl && !!(window.LEENAI && LEENAI.auth && LEENAI.auth.token);
+  }
+  function dvFetch(url, opt) {
+    return LEENAI.auth.token('dataverse').then(function (tok) {
+      if (!tok) throw new Error('COMPASS のトークンがありません (再ログインしてください)');
+      var o = Object.assign({ cache: 'no-store' }, opt || {});
+      o.headers = Object.assign({ 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }, (opt && opt.headers) || {}, { Authorization: 'Bearer ' + tok });
+      return fetch(url, o);
+    });
+  }
+  function dvBase() { return String((C01.COMPASS || {}).dvUrl || '').replace(/\/$/, ''); }
+  function compassLive(iv) {
+    var sel = 'crcf9_container_informationid,' + C01.compass.FIELDS.map(function (f) { return f[1]; }).join(',');
+    var url = dvBase() + '/api/data/v9.2/crcf9_container_informations?$select=' + sel + '&$filter=' + encodeURIComponent('_crcf9_booking_id_value eq ' + iv.booking_guid);
+    return dvFetch(url, { method: 'GET', headers: { Accept: 'application/json' } }).then(function (r) {
+      if (!r.ok) throw new Error('COMPASS を読めません (' + r.status + ')');
+      return r.json();
+    }).then(function (j) {
+      var sl = {};
+      (iv.slots || []).forEach(function (s) { if (s.slot_guid) sl[s.slot_guid] = s; });
+      var cells = {};
+      (j.value || []).forEach(function (r) {
+        var s = sl[r.crcf9_container_informationid] || {};
+        r._packer = s.packer || null; r._item = s.item || null; r._plant = s.plant || null;
+        cells[r.crcf9_container_informationid] = r;
+      });
+      var dups = {};
+      Object.keys(cells).forEach(function (g) {
+        dups[g] = Object.keys(cells).filter(function (h) { return h !== g; }).map(function (h) { return C01.compass.normText(cells[h].crcf9_container_no); }).filter(Boolean);
+      });
+      return { cells: cells, dups: dups, live: true };
+    });
+  }
+  function compassWriter() {
+    return new C01.compass.Writer({ baseUrl: dvBase(), enabled: true, fetchFn: function (url, opt) { return dvFetch(url, opt); } });
+  }
+  /* その IV の Compass入力 記録 (エンジン反映済 + 自分の画面の未反映) — 新しい順 */
+  function compassRecords(iv) {
+    var xs = (iv.compass_input || []).map(function (x) { return { action_id: x.action_id, by: x.by, at: x.at, value: x.value || {} }; });
+    (S.mine || []).forEach(function (m) {
+      var a = m.action;
+      if (a.action === 'compass_done' && a.iv === iv.iv_no && !xs.some(function (x) { return x.action_id === a.action_id; })) xs.push({ action_id: a.action_id, by: a.by, at: a.at, value: a.value || {} });
+    });
+    return xs.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+  }
+  function compassIsDone(iv) {
+    var last = compassRecords(iv)[0];
+    return !!last && !last.value.undo_of;
+  }
   function openCompass(ivNo) {
     var iv = ivById(ivNo);
     if (!iv) return;
     S.modal = { kind: 'compass', iv: ivNo };
-    S.src.getJson('compass_now/' + ivNo + '.json').then(function (snap) { return snap; }).catch(function () { return null; }).then(function (snap) {
+    var live = compassLiveOn();
+    var getSnap = live ? compassLive(iv).catch(function (e) { return { error: e.message }; })
+      : S.src.getJson('compass_now/' + ivNo + '.json').then(function (snap) { return snap; }).catch(function () { return null; });
+    getSnap.then(function (snap) {
       if (!S.modal || S.modal.iv !== ivNo) return;
-      var html = '<div class="c01-mh"><b>Compass入力 — 比較表</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(md(iv.cy_cut)) + '</span>' +
-        '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>' +
+      var html = '<div class="c01-mh"><b>Compass入力' + (live ? '' : ' — 比較表') + '</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(md(iv.cy_cut)) + '</span>' +
+        (live ? ((C01.COMPASS || {}).trial ? '<span class="c01-trial" data-trial>試験運用中</span>' : '')
+          : '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>') +
         '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>';
-      if (!snap) {
-        html += '<div class="c01-mb"><p class="c01-err">COMPASS の今の値がありません（ローカルプレビュー: compass_now/' + esc(ivNo) + '.json なし）</p></div>';
+      if (!snap || snap.error) {
+        html += '<div class="c01-mb"><p class="c01-err">' + (snap && snap.error ? esc(snap.error) : 'COMPASS の今の値がありません（ローカルプレビュー: compass_now/' + esc(ivNo) + '.json なし）') + '</p></div>';
         showModal(html);
         return;
       }
       var res = C01.compass.compareIv(ivNo, compassInput(iv), snap.cells || {}, snap.dups || {}, C01.COMPASS || null);
-      S.modal.res = res;
+      S.modal.res = res; S.modal.live = live; S.modal.cells = snap.cells || {};
+      S.modal.pick = {};
+      res.rows.forEach(function (r) { if (!r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = r.warnings.length === 0; });
       html += '<div class="c01-mb"><div class="c01-csum">' +
         '<span class="c01-cst SAME">同じ ' + res.count.cells.SAME + '</span><span class="c01-cst FILL">空欄→入力 ' + res.count.cells.FILL + '</span>' +
         '<span class="c01-cst DIFF">違う値 ' + res.count.cells.DIFF + '</span><span class="c01-cst KEEP">値なし ' + res.count.cells.KEEP + '</span>' +
         '<span class="t2">PATCH 対象 ' + res.count.patch_rows + '行 · 作業日は入れません</span></div>' +
-        (res.all_ok ? '' : '<p class="c01-warnline" id="cmp-reason">' + esc(res.button.reason || '') + ' — 比較表だけ表示します</p>') +
-        '<table class="c01-ctable" id="compass-table"><thead><tr><th>CT</th>' + C01.compass.FIELDS.map(function (f) { return '<th>' + CF_LABEL[f[0]] + '</th>'; }).join('') +
-        '<th>警告・理由</th></tr></thead><tbody>';
+        (res.all_ok ? '' : '<p class="c01-warnline" id="cmp-reason">' + esc(res.button.reason || '') + (live ? ' — 自動OK・確認済 の行だけ入力できます' : ' — 比較表だけ表示します') + '</p>') +
+        '<table class="c01-ctable" id="compass-table"><thead><tr>' + (live ? '<th title="入力する行">入力</th>' : '') + '<th>CT</th>' +
+        C01.compass.FIELDS.map(function (f) { return '<th>' + CF_LABEL[f[0]] + '</th>'; }).join('') + '<th>警告・理由</th></tr></thead><tbody>';
       res.rows.forEach(function (r) {
-        html += '<tr data-crow="' + esc(r.container_id || '') + '"><td class="mono">' + esc(r.ct || '—') + '</td>';
+        var can = !r.skip && Object.keys(r.patch).length > 0;
+        html += '<tr data-crow="' + esc(r.container_id || '') + '"' + (r.ct_id ? ' data-ctid="' + esc(r.ct_id) + '"' : '') + '>' +
+          (live ? '<td class="c01-cpick">' + (can ? '<input type="checkbox" data-cpick="' + esc(r.ct_id) + '"' + (S.modal.pick[r.ct_id] ? ' checked' : '') + ' title="' + (r.warnings.length ? '警告あり — 確認して入れる時だけチェック' : 'この行を入力') + '">' : '') + '</td>' : '') +
+          '<td class="mono">' + esc(r.ct || '—') + '</td>';
         if (r.skip) {
           html += '<td colspan="' + C01.compass.FIELDS.length + '" class="c01-skip">' + esc(SKIP_LABEL[r.skip] || r.skip) + '</td>';
         } else {
@@ -827,14 +892,116 @@ window.C01 = window.C01 || {};
               '<div class="now">' + esc(c.now == null ? '（空）' : c.now) + '</div>' + (c.state === 'SAME' || c.state === 'KEEP' ? '' : '<div class="put">→ ' + esc(c.put == null ? '' : c.put) + '</div>') + '</td>';
           });
         }
-        html += '<td>' + r.warnings.map(function (w) { return '<span class="c01-wchip" data-warn="' + w + '">' + esc(WARN_LABEL[w] || w) + '</span>'; }).join('') + '</td></tr>';
+        html += '<td>' + r.warnings.map(function (w) { return '<span class="c01-wchip" data-warn="' + w + '">' + esc(WARN_LABEL[w] || w) + '</span>'; }).join('') +
+          '<span class="c01-cres" data-cres="' + esc(r.ct_id || '') + '"></span></td></tr>';
       });
-      html += '</tbody></table><details class="c01-patch"><summary>PATCH 本文（送りません）</summary><pre id="compass-patch">' +
-        esc(JSON.stringify(res.patches, null, 1)) + '</pre></details></div>' +
-        '<div class="c01-mf"><span class="t2">If-Match (etag) 付きで入力 → もう一度読んで確認 → compass_done を記録（R7 以降・職員ログイン）</span><span class="c01-flex"></span>' +
-        '<button id="compass-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 はローカル DRY">DRY — 送信しません</button></div>';
-      showModal(html);
+      html += '</tbody></table><details class="c01-patch"><summary>PATCH 本文' + (live ? '' : '（送りません）') + '</summary><pre id="compass-patch">' +
+        esc(JSON.stringify(res.patches, null, 1)) + '</pre></details>';
+      var recs = live ? compassRecords(iv) : [];
+      var last = recs[0];
+      if (recs.length) {
+        html += '<div class="c01-chist" id="compass-hist"><b>入力の記録</b>' + recs.slice(0, 5).map(function (x) {
+          return '<div>' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + ' · ' + esc(staffName(x.by)) + ' · ' + (x.value.undo_of ? '元に戻した ' : '入力 ') +
+            ((x.value.cells || []).length) + '行' + (x.value.failed && x.value.failed.length ? ' · 失敗 ' + x.value.failed.length + '行' : '') + '</div>';
+        }).join('') + '</div>';
+      }
+      html += '</div><div class="c01-mf">';
+      if (live) {
+        html += '<span class="t2">チェックした行を COMPASS に入力（If-Match → もう一度読んで確認 → 記録）· 入力する人 = ' + esc((S.me && S.me.name) || '') + '</span><span class="c01-flex"></span>' +
+          (last && !last.value.undo_of && (last.value.cells || []).length ? '<button id="compass-undo" class="c01-btn-ghost2" title="この IV の最後の入力を 前の値 に戻します">元に戻す</button>' : '') +
+          '<button id="compass-send" class="c01-btn-pri">Compass に入力 (<span id="compass-n">0</span>行)</button>';
+      } else {
+        html += '<span class="t2">If-Match (etag) 付きで入力 → もう一度読んで確認 → compass_done を記録（R7 以降・職員ログイン）</span><span class="c01-flex"></span>' +
+          '<button id="compass-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 はローカル DRY">DRY — 送信しません</button>';
+      }
+      html += '</div>';
+      showModal(html, 'c01-compass');
+      if (!live) return;
+      var upd = function () {
+        var n = Object.keys(S.modal.pick).filter(function (k) { return S.modal.pick[k]; }).length;
+        $('compass-n').textContent = n;
+        var b = $('compass-send'); b.disabled = n === 0 || !!S.modal.busy; b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
+      };
+      document.querySelectorAll('[data-cpick]').forEach(function (el) {
+        el.onchange = function () { S.modal.pick[el.getAttribute('data-cpick')] = el.checked; upd(); };
+      });
+      $('compass-send').onclick = function () { compassSend(ivNo); };
+      if ($('compass-undo')) $('compass-undo').onclick = function () { compassUndo(ivNo, last); };
+      upd();
     });
+  }
+  function cres(ctId, text, cls) {
+    var el = document.querySelector('[data-cres="' + (window.CSS && CSS.escape ? CSS.escape(ctId) : ctId) + '"]');
+    if (el) { el.textContent = text; el.className = 'c01-cres ' + (cls || ''); }
+  }
+  var CRES_LABEL = { OK: '入力済 ✓', PRECONDITION_FAILED: '他の人が先に変更 — 入力していません', REREAD_DIFF: '読み直した値が違う — 確認してください', ERROR: 'エラー — 入力できませんでした' };
+  function compassSend(ivNo) {
+    var m = S.modal;
+    if (!m || m.kind !== 'compass' || !m.live || m.busy) return;
+    var pick = m.res.patches.filter(function (p) { return m.pick[p.ct_id]; });
+    if (!pick.length) return;
+    if (!window.confirm('COMPASS に ' + pick.length + ' 行を入力します（' + ((S.me && S.me.name) || '') + '）。よろしいですか？')) return;
+    m.busy = true;
+    $('compass-send').disabled = true;
+    var w = compassWriter(), results = [], chain = Promise.resolve();
+    pick.forEach(function (p) {
+      chain = chain.then(function () {
+        cres(p.ct_id, '入力中…', '');
+        return w.apply(p).catch(function (e) { return { result: 'ERROR', ct_id: p.ct_id, error: e.message }; }).then(function (r) {
+          results.push(r);
+          cres(p.ct_id, (CRES_LABEL[r.result] || r.result) + (r.error ? ' (' + r.error + ')' : ''), r.result === 'OK' ? 'ok' : 'ng');
+        });
+      });
+    });
+    chain.then(function () {
+      var ok = results.filter(function (r) { return r.result === 'OK'; });
+      var bad = results.filter(function (r) { return r.result !== 'OK'; }).map(function (r) { return { ct_id: r.ct_id, result: r.result, error: r.error || null }; });
+      if (!ok.length && !bad.length) return;
+      var a = C01.compass.compassDoneAction(actionId(), ivNo, S.me.email, jstNow(), ok.map(function (r) { return r.cell; }));
+      a.value.failed = bad;
+      a.value.trial = !!(C01.COMPASS || {}).trial;
+      return (ok.length ? writeAction(a) : Promise.resolve()).then(function () {
+        m.busy = false;
+        toast('COMPASS 入力: 成功 ' + ok.length + '行' + (bad.length ? ' · 失敗 ' + bad.length + '行（赤の行）' : ''), bad.length ? 'warn' : 'success');
+        if (!bad.length) { closeModal(); render(); }
+      });
+    }).catch(function (e) { m.busy = false; toast('COMPASS 入力: ' + e.message, 'error'); });
+  }
+  function compassUndo(ivNo, last) {
+    var m = S.modal;
+    if (!m || m.busy || !last) return;
+    var cells = last.value.cells || [];
+    if (!window.confirm('この IV の最後の入力 (' + cells.length + '行 · ' + staffName(last.by) + ') を 前の値 に戻します。よろしいですか？')) return;
+    m.busy = true;
+    var w = compassWriter(), done = [], bad = [], chain = Promise.resolve();
+    var names = {};
+    C01.compass.FIELDS.forEach(function (f) { names[f[1]] = f[0]; });
+    cells.forEach(function (c) {
+      chain = chain.then(function () {
+        return w.getCell(c.ct_id).then(function (now) {
+          if (!now) { bad.push({ ct_id: c.ct_id, result: 'ERROR', error: 'GET 失敗' }); return; }
+          var body = {};
+          Object.keys(c.after || {}).forEach(function (dv) {
+            var f = names[dv];
+            if (C01.compass.nowValue(f, now[dv]) === C01.compass.nowValue(f, c.after[dv])) body[dv] = c.before ? c.before[dv] : null;   /* 今 = 入れた値 の項目だけ戻す */
+          });
+          if (!Object.keys(body).length) { bad.push({ ct_id: c.ct_id, result: 'CHANGED', error: '他の値に変わっています — 戻しません' }); return; }
+          return w.apply({ ct_id: c.ct_id, if_match: now['@odata.etag'] || null, body: body }).then(function (r) {
+            if (r.result === 'OK') done.push(r.cell); else bad.push({ ct_id: c.ct_id, result: r.result, error: r.error || null });
+          });
+        }).catch(function (e) { bad.push({ ct_id: c.ct_id, result: 'ERROR', error: e.message }); });
+      });
+    });
+    chain.then(function () {
+      var a = C01.compass.compassDoneAction(actionId(), ivNo, S.me.email, jstNow(), done);
+      a.value.undo_of = last.action_id;
+      a.value.failed = bad;
+      return (done.length ? writeAction(a) : Promise.resolve()).then(function () {   /* 戻せた行が 0 = 記録しない (エンジン schema: cells 1 行以上) */
+        m.busy = false;
+        toast('元に戻しました: ' + done.length + '行' + (bad.length ? ' · 戻せなかった ' + bad.length + '行' : ''), bad.length ? 'warn' : 'success');
+        closeModal(); render();
+      });
+    }).catch(function (e) { m.busy = false; toast('元に戻す: ' + e.message, 'error'); });
   }
   /* ── v0.2.0 催促 プレビュー窓 (設計 §7 · 決定 #97) — 下書きだけ。送信は無効「下書きのみ」 ── */
   /* ── #109 行の情報表示 · スロット変更 (全職員 · 入れ替え確認 · _actions に 誰・いつ・前→後 · 元に戻す) ── */
@@ -1059,7 +1226,8 @@ window.C01 = window.C01 || {};
     var html = '<div class="c01-mh"><b>使い方</b><span class="t2">並行期間 2026-11-16〜11-22</span>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
       '<p class="c01-help-lead">並行期間中は <b>これまでのシステムで仕事を続けてください</b>。この TOOL で使うのは <b>「見る」（実況表）</b> と <b>「確認・入力」</b> だけです。<br>' +
-      '<span class="c01-trial">試験表示</span> 「催促」 と 「Compass入力」 は試験表示です — ここから送信・COMPASS 入力はしません（これまでどおりの方法で）。</p>' +
+      '<span class="c01-trial">試験表示</span> 「催促」 は試験表示です — ここから送信しません（これまでどおりの方法で）。 ' +
+      '「Compass入力」 は <span class="c01-trial">試験運用中</span> — ボタンを押すと COMPASS に入力します（試験用 · 職員の業務はこれまでどおりの方法で）。</p>' +
       '<div class="c01-help-grid">' +
       '<section><h4>1. 自分の担当を見る</h4><p>実況表の 「担当港」 で <b>「自分の担当」</b> を押すと、自分の港の IV だけが出ます。「全港」 = 全部。港の名前を押すとその港だけ（複数選べます）。</p></section>' +
       '<section><h4>2. 状況の意味</h4><ul>' +

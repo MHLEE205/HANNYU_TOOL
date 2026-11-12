@@ -82,7 +82,8 @@
 .c01-btn-sub { min-height: 30px; padding: 3px 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--read); color: var(--text); font-size: 12px; font-family: inherit; }
 .c01-btn-pri[disabled], .c01-btn-sub[disabled] { opacity: .55; cursor: not-allowed; }
 .c01-blocked { min-height: 30px; display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 6px; border: 1px dashed var(--border); color: var(--text2); font-size: 12px; }
-.c01-done { color: var(--ok); font-size: 12px; font-weight: 600; }
+.c01-done { color: var(--ok); font-size: 12px; font-weight: 600; background: none; border: 1px solid transparent; border-radius: 6px; padding: 1px 6px; cursor: pointer; }
+.c01-done:hover { border-color: var(--ok); }
 .c01-empty { color: var(--text2); padding: 18px; text-align: center; }
 .c01-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 11px; color: var(--text2); align-items: center; }
 .c01-legend span { display: flex; align-items: center; gap: 6px; }
@@ -336,3 +337,10 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-samephs { flex: 0 0 200px; display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; overflow-y: auto; background: var(--surface2); border-left: 1px solid var(--border); }
 .c01-sameph { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--read); color: var(--text); cursor: pointer; font-family: inherit; font-size: 11px; }
 .c01-samephimg { display: block; width: 100%; height: auto; }
+/* v0.3.19 (R7T #190): Compass入力 実際の入力 — 行チェック · 結果 · 記録 */
+.c01-cpick { text-align: center; width: 36px; }
+.c01-cres { display: block; font-size: 11px; margin-top: 2px; }
+.c01-cres.ok { color: var(--ok); font-weight: 700; }
+.c01-cres.ng { color: var(--c-diff); font-weight: 700; }
+.c01-chist { margin-top: 8px; font-size: 12px; color: var(--text2); }
+.c01-chist b { display: block; margin-bottom: 2px; }

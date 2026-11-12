@@ -7,9 +7,9 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.18',
+  version: '0.3.19',
   date: '2026-11-12',
-  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (DRY) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
+  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
 
 /* D-6 → 決定 #109 (R6.8) で決まった規則。ここだけ変える (エンジン engine/actions/apply.py ACTION_RULES と同じ規則) */
@@ -34,14 +34,20 @@ C01.SOURCE = {
 
 /* v0.2.0 (R6): Compass入力 · 催促 は下書き・比較表だけ。送信ボタンは常に無効 (R7 以降 · 決定のあと) */
 C01.SEND = {
-  compass: false,         /* true にしても R6 のコードは送らない — js/compass.js Writer は enabled + fetchFn が無いと PATCH しない */
+  /* v0.3.19 (R7T 決定 #190): Compass入力 = 実際に入力 (graph モード · ログインした人のトークン = その人の権限 · 記録 + 元に戻す)。
+     false = 比較表だけ (DRY · 送信ボタン無効) */
+  compass: true,
   remind: false
 };
 
 /* v0.2.1 (R6.6): Compass入力 比較の規則 — 決定 D-11 待ち。ここだけ変える (エンジン設定 compass_follow_same_cond_slot と同じ名前・同じ規則)
    follow_same_cond_slot: true = 入れる CT が同じブッキングの同一条件の別の枠に既にあれば、その枠で比較・入力 (D-11 (가)) / false = 今のまま (既定) */
 C01.COMPASS = {
-  follow_same_cond_slot: false
+  follow_same_cond_slot: false,
+  /* v0.3.19 (R7T 決定 #190): COMPASS (Dataverse) の場所 — LEENAI_COMMON と同じ環境 · 読み書きは職員トークン (LEENAI.auth.token('dataverse')) */
+  dvUrl: 'https://orgde512c6f.crm7.dynamics.com',
+  /* 並行期間 (#176): 職員の業務は旧方式のまま — 窓に「試験運用中」 */
+  trial: true
 };
 
 /* v0.3.2 (R7B): PDF を画面の中に描く pdf.js (cdnjs · 版固定 · LEENAI の他 TOOL と同じ版) */
