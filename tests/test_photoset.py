@@ -103,7 +103,7 @@ def main():
             page.locator(f"tr.c01-row[data-key*='{ct1}'] .c01-checkbtn").first.click()
             page.wait_for_selector(".c01-side", timeout=5000)
             side = page.locator(".c01-side").inner_text()
-            ok("옆 창 문장 = 엔진 사유 문장", f"通関用写真が不足しています（{miss1}）" in side, side[:120])
+            ok("옆 창 문장 = 이유 문구 v0.1 (#212 · 설명 1줄)", f"通関用写真が足りません（{miss1}）" in side, side[:120])
             ok("옆 창 「ここで確認できる項目はありません」 안 나옴", "ここで確認できる項目はありません" not in side)
             btn = page.locator("#panel-ok")
             ok("「確認する」 켜짐", btn.is_enabled() and btn.inner_text().strip() == "確認する", btn.inner_text())

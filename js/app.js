@@ -6,9 +6,11 @@ window.C01 = window.C01 || {};
 (function () {
   var FIELD_LABEL = { ct: 'CT番号', seal: 'シール番号', n_w: '正味重量', t_w: '風袋重量', bales: 'ベール数', work_date: '作業日' };
   var FIELD_SHORT = { ct: 'CT', seal: 'シール', n_w: '正味', t_w: '風袋', bales: 'ベール', work_date: '作業日' };
-  var REASON_SHORT = { SOURCE_MISMATCH: '値の違い', RANGE: '範囲外', MISSING_FIELD: '未読', NO_SLOT: 'スロット', SLOT_VANISHED: 'スロット',
-    SLOT_CANDIDATES: 'スロット', UNIT_PRICE_DIFF: '単価', AUTO_CORRECTED: '補正', GROUP_HOLD: '写真', CT_INVALID: 'CT', SEAL_FORMAT: 'シール',
-    WORK_DATE: '作業日', MIN_SOURCES: '出典', SAME_CT_TWO_CONTAINERS: '重複',
+  var REASON_SHORT = { SOURCE_MISMATCH: '値の違い', RANGE: '範囲外', MISSING_FIELD: '未読', NO_SLOT: '枠なし', SLOT_VANISHED: '枠なし',
+    SLOT_CANDIDATES: '枠候補', SAME_COND_NOT_ELIGIBLE: '枠候補', UNIT_PRICE_DIFF: '単価', AUTO_CORRECTED: '自動補正', GROUP_HOLD: '写真', CT_INVALID: 'CT', SEAL_FORMAT: 'シール',
+    WORK_DATE: '作業日', MIN_SOURCES: '確認1つ', SAME_CT_TWO_CONTAINERS: 'CT重複', BALES_UNSEEN: 'ベール数', WEIGHT_MISMATCH: '重量', TW_MISSING: '風袋',
+    SLOT_CONFLICT: '枠の重なり', NEAR_DUP: '似たCT', NOT_IN_LIST: 'リスト外', LAYOUT_UNAPPROVED: '新しい書式', FIELD_RULE_NO_AUTO: '手確認', BKG_CONFLICT: 'BKG',
+    UNREGISTERED_SENDER: '送信元', 'CUT後受信': 'CUT後',   /* v0.3.24 (R7X Part B · #212): 理由文言 v0.1 の短い表 */
     CONTRACT_MONTH_CONFLICT: '契約月', NW_OVER_LIMIT: '重量',   // R6M7: 사유 코드 27 (#115) · 28 (#125) — 문장은 엔진 reason_text
     PHOTO_SET_INCOMPLETE: '写真不足', PACKER_AUTOSTOP: '停止中' };   // R6M11: 사유 코드 29 (#129·#131) · 30 (#118) — 문장은 엔진 reason_text
   // R6M11 (#129 「実況表 줄に足りない写真の種類」): 사유 29 줄의 빠진 종류 (엔진 row.photo_missing) — 문장의 {없는 종류} 를 바꿈
@@ -16,6 +18,77 @@ window.C01 = window.C01 || {};
     var miss = r.photo_missing || '';
     return (r.reason_text || []).map(function (t) { return String(t).split('{없는 종류}').join(miss || '—'); });
   }
+  /* v0.3.24 (R7X Part B · #212 · relay/design/理由文言_v0_1.md): 説明 1 行 (見える) · やること 1 行 (hover / クリック) — {A}{B} = 写真・搬入票・FAX・Excel・EIR・計量票・納品書 · {項目} = 項目名 */
+  var REASON_TEXT = {
+    SOURCE_MISMATCH: ['{A}と{B}で{項目}が違います。', '原本を見て正しい方を選んでください。'],
+    MIN_SOURCES: ['{項目}を確かめた書類が{A}の1つだけです。', '{A}を見て値が合っていれば「確認する」。'],
+    BALES_UNSEEN: ['ベール数がいつもの数と大きく違います。', '搬入票のベール数を確認してください。'],
+    WEIGHT_MISMATCH: ['正味＋風袋が総重量と合いません。', '搬入票の3つの重量を確認してください。'],
+    NW_OVER_LIMIT: ['正味重量が26,000kgを超えています。', '総重量を正味に書いた可能性 — 搬入票を確認。'],
+    TW_MISSING: ['風袋重量が読めませんでした。', '搬入票か写真の風袋を入力してください。'],
+    MISSING_FIELD: ['{項目}が読めませんでした。', '原本を見て入力してください。'],
+    RANGE: ['{項目}がいつもの範囲の外です。', '原本の値を確認してください。'],
+    CT_INVALID: ['CT番号の最後の数字（チェック）が合いません。', '写真のCTを見て直してください。'],
+    SEAL_FORMAT: ['シール番号の形がこの船会社と違います。', '写真のシールを見て確認してください。'],
+    AUTO_CORRECTED: ['読み違いを自動で直した値があります。', '直した値が原本と合うか見てください。'],
+    WORK_DATE: ['作業日が受信日と大きく離れています。', '原本の作業日を見て ✎ 修正。'],
+    NO_SLOT: ['この行が入る COMPASS 枠が見つかりません。', 'COMPASS の枠を確認してください。'],
+    SLOT_CANDIDATES: ['入る枠の候補が2つ以上あります。', '「スロット変更」で枠を選んでください。'],
+    SAME_COND_NOT_ELIGIBLE: ['同じ条件の枠が2つ以上あり選べません。', '「スロット変更」で枠を選んでください。'],
+    SLOT_VANISHED: ['入っていた COMPASS 枠がなくなりました。', 'COMPASS の枠を確認してください。'],
+    SLOT_CONFLICT: ['同じ枠に別のコンテナも入りそうです。', 'どちらの枠か選んでください。'],
+    UNIT_PRICE_DIFF: ['同じ条件で単価・契約が違う枠があります。', '正しい契約の枠を選んでください。'],
+    CONTRACT_MONTH_CONFLICT: ['メール件名の月とExcelの契約月が違います。', '契約月を確認して枠を選んでください。'],
+    SAME_CT_TWO_CONTAINERS: ['同じCTの行が2つあります。', '同じコンテナなら「合わせる」。'],
+    NEAR_DUP: ['1字だけ違うCTの行があります。', '写真のCTを見て確認してください。'],
+    NOT_IN_LIST: ['業者のExcelにないCTです。', '写真のCTを確認してください。'],
+    GROUP_HOLD: ['写真のまとまりがはっきりしません。', '写真を見て同じコンテナか確認。'],
+    PHOTO_SET_INCOMPLETE: ['通関用写真が足りません（{ない種類}）。', '写真を見て「写真OK」か催促。'],
+    PACKER_AUTOSTOP: ['この業者は自動OKを一時止めています。', '値を原本で確認してください。'],
+    LAYOUT_UNAPPROVED: ['まだ確認していない書式の書類です。', '値を原本で確認してください。'],
+    FIELD_RULE_NO_AUTO: ['この項目は人が確認する設定です。', '原本で確認してください。'],
+    BKG_CONFLICT: ['書類によってBKG番号が違います。', '正しいBKGを確認してください。'],
+    UNREGISTERED_SENDER: ['登録されていない送信元のメールです。', '当社の書類か確認してください。'],
+    'CUT後受信': ['CYカット後の受信です。船会社に確認してください。', '']
+  };
+  /* 理由コード → {code, short, desc, todo} ({A}{B}{項目} を その行 · 項目の出典で埋める — 分からない時は 「書類」 「値」) */
+  function reasonInfo(code, r, qs) {
+    var t = REASON_TEXT[code];
+    if (!t) return null;
+    var item = '', A = '', B = '';
+    (qs || []).forEach(function (q) {
+      if (!item && q.field && FIELD_LABEL[q.field]) item = FIELD_LABEL[q.field];
+      if (!A && q.values) { var ks = Object.keys(q.values); if (ks.length >= 2) { A = ks[0]; B = ks[1]; } else if (ks.length === 1) { A = B = ks[0]; } }
+      if (code === 'MIN_SOURCES' && q.field_sources) {
+        var one = [];
+        Object.keys(q.field_sources).forEach(function (f) {
+          var ag = (q.field_sources[f] || []).filter(function (x) { return x.agree; });
+          if (ag.length === 1 && ['seal', 'n_w', 't_w', 'bales'].indexOf(f) >= 0) { one.push(FIELD_LABEL[f]); if (!A) A = ag[0].src; }
+        });
+        if (one.length && !item) item = one.join('・');
+      }
+    });
+    var fill = function (x) { return String(x).split('{A}').join(A || '書類').split('{B}').join(B || '別の書類').split('{項目}').join(item || '値').split('{ない種類}').join((r && r.photo_missing) || '—'); };
+    return { code: code, short: REASON_SHORT[code] || code, desc: fill(t[0]), todo: fill(t[1]) };
+  }
+  function reasonInfos(r, qs) {
+    var rt = reasonTexts(r);
+    return (r.reasons || []).map(function (c, i) { return reasonInfo(c, r, qs) || { code: c, short: REASON_SHORT[c] || c, desc: rt[i] || c, todo: '' }; });
+  }
+  /* 説明 1 行 + 「?」 (やること: hover = title · クリック / タッチ = その横に 1 行) */
+  function reasonLine(ri) {
+    return '<span class="c01-rdesc" data-rcode="' + esc(ri.code) + '">' + esc(ri.desc) + (ri.todo ? ' <button class="c01-rq" type="button" data-todo="' + esc(ri.todo) + '" title="' + esc(ri.todo) + '" aria-label="やること">?</button>' : '') + '</span>';
+  }
+  function reasonTitle(ris) { return ris.map(function (x) { return x.desc + (x.todo ? ' → ' + x.todo : ''); }).join('\n'); }
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('.c01-rq') : null;
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var nx = b.parentNode.querySelector('.c01-rtodo');
+    if (nx) { nx.parentNode.removeChild(nx); return; }
+    var sp = document.createElement('span'); sp.className = 'c01-rtodo'; sp.textContent = '→ ' + b.getAttribute('data-todo');
+    b.parentNode.appendChild(sp);
+  }, true);
   var KIND = {
     '値の違い': { key: 'diff', color: 'var(--c-diff)' },
     '手入力': { key: 'manual', color: 'var(--c-manual)' },
@@ -24,8 +97,10 @@ window.C01 = window.C01 || {};
     '写真不足': { key: 'photo', color: 'var(--c-photo)' },    /* R6M13 (エンジン out_queue_photo_set): 理由 29 の行 — 写真を見て 確認する */
     '業者・IV未定': { key: 'hold', color: 'var(--c-fax)', label: '業者・IV 未定' },   /* v0.3.11 (R7J Part C · エンジン out_queue_hold): 保留中のメールの書類 */
     '他社搬入票候補': { key: 'foreign', color: 'var(--c-fax)', label: '他社搬入票候補' },   /* v0.3.20 (R7U Part D · 決定 #202 · エンジン s3_foreign_doc_v2): 他の会社の書類らしい */
-    '同一候補': { key: 'same', color: 'var(--c-photo)', label: '同一コンテナ候補' }   /* v0.3.12 (R7K Part C · 決定 #150): FAX の行 ↔ 写真の行 (エンジン same_cand) */
+    '同一候補': { key: 'same', color: 'var(--c-photo)', label: '同一コンテナ候補' },   /* v0.3.12 (R7K Part C · 決定 #150): FAX の行 ↔ 写真の行 (エンジン same_cand) */
+    '値の確認': { key: 'diff', color: 'var(--c-diff)', label: '値の確認' }   /* v0.3.24 (R7X Part A · エンジン out_queue_value_check): 再確認 なのに他の項目が無い行 — 値を見て 確認する */
   };
+  var VCHK = '値の確認';
   var SAME = '同一候補';
   var HOLD = '業者・IV未定';
   var FOREIGN = '他社搬入票候補';
@@ -208,6 +283,19 @@ window.C01 = window.C01 || {};
   }
   /* v0.3.15 (R7N Part G-3): エンジンが判読の時に見つけた ページの向き (時計回り 0 · 90 · 180 · 270) — 最初から正しい向きで表示
      形 (どちらでも): files[] / docs[] の rotation = 数 (その項目の page のページ · page が無い = 全ページ · 画像) または { "ページ番号": 角度 } */
+  /* v0.3.24 (R7X Part G-3 · 형님 18:0x): 人が ⟳ で回した角度を覚える (ファイル sha16 + ページ · このブラウザ) — エンジンの向きに足す · 確認・入力 · 📄 タブ */
+  var ROTMEM_KEY = 'c01_rotmem';
+  function rotMemAll() { try { return JSON.parse(localStorage.getItem(ROTMEM_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function rotMemKey(sha, page) { return sha ? String(sha) + '#' + (page || 1) : null; }
+  function rotMemGet(k) { var m = rotMemAll(); return k && m[k] ? (+m[k] || 0) % 360 : 0; }
+  function rotMemSet(k, v) {
+    if (!k) return;
+    var m = rotMemAll();
+    if (v % 360) m[k] = v % 360; else delete m[k];
+    var ks = Object.keys(m);
+    if (ks.length > 500) ks.slice(0, ks.length - 500).forEach(function (x) { delete m[x]; });
+    try { localStorage.setItem(ROTMEM_KEY, JSON.stringify(m)); } catch (e) { /* 保存できない時は覚えない */ }
+  }
   function normRot(v) { v = Math.round(+v || 0); v = ((v % 360) + 360) % 360; return v % 90 === 0 ? v : 0; }
   function rotMap(f) {
     var r = f && f.rotation, m = {};
@@ -576,6 +664,7 @@ window.C01 = window.C01 || {};
         ['ct', 'seal', 'n_w', 't_w', 'bales', 'work_date'].forEach(function (f) { vals[f] = x.human[f] ? x.human[f].value : r[f]; });
         var openQ = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id && !queueState(q, ov).done; });
         var short = openQ.length && openQ[0].field ? FIELD_SHORT[openQ[0].field] : (REASON_SHORT[(r.reasons || [])[0]] || (r.reasons || [])[0] || '');
+        var rTitle = x.st === '再確認' ? reasonTitle(reasonInfos(r, openQ)) : '';    /* v0.3.24 (R7X Part B): 説明 → やること (hover) */
         var photoMiss = (r.reasons || []).indexOf('PHOTO_SET_INCOMPLETE') >= 0 && r.photo_missing ? r.photo_missing : '';
         if (photoMiss && !(openQ.length && openQ[0].field)) short = REASON_SHORT.PHOTO_SET_INCOMPLETE + '（' + photoMiss + '）';
         var wait = '';
@@ -588,7 +677,7 @@ window.C01 = window.C01 || {};
         if (cand) wait = '受信中・候補あり' + (cand.level === 'bkg' ? '（BKG）' : '') + ' · ' + wait;
         var candTitle = cand ? (cand.level === 'ct' ? '同じ CT' : '同じ BKG') + 'の' + (r.has_docs === false ? '搬入票' : '写真') + 'らしいファイルが受信済みメールにあります（' +
           (cand.where || []).join(' / ') + (cand.recv && cand.recv.length ? ' · ' + cand.recv.join(' / ') : '') + '）— 未着ではない可能性 · 催促の対象外' : '';
-        return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, wait: wait, openQ: openQ, candTitle: candTitle };
+        return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, rTitle: rTitle, wait: wait, openQ: openQ, candTitle: candTitle };
       });
       var unarr = (iv.mail_missing || []).map(function (m) {
         return { kind: 'missing', key: iv.iv_no + '|missing|' + m.slot_guid, m: m, st: 'メール未着', vals: { work_date: m.work_date }, wait: 'メール未着' };
@@ -755,7 +844,7 @@ window.C01 = window.C01 || {};
         var hmark = function (f) { return x.human[f] ? ' <span class="c01-hm" title="確認済 ' + esc(x.human[f].by || '') + '">✓</span>' : ''; };
         var stCell = (x.st === '自動OK' || x.st === '確認済') && valueEditOn() ? '<button class="st-ok c01-okedit" data-okedit="' + esc(x.key) + '" title="クリックで値を修正（確認済（手入力）に変わります）">' + x.st + '</button>' :
           x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok">' + x.st + '</span>' :
-          x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '">⚠ 要確認 · ' + esc(x.short) + '</button>' :
+          x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '"' + (x.rTitle ? ' title="' + esc(x.rTitle) + '"' : '') + '>⚠ 要確認 · ' + esc(x.short) + '</button>' :
             '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>';
         if (x.dup_seal) stCell = '<span class="c01-over" title="' + esc('同じシール番号の行があります（' + x.dup_seal.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 入力の間違い · 読み違いの可能性') + '">シール重複</span> ' + stCell;
         if (x.dup_ct) stCell = '<span class="c01-over" title="' + esc('同じ CT 番号の行があります（' + x.dup_ct.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 同じコンテナの再送 · 読み違いの可能性') + '">CT重複</span> ' + stCell;
@@ -819,7 +908,7 @@ window.C01 = window.C01 || {};
   window.addEventListener('resize', function () { if (S.view === 'main') fitTable(); });
 
   /* ── v0.2.0 Compass入力 DRY 窓 (設計 §6 · 決定 #1~#3 · #91) — 比較表だけ。送信は無効「DRY — 送信しません」 ── */
-  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）' };
+  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）', PLAN: '予定値 → 入力（CT が空の枠 · 前の値は記録）', NOINPUT: '入力しない（保留）' };
   var WARN_LABEL = { PACKER_DIFF: '業者が違う', ITEM_DIFF: '品目が違う', OFFICE_DIFF: '営業所が違う', EXISTING_DIFF: 'COMPASS に別の値', CT_DUP: 'CT が別の枠にもある',
     TYPE_42_22: '形態 42GP/22GP — 担当者が判断', NUM_INVALID: '数字にできない — この行は入力しない',
     /* v0.2.1 (D-11 (가) 準備 · C01.COMPASS.follow_same_cond_slot · 既定オフ) */
@@ -927,10 +1016,12 @@ window.C01 = window.C01 || {};
       res.rows.forEach(function (r) { if (!r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = r.warnings.length === 0; });
       html += '<div class="c01-mb"><div class="c01-csum">' +
         '<span class="c01-cst SAME">同じ ' + res.count.cells.SAME + '</span><span class="c01-cst FILL">空欄→入力 ' + res.count.cells.FILL + '</span>' +
+        (res.count.cells.PLAN !== undefined ? '<span class="c01-cst PLAN">予定値→入力 ' + res.count.cells.PLAN + '</span>' : '') +
         '<span class="c01-cst DIFF">違う値 ' + res.count.cells.DIFF + '</span><span class="c01-cst KEEP">値なし ' + res.count.cells.KEEP + '</span>' +
+        (res.count.cells.NOINPUT !== undefined ? '<span class="c01-cst NOINPUT">形態は入力しない</span>' : '') +
         '<span class="t2">PATCH 対象 ' + res.count.patch_rows + '行 · 作業日は入れません</span></div>' +
         (res.all_ok ? '' : '<p class="c01-warnline" id="cmp-reason">' + esc(res.button.reason || '') + (live ? ' — 自動OK・確認済 の行だけ入力できます' : ' — 比較表だけ表示します') + '</p>') +
-        '<table class="c01-ctable" id="compass-table"><thead><tr>' + (live ? '<th title="入力する行">入力</th>' : '') + '<th>CT</th>' +
+        '<table class="c01-ctable" id="compass-table"><thead><tr>' + (live ? '<th title="入力する行"><label class="c01-call" title="警告のない行を全て選ぶ（警告のある行は 1 行ずつ確認して選ぶ）"><input type="checkbox" id="compass-all"> 全て選択</label></th>' : '') + '<th>CT</th>' +
         C01.compass.FIELDS.map(function (f) { return '<th>' + CF_LABEL[f[0]] + '</th>'; }).join('') + '<th>警告・理由</th></tr></thead><tbody>';
       res.rows.forEach(function (r) {
         var can = !r.skip && Object.keys(r.patch).length > 0;
@@ -942,7 +1033,8 @@ window.C01 = window.C01 || {};
         } else {
           r.cells.forEach(function (c) {
             html += '<td class="c01-cell ' + c.state + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL[c.state]) + '" data-state="' + c.state + '">' +
-              '<div class="now">' + esc(c.now == null ? '（空）' : c.now) + '</div>' + (c.state === 'SAME' || c.state === 'KEEP' ? '' : '<div class="put">→ ' + esc(c.put == null ? '' : c.put) + '</div>') + '</td>';
+              (c.state === 'NOINPUT' ? '<div class="now">' + esc(c.now == null ? '（空）' : c.now) + '</div><div class="t2">入力しない</div>' :
+              '<div class="now">' + (c.state === 'PLAN' ? '<span class="t2">予定 </span>' : '') + esc(c.now == null ? '（空）' : c.now) + '</div>' + (c.state === 'SAME' || c.state === 'KEEP' ? '' : '<div class="put">→ ' + esc(c.put == null ? '' : c.put) + '</div>')) + '</td>';
           });
         }
         html += '<td>' + r.warnings.map(function (w) { return '<span class="c01-wchip" data-warn="' + w + '">' + esc(WARN_LABEL[w] || w) + '</span>'; }).join('') +
@@ -978,6 +1070,17 @@ window.C01 = window.C01 || {};
       document.querySelectorAll('[data-cpick]').forEach(function (el) {
         el.onchange = function () { S.modal.pick[el.getAttribute('data-cpick')] = el.checked; upd(); };
       });
+      /* v0.3.24 (R7X Part D-3): 全て選択 = 警告のない行だけ (CT が別の枠にもある · COMPASS に別の値 (予定値でない) 等の行は外す — 1 行ずつ確認) */
+      var noWarn = {};
+      res.rows.forEach(function (r) { if (!r.skip && Object.keys(r.patch).length && !r.warnings.length) noWarn[r.ct_id] = 1; });
+      if ($('compass-all')) $('compass-all').onchange = function () {
+        var on = $('compass-all').checked;
+        document.querySelectorAll('[data-cpick]').forEach(function (el) {
+          var id = el.getAttribute('data-cpick');
+          if (noWarn[id]) { el.checked = on; S.modal.pick[id] = on; }
+        });
+        upd();
+      };
       $('compass-send').onclick = function () { compassSend(ivNo); };
       if ($('compass-undo')) $('compass-undo').onclick = function () { compassUndo(ivNo, last); };
       upd();
@@ -1097,14 +1200,14 @@ window.C01 = window.C01 || {};
     var s = slotOfRow(iv, r);
     var own = r ? r[key] : null;
     if (key === 'packer' && own) return { v: own, t: own };              /* 圧縮業者 = エンジンのコンテナ値が先 (rowKey と同じ) */
-    if (s && s[key]) return { v: s[key], t: s[key] };
+    /* v0.3.24 (R7X Part C · 형님 16:5x): 枠が決まった行 = その枠の値だけ (枠に無ければ 行の値 · どちらも無ければ空欄) — IV の他の枠の値で埋めない */
+    if (s) { var sv = s[key] || own || ''; return { v: sv, t: sv }; }
     if (own) return { v: own, t: own };
     var u = [];
     ((iv && iv.slots) || []).forEach(function (x) { if (x[key] && u.indexOf(x[key]) < 0) u.push(x[key]); });
-    if (u.length === 1) return { v: u[0], t: u[0] };
-    if (u.length > 1) return { v: '—', t: '候補: ' + u.join(' / ') };
+    if (u.length) return { v: '—', t: '枠が未定 · 候補: ' + u.join(' / ') };   /* 候補が 1 つでも埋めない (枠が決まってから) */
     var f = (iv && iv[key]) || '';
-    return String(f).indexOf('・') >= 0 ? { v: '—', t: '候補: ' + String(f).split('・').join(' / ') } : { v: f, t: f };
+    return f ? { v: '—', t: '枠が未定 · 候補: ' + String(f).split('・').join(' / ') } : { v: '', t: '' };
   }
   var ACT_MARK = '<!--c01-acts-->';
   function qAiDiff(q, iv) {
@@ -1132,6 +1235,54 @@ window.C01 = window.C01 || {};
       '<div class="c01-mbtns"><button class="c01-btn-pri" id="okedit-go">修正する</button><button class="c01-btn-ghost2" data-close>やめる</button></div>';
     showModal(html, 'c01-modal-okedit');
     $('okedit-go').onclick = function () { closeModal(); S.sel = rowKey(iv, r); S.editRow = rowKey(iv, r); S.picks = {}; S.panelInput = ''; render(); };
+  }
+  /* v0.3.24 (R7X Part A · 형님 17:1x): 再確認 の行 = 「このまま確認（OK）」 — 値は変えずに 確認済 (今の値で confirm_value · queue_id = その項目 ·
+     元に戻す = 各項目の 「元に戻す」)。空欄 · CT 不明 · 他の種類の項目が残っている時は できない理由を出す */
+  var KEEP_SRC = { '搬入票': 1, '写真': 1, 'Excel': 1 };
+  function keepSrc(q, fd, val) {
+    var s0 = null;
+    Object.keys((q && q.values) || {}).forEach(function (k) { if (!s0 && (q.values[k] || []).some(function (v) { return String(v) === String(val); })) s0 = k; });
+    if (!s0) (((q && q.field_sources) || {})[fd] || []).forEach(function (x) { if (!s0 && x.agree) s0 = x.src; });
+    return KEEP_SRC[s0] ? s0 : '搬入票';
+  }
+  function keepPlan(iv, r, ov) {
+    var x = statusOf(r, iv, ov), acts = [], block = [];
+    var cur = function (fd) { return x.human[fd] ? x.human[fd].value : r[fd]; };
+    var open = qItems().filter(function (q) { return q.container_id === r.container_id && !queueState(q, ov).done; });
+    var ctq = function (q, qid) {
+      var v = cur('ct');
+      if (!v) { block.push('CT が分かりません — 先に CT を確認してください'); return; }
+      acts.push({ iv: iv.iv_no, ct: r.ct, field: 'ct', value: String(v), source: q ? keepSrc(q, 'ct', v) : (r.photos ? '写真' : '搬入票'), queue_id: qid });
+    };
+    open.forEach(function (q) {
+      if (q.kind === '値の違い' && q.field) {
+        var v = cur(q.field);
+        if (v == null || v === '') { block.push(FIELD_LABEL[q.field] + ' が空欄 — 値を選ぶか入力してください'); return; }
+        acts.push({ iv: iv.iv_no, ct: r.ct, field: q.field, value: v, source: keepSrc(q, q.field, v), queue_id: q.queue_id });
+      } else if (q.kind === '手入力') block.push(FIELD_LABEL[q.field] + ' が空欄 — 原本を見て入力してください');
+      else if (q.kind === '写真のCT') block.push('写真の CT が分かりません — 確認・入力 で選んでください');
+      else if (q.kind === PHOTO_SET || q.kind === VCHK) ctq(q, q.queue_id);
+      else block.push(kindLabel(q.kind) + ' を先に処理してください');
+    });
+    if (!open.length) ctq(null, editQid(r, 'ct'));
+    return { acts: acts, block: block };
+  }
+  function keepRow(iv, r, after) {
+    if (!S.me) { toast('担当者を選んでください（右上）', 'warn'); return; }
+    var pl = keepPlan(iv, r, overlay());
+    if (pl.block.length || !pl.acts.length) { toast('このままでは確認できません: ' + (pl.block[0] || '確認する項目がありません'), 'warn'); return; }
+    var vals = EDIT_FIELDS.map(function (fd) { var v = statusOf(r, iv, overlay()).human[fd]; v = v ? v.value : r[fd]; return FIELD_SHORT[fd] + ' ' + (v == null || v === '' ? '—' : (typeof v === 'number' ? v.toLocaleString('en-US') : v)); });
+    var html = '<h3>このまま確認（OK）</h3><p>値を変えずに <b>確認済</b> にします（記録されます · 各項目の 「元に戻す」 で戻せます）。</p>' +
+      '<p class="t2 mono">' + esc((r.ct || '（CT 不明）') + ' · ' + iv.iv_no) + '</p><p class="mono c01-keepvals">' + esc(vals.join(' · ')) + '</p>' +
+      (compassIsDone(iv) ? '<p class="c01-warn2">COMPASS には入力済み</p>' : '') +
+      '<div class="c01-mbtns"><button class="c01-btn-pri" id="keep-go">確認済にする</button><button class="c01-btn-ghost2" data-close>やめる</button></div>';
+    showModal(html, 'c01-modal-keep');
+    $('keep-go').onclick = function () {
+      closeModal();
+      var chain = Promise.resolve();
+      pl.acts.forEach(function (f) { chain = chain.then(function () { return writeAction(mkAction('confirm_value', f)); }); });
+      chain.then(function () { toast('このまま確認しました（確認済）', 'success'); if (after) after(); else render(); });
+    };
   }
   /* 修正した値の 「元に戻す」 (manual_input · confirm_value の undo — エンジンが前の人の値 · エンジンの値に戻す) */
   function undoValue(iv, row, fd, h) {
@@ -1209,7 +1360,11 @@ window.C01 = window.C01 || {};
     if (fd === 'ct' && !ctDupWarn(iv.iv_no, v.value, row.container_id)) { S.qedit.err = 'このCTは同じ IV の別の行にあります'; render(); return; }
     var x = statusOf(row, iv, overlay());
     var old = x.human[fd] ? x.human[fd].value : row[fd];
-    if (String(old == null ? '' : old) === String(v.value)) { S.qedit = null; render(); toast('値は変わっていません', 'info'); return; }
+    if (String(old == null ? '' : old) === String(v.value)) {
+      S.qedit = null;
+      if (x.st === '再確認') { keepRow(iv, row); return; }              /* v0.3.24 (R7X Part A ③): 変更なしで保存 = このまま確認 */
+      render(); toast('値は変わっていません', 'info'); return;
+    }
     var a = mkAction('manual_input', { iv: iv.iv_no, ct: row.ct, field: fd, value: v.value, source: '手入力', queue_id: editQid(row, fd), override: v.override,
       mode: valueEditOn() ? 'edit' : null });
     S.qedit = null;
@@ -1465,12 +1620,14 @@ window.C01 = window.C01 || {};
       '<button class="c01-x" id="panel-close" aria-label="閉じる">✕</button></div>' +
       '<div class="c01-side-b">' + lostMsg +
       (editMode ? '<p class="c01-reason">値を変えると 確認済（手入力）に変わり、記録されます（✎ 修正 · 元に戻す）' + (compassIsDone(iv) ? ' — <b>COMPASS には入力済み — 修正後に Compass入力 をもう一度</b>' : '') + '</p>' :
-        '<p class="c01-reason">' + esc(reasonTexts(r).join(' / ') || (r.reasons || []).join(' / ')) + '</p>') +
+        '<p class="c01-reason">' + (reasonInfos(r, qs).map(reasonLine).join('<br>') || esc((r.reasons || []).join(' / '))) + '</p>') +
       '<div class="c01-thumbs"><button id="panel-doc" class="c01-thumb"' + (doc ? '' : ' disabled') + '>' + (doc ? (/\.pdf$/i.test(doc.path || '') ? pdfTag(doc.path, doc.page, true, rotMap(doc)) : imgTag(doc.path, 'c01-thimg', '原本')) : '') + '<span>' + (doc ? esc('原本 ' + (doc.name || '') + (doc.page ? ' p' + doc.page : '')) : '原本なし') + '</span></button>' +
       '<button id="panel-photo" class="c01-thumb"' + (firstPhoto ? '' : ' disabled') + '>' + (firstPhoto ? imgTag(firstPhoto.path, 'c01-thimg', '写真') : '') + '<span>' + (firstPhoto ? esc('写真 ' + (firstPhoto.label || '')) : '写真なし') + '</span></button></div>' +
       fields +
       (needPick.length === 1 ? '<label class="c01-direct">どちらも違う場合は直接入力<input id="panel-input" type="text" placeholder="正しい値" value="' + esc(S.panelInput) + '"></label>' : '') +
-      (needPick.length || psQ || editMode ? '' : wdNeed ? '<p class="c01-note2">作業日を原本で確認し、違っていれば ✎ 修正 で直してください</p>' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
+      (needPick.length || psQ || editMode ? '' : wdNeed ? '<p class="c01-note2">作業日を原本で確認し、違っていれば ✎ 修正 で直してください</p>' :
+          statusOf(r, iv, ov).st === '再確認' ? '<p class="c01-note2">値が合っていれば 「このまま確認（OK）」 · 違っていれば ✎ 修正</p>' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
+      (!editMode && statusOf(r, iv, ov).st === '再確認' ? '<button id="panel-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') +
       '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + (editMode ? ' hidden' : '') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
       '<button id="panel-later" class="c01-btn-ghost2">' + (editMode ? '閉じる' : 'あとで') + '</button></div>' +
       '<p class="c01-foot">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</p>' +
@@ -1484,6 +1641,7 @@ window.C01 = window.C01 || {};
       S.view = 'input'; S.qsel = qs[0].queue_id; S.sel = null; render();
     };
     if (firstPhoto) $('panel-photo').onclick = function (ev) { openPhotos(ev, S.sel, 0); };
+    if ($('panel-keep')) $('panel-keep').onclick = function () { keepRow(iv, r, function () { S.sel = null; S.picks = {}; S.panelInput = ''; render(); }); };
     el.querySelectorAll('[data-pick]').forEach(function (b2) {
       b2.onclick = function () {
         var fd = b2.getAttribute('data-pick'), i = +b2.getAttribute('data-i');
@@ -1545,8 +1703,8 @@ window.C01 = window.C01 || {};
   }
   /* ── v0.3.23 (R7W Part B · 形님 15:2x): 「📄」 = その行の値の出典書類 (rows[].docs) を 同じウィンドウの新しいタブ (doc.html · photo.html と同じ方式) ──
      並び: 搬入票 → 計量伝票 → 納品書 · その他 → EIR → Excel (エンジン doc_type · 無ければファイル名で) · 書類が無い行 = 「—」 */
-  var DOC_KIND = { hannyuhyo: ['搬入票', 0], keiryo: ['計量伝票', 1], nouhin: ['納品書', 2], vanning_list: ['バンニング表', 2], other: ['書類', 3], inspection: ['検査', 4],
-    eir: ['EIR', 6], excel: ['Excel', 7] };
+  var DOC_KIND = { hannyuhyo: ['搬入票', 0], keiryo: ['計量伝票', 1], eir: ['EIR', 2], excel: ['Excel', 3], nouhin: ['納品書', 4], vanning_list: ['バンニング表', 4],
+    other: ['書類', 5], inspection: ['検査', 9] };   /* v0.3.24 (R7X Part H ②): 検査書類 (COTECNA 等) は最後 · 📄 の数 = 開ける書類 (path あり) */
   function docKind(d) {
     var t = d.doc_type, n = String(d.name || d.path || '');
     if (!t || !DOC_KIND[t]) {
@@ -1570,7 +1728,7 @@ window.C01 = window.C01 || {};
       var ext = (String(name).match(/\.([a-z0-9]+)$/i) || [])[1] || '';
       var rot = rotMap(d), pg = d.page || 1;
       out.push({ path: d.path, name: name, page: d.page || null, kind: t, kindText: DOC_KIND[t][0], order: DOC_KIND[t][1], ext: ext.toLowerCase(),
-        rot: rot[String(pg)] || rot['*'] || 0, fields: (d.fields || []).map(function (f) { return FIELD_LABEL[f] || f; }) });
+        rot: ((rot[String(pg)] || rot['*'] || 0) + rotMemGet(rotMemKey(d.sha16, pg))) % 360, fields: (d.fields || []).map(function (f) { return FIELD_LABEL[f] || f; }) });
     });
     return out.sort(function (a, b) { return a.order - b.order; });
   }
@@ -1634,7 +1792,9 @@ window.C01 = window.C01 || {};
     var key = keyByHash(h);
     if (!key) { send({ t: 'c01-photo-err', msg: 'このコンテナは今の実況表にありません — 実況表から開き直してください' }); return; }
     var f = findRow(key);
-    (S.photos[f.iv.iv_no] ? Promise.resolve() : loadPhotos(f.iv.iv_no)).then(function () {
+    var d0 = S.photos[f.iv.iv_no] ? (photosOf(key) || { list: [] }) : null;
+    var stale = !d0 || ((f.r.photos || 0) > 0 && (d0.list || []).length !== (f.r.photos || 0));     /* v0.3.24 (R7X Part E ③) */
+    (stale ? loadPhotos(f.iv.iv_no, f.iv.photos_sig || undefined) : Promise.resolve()).then(function () {
       var d = photosOf(key) || { list: [] };
       var list = d.list || [];
       send({ t: 'c01-photo-head', head: { iv: f.iv.iv_no, ct: f.r.ct || '', packer: rowVal(f.iv, f.r, 'packer').v || '', plant: rowVal(f.iv, f.r, 'plant').v || '',
@@ -1868,7 +2028,7 @@ window.C01 = window.C01 || {};
     var html = '<div class="c01-input">';
     var kindKeys = Object.keys(KIND).filter(function (k) {
       if (k === FOREIGN) return all.some(function (y) { return y.kind === FOREIGN; });     /* v0.3.20: 他社搬入票候補 = ある時だけ */
-      return (k !== PHOTO_SET && k !== HOLD && k !== SAME) || ((S.queue && S.queue.kinds) || []).indexOf(k) >= 0 || (k === SAME && all.some(function (y) { return y.kind === SAME; }));
+      return (k !== PHOTO_SET && k !== HOLD && k !== SAME && k !== VCHK) || ((S.queue && S.queue.kinds) || []).indexOf(k) >= 0 || (k === SAME && all.some(function (y) { return y.kind === SAME; }));
     });
     html += '<aside class="c01-list" aria-label="作業リスト"><div class="c01-kinds">' +
       [['all', 'すべて']].concat(kindKeys.map(function (k) { return [k, kindLabel(k)]; })).concat([['done', '完了']]).map(function (k) {
@@ -1907,6 +2067,8 @@ window.C01 = window.C01 || {};
       var isPdfF = !isPhotos && /\.pdf$/i.test(f.path || '');
       var pdfPg = isPdfF ? (S.pdfPage[pdfKey(q, f)] || f.page || 1) : 0;
       var rots = isPhotos ? {} : rotMap(f);
+      var rk = !isPhotos && f.sha16 ? rotMemKey(f.sha16, isPdfF ? pdfPg : f.page) : null;     /* v0.3.24 G-3: 別のファイル · ページに移った時 = 覚えた角度 (無ければ 0) */
+      if (rk !== S.rotKey) { S.rotKey = rk; if (rk) S.rot = rotMemGet(rk); }
       var baseRot = isPhotos ? 0 : rotOf(rots, isPdfF ? pdfPg : f.page);
       html += '<div class="c01-orig-h"><span class="t2">' + (isPhotos ? '写真' : q.kind === '未分類FAX' ? 'FAX' : q.kind === HOLD ? '保留中の書類' : q.kind === SAME ? 'FAX の行の搬入票' : '搬入票') + '</span><span class="mono">' + esc(isPhotos ? files.length + '枚' : (f.name || '')) + '</span>' +
         (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph, rowVal(iv, qrow, 'packer').v) ? ' c01-ph-alert' : '') + '" title="' + esc('このコンテナの写真枚数（' + photoRangeText(rowVal(iv, qrow, 'packer').v) + 'は色付き）') + '">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
@@ -2062,6 +2224,11 @@ window.C01 = window.C01 || {};
           }).join('') +
           '<tr><th>写真</th><td>0枚</td><td>' + (sp.photos ? '<button class="c01-phbtn" id="same-ph">📷 ' + sp.photos + '枚</button>' : '0枚') + '</td></tr></tbody></table>' +
           '<p class="c01-note2">CT ' + (+q.same.ct_diff) + '字 · シール ' + (+q.same.seal_diff) + '字の違い。合わせると 写真の行の CT を使い、FAX の値は搬入票の出典になります（エンジンが次の判定で値をもう一度確かめます · 確認済にはなりません）。</p>';
+      } else if (q.kind === VCHK) {
+        /* v0.3.24 (R7X Part A ②): 値の確認 = 理由 (説明 1 行 + ?) · 今の値と出典 (✎ 修正可) · 「確認する」 = このまま確認 */
+        var vrow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+        html += '<div class="c01-vchk"><p class="c01-reason">' + (vrow ? reasonInfos(vrow, [q]).map(reasonLine).join('<br>') : esc(q.note || '')) + '</p></div>';
+        if (vrow) { var fsv = q.field_source_text || {}; html += EDIT_FIELDS.map(function (x) { return editCell(iv, vrow, x, fsv[x], ov); }).join(''); }
       } else if (q.kind === FOREIGN) {
         html += '<div class="c01-hold"><div><span class="k">根拠</span> ' + esc(foreignWhy(q)) + '</div>' +
           '<p class="c01-note2">他の会社の搬入票なら「他社の書類」（この書類の値を使いません · ファイルは消しません · 元に戻せます）。当社の書類なら「当社の書類」（値をもう一度使います）。写真はそのままです。</p></div>';
@@ -2078,13 +2245,16 @@ window.C01 = window.C01 || {};
       var canNot = DOC_KINDS[q.kind] && !st.done && (q.kind === '未分類FAX' || (curF && (curF.sha16 || (q.files || []).some(function (x) { return x.sha16; }))));
       var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv') && st.aid;
       if (q.kind === FOREIGN) canNot = false;              /* v0.3.20: 他社搬入票候補 = 「他社の書類」 · 「当社の書類」 の 2 つだけ */
+      var krow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+      var canKeep = !st.done && krow && q.kind !== VCHK && q.kind !== FOREIGN && q.kind !== SAME && statusOf(krow, iv, ov).st === '再確認' && !keepPlan(iv, krow, ov).block.length;   /* v0.3.24 (R7X Part A ①) */
       var acts = '<div class="c01-form-a"><button id="q-submit" class="c01-btn-big' + (ready || st.done ? ' ready' : '') + '"' + (ready || st.done ? '' : ' disabled') + '>' +
         (st.done ? '完了しました — 次へ' : q.kind === SAME ? '同じコンテナとして合わせる' : q.kind === FOREIGN ? '他社の書類' : ready ? '確認して次へ' : submitLabel(q)) + '</button>' +
         '<div class="row"><button id="q-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
         (q.kind === FOREIGN && !st.done ? '<button id="q-ours" class="c01-btn-ghost2" title="当社の書類です（値をもう一度使います · 元に戻せます）">当社の書類</button>' : '') +
         (q.kind === SAME && !st.done ? '<button id="q-notsame" class="c01-btn-ghost2" title="この 2 行は別のコンテナです（候補を出さなくなります · 元に戻せます）">別のコンテナ</button>' : '') +
         (canNot ? '<button id="q-notours" class="c01-btn-ghost2 danger" title="この書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
-        (canUndo ? '<button id="q-undo" class="c01-btn-ghost2">元に戻す</button>' : '') + '</div></div>';
+        (canUndo ? '<button id="q-undo" class="c01-btn-ghost2">元に戻す</button>' : '') +
+        (canKeep ? '<button id="q-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') + '</div></div>';
       html = html.replace(ACT_MARK, acts);
     } else {
       html += '<p class="c01-empty">作業はありません</p>';
@@ -2096,13 +2266,13 @@ window.C01 = window.C01 || {};
     if ($('fax-old')) $('fax-old').onchange = function () { S.showOldFax = !S.showOldFax; render(); };
     if ($('qiv-clear')) $('qiv-clear').onclick = function () { S.qiv = null; S.qsel = null; render(); };
     root.querySelectorAll('[data-kind]').forEach(function (el) { el.onclick = function () { S.qkind = el.getAttribute('data-kind'); S.qsel = null; render(); }; });
-    root.querySelectorAll('[data-q]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-q'); S.zoom = 100; S.rot = 0; render(); }; });
-    root.querySelectorAll('[data-sec]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-sec'); S.zoom = 100; S.rot = 0; render(); }; });
+    root.querySelectorAll('[data-q]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-q'); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); }; });
+    root.querySelectorAll('[data-sec]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-sec'); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); }; });
     if (!q) return;
     var zi = $('z-in'), zo = $('z-out'), ro = $('rot');
     if (zi) zi.onclick = function () { S.zoom = Math.min(200, S.zoom + 20); render(); };
     if (zo) zo.onclick = function () { S.zoom = Math.max(60, S.zoom - 20); render(); };
-    if (ro) ro.onclick = function () { S.rot = (S.rot + 90) % 360; render(); };
+    if (ro) ro.onclick = function () { S.rot = (S.rot + 90) % 360; rotMemSet(S.rotKey, S.rot); render(); };
     var pel = root.querySelector('.c01-orig [data-pdf]');
     if (pel) {
       var prel = pel.getAttribute('data-pkey') || pel.getAttribute('data-pdf');
@@ -2114,7 +2284,7 @@ window.C01 = window.C01 || {};
       if ($('pdf-next')) $('pdf-next').onclick = function () { turn(1); };
     }
     if ($('pdf-open')) $('pdf-open').onclick = function () { openTab((qFiles(q)[curFileIdx(q)] || {}).path || ''); };
-    root.querySelectorAll('[data-qf]').forEach(function (el) { el.onclick = function () { S.qfile[q.queue_id] = +el.getAttribute('data-qf'); S.zoom = 100; S.rot = 0; render(); }; });
+    root.querySelectorAll('[data-qf]').forEach(function (el) { el.onclick = function () { S.qfile[q.queue_id] = +el.getAttribute('data-qf'); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); }; });
     root.querySelectorAll('[data-gph]').forEach(function (el) {
       el.onclick = function () { openLightboxList('CT 不明の写真', (q.files || []).map(function (pf) { return { path: pf.path, label: pf.name }; }), +el.getAttribute('data-gph')); };
     });
@@ -2148,6 +2318,8 @@ window.C01 = window.C01 || {};
     if (ud) ud.onclick = function () { undoAction(q); };
     var qo = $('q-ours');
     if (qo) qo.onclick = function () { foreignAction(q, 'ours_doc'); };
+    var qk = $('q-keep');
+    if (qk) qk.onclick = function () { var kr = iv && iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0]; if (kr) keepRow(iv, kr, function () { S.qsel = nextQueueId(q); render(); }); };
     var ns = $('q-notsame');
     if (ns) ns.onclick = function () { sameAction(q, 'not_same'); };
     root.querySelectorAll('[data-sameph]').forEach(function (el) {
@@ -2158,7 +2330,7 @@ window.C01 = window.C01 || {};
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
     if (q.kind === HOLD) bindLinkIv(q);                           /* v0.3.23 (R7W Part D) */
     var erow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
-    if (erow && VALUE_KINDS[q.kind]) bindEdits(root, iv, erow);
+    if (erow && (VALUE_KINDS[q.kind] || q.kind === VCHK)) bindEdits(root, iv, erow);
   }
   /* 写真の CT の候補: エンジンの candidates → 無ければ同じ IV の CT がある行 (この行を除く) */
   function photoCands(q, iv) {
@@ -2196,6 +2368,7 @@ window.C01 = window.C01 || {};
     }
     if (q.kind === '写真のCT') return S.qchoice[q.queue_id] !== undefined || !!String(v.ct || '').trim();
     if (q.kind === PHOTO_SET) return !!q.ct;
+    if (q.kind === VCHK) { var vr = rowByCid(q.container_id); return !!(vr && vr.r && (vr.r.ct || q.ct)); }
     if (q.kind === '未分類FAX') return S.qchoice[q.queue_id] !== undefined || !!String(v.iv || '').trim();
     if (q.kind === SAME) return !!q.same;
     if (q.kind === FOREIGN) return (q.files || []).some(function (f) { return f.sha16; });
@@ -2208,6 +2381,7 @@ window.C01 = window.C01 || {};
     if (q.kind === '手入力') return FIELD_LABEL[q.field] + ' が読めませんでした。原本を見て入力してください。';
     if (q.kind === '写真のCT') return '写真から CT 番号が読めませんでした。写真を見て、どのコンテナか選んでください。';
     if (q.kind === PHOTO_SET) return q.reason_text || '通関用写真が不足しています';     /* エンジンの既存理由文 (reason_text) をそのまま */
+    if (q.kind === VCHK) return '値に確かめ切れていない所があります。原本と写真を見て、合っていれば「確認する」（値はそのまま）· 違っていれば ✎ 修正。';
     if (q.kind === HOLD) return '受信したメールの書類ですが、どの業者・インボイスか判定できず保留になっています。';
     if (q.kind === SAME) return '写真のない FAX の行と、搬入票のない写真の行が 同じコンテナかもしれません（CT・シールの読み違い）。原本と写真を見て決めてください。';
     return 'どのインボイスの搬入票か判定できませんでした。';
@@ -2279,7 +2453,7 @@ window.C01 = window.C01 || {};
     if (!hs.length) return;
     var a = mkAction(act, { iv: q.iv_no || null, ct: q.ct || null, field: null, value: { sha16: hs.filter(function (h, i) { return hs.indexOf(h) === i; }) }, source: null, queue_id: q.queue_id });
     writeAction(a).then(function () {
-      S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; render();
+      S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render();
       toast(act === 'ours_doc' ? '「当社の書類」にしました（完了 から 元に戻せます）' : '「他社の書類」にしました — この書類の値を使いません（完了 から 元に戻せます）', 'success');
     });
   }
@@ -2293,7 +2467,7 @@ window.C01 = window.C01 || {};
       if (!hs.length) return;
       a = mkAction('not_hannyuhyo', { iv: q.iv_no || null, ct: q.ct || null, field: null, value: { sha16: hs.filter(function (h, i) { return hs.indexOf(h) === i; }) }, source: null, queue_id: q.queue_id });
     }
-    writeAction(a).then(function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; render(); toast('「搬入票ではない」にしました（完了 から 元に戻せます）', 'success'); });
+    writeAction(a).then(function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); toast('「搬入票ではない」にしました（完了 から 元に戻せます）', 'success'); });
   }
   /* v0.3.12 (R7K Part C): 「同じコンテナとして合わせる」 (merge_same) · 「別のコンテナ」 (not_same) — 2 行の container_id を記録 · エンジンが次の判定で合わせる */
   function sameAction(q, act) {
@@ -2411,6 +2585,11 @@ window.C01 = window.C01 || {};
     if (q.kind === SAME) { sameAction(q, 'merge_same'); return; }
     if (q.kind === FOREIGN) { foreignAction(q, 'not_hannyuhyo'); return; }
     if (q.kind === HOLD) { if (linkIvOn()) linkIvAction(q); return; }
+    if (q.kind === VCHK) {                                       /* v0.3.24 (R7X Part A ②): 値の確認 = このまま確認 */
+      var vx = rowByCid(q.container_id);
+      if (vx && vx.r) keepRow(vx.iv, vx.r, function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); });
+      return;
+    }
     if (VALUE_KINDS[q.kind]) {
       var its = openValueItems(q);
       for (var k = 0; k < its.length; k++) {
@@ -2447,7 +2626,7 @@ window.C01 = window.C01 || {};
     chain.then(function () {
       var lost = queueState(q, overlay()).mineLost;
       if (lost) { toast('他の人が先に確認しました', 'warn'); render(); return; }
-      S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; render();
+      S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render();
     });
   }
 
@@ -2472,16 +2651,34 @@ window.C01 = window.C01 || {};
   }
 
   /* ── 読み込み · 30 秒ごとの更新 ── */
-  function loadPhotos(iv) {
-    return S.src.getJson('photos/' + iv + '.json').then(function (p) { S.photos[iv] = p; }).catch(function () { S.photos[iv] = { containers: [], unassigned: [], docs: [] }; });
+  /* v0.3.24 (R7X Part E · 형님 17:4x): 写真の一覧 — 読めなかった時は 前の一覧をそのまま (前は空にして 「0枚」 が一瞬出た) · 失敗コードはコンソール ·
+     エンジンの指紋 (iv.photos_sig) が前と同じ IV は読まない (30 秒ごとの GET ≈ 0) */
+  S.photoSig = {}; S.photoStat = { get: 0, fail: 0, codes: {} };
+  function loadPhotos(iv, sig) {
+    S.photoStat.get++;
+    return S.src.getJson('photos/' + iv + '.json').then(function (p) { S.photos[iv] = p; if (sig !== undefined) S.photoSig[iv] = sig; }).catch(function (e) {
+      S.photoStat.fail++;
+      var code = String((e && (e.status || e.message)) || 'error');
+      S.photoStat.codes[code] = (S.photoStat.codes[code] || 0) + 1;
+      if (window.console && console.warn) console.warn('[C01] 写真一覧を読めませんでした (前の一覧のまま):', iv, code);
+      if (!S.photos[iv]) S.photos[iv] = { containers: [], unassigned: [], docs: [], _failed: true };
+    });
   }
   function loadAll() {
     return Promise.all([S.src.getJson('jikkyou.json'), S.src.getJson('queue.json').catch(function () { return { items: [] }; }),
       S.src.getJson('remind.json').catch(function () { return null; }), S.src.getJson('meta.json').catch(function () { return null; })]).then(function (r) {
       S.jik = r[0]; S.queue = r[1]; S.remind = r[2]; S.meta = r[3]; S.lastLoad = new Date();
-      return Promise.all(((S.jik && S.jik.ivs) || []).map(function (iv) { return loadPhotos(iv.iv_no); }));
+      var seen = {};
+      return Promise.all(((S.jik && S.jik.ivs) || []).map(function (iv) {
+        if (seen[iv.iv_no]) return null;
+        seen[iv.iv_no] = 1;
+        var sig = iv.photos_sig;
+        if (sig && S.photos[iv.iv_no] && !S.photos[iv.iv_no]._failed && S.photoSig[iv.iv_no] === sig) return null;   /* 指紋が同じ = 読まない */
+        return loadPhotos(iv.iv_no, sig || undefined);
+      }));
     });
   }
+  C01.photoStat = function () { return S.photoStat; };
   function poll() {
     var t = (S.info && S.info.today) || new Date().toISOString().slice(0, 10);
     var days = [addDays(t, -1), t];

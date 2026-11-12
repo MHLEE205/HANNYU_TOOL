@@ -139,7 +139,7 @@ def main():
                     ai = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-02'] [data-info='AI_GROUP_DIFF']")].map(e => e.title)""")
                     ok("R7D A: AI 区分が異なる 정보 = 그 줄 1개 (title 설명)", len(ai) == 1 and "AI 区分が異なる" in ai[0], ai)
                     ok("U-1 미배정 줄 = 「—」 · 마우스 = 후보", all(x["t"] == "—" for x, g in zip(real, slots2) if not g) and any(not g for g in slots2) and
-                       all(x["title"] == "候補: テスト一工場 / テスト二工場" for x, g in zip(real, slots2) if not g), pl)
+                       all(x["title"] == "枠が未定 · 候補: テスト一工場 / テスト二工場" for x, g in zip(real, slots2) if not g), pl)   # v0.3.24 R7X C: 「枠が未定」
                 page.context.close()
             br.close()
     finally:

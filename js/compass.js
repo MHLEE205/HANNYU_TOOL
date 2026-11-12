@@ -19,6 +19,9 @@
     'SLOT_FOLLOWED', 'CT_DUP_OTHER_COND', 'CT_DUP_MULTI', 'OTHER_CT_IN_SLOT'];   /* 後ろ 4 つ = v0.2.1 follow_same_cond_slot (オンの時だけ) */
   var FOLLOW_OPT = 'follow_same_cond_slot';
   var STATES = ['SAME', 'FILL', 'DIFF', 'KEEP'];
+  /* v0.3.24 (R7X Part D · #214 · 형님 実入力試験 OK 後): opts.plan_fill = COMPASS の CT が空の枠の 数値 (ブッキング予定値 例 23,000) は 「予定値 → 入力」 (PLAN · 警告なし · before は記録) ·
+     opts.type_input === false = 形態 (crcf9_type) は入力しない (NOINPUT · PATCH から外す)。opts なし = エンジン rules.py と同じ (交差試験) */
+  var PLAN_FIELDS = ['n_w', 'g_w', 't_w', 'bales'];
 
   function NumInvalid(v) { this.value = v; }
 
@@ -71,7 +74,7 @@
     return out.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
   }
 
-  function compareRow(row, cell, dupCts) {
+  function compareRow(row, cell, dupCts, opts) {
     var out = { container_id: row.container_id === undefined ? null : row.container_id, ct: row.ct === undefined ? null : row.ct,
       ct_id: row.ct_id === undefined ? null : row.ct_id, etag: null, status: row.status === undefined ? null : row.status, skip: null,
       warnings: [], cells: [], patch: {} };
@@ -102,8 +105,10 @@
       var pv = put[name] === undefined ? null : put[name];
       var pc = (name === 'ct' || name === 'seal') ? normText(pv) : pv;
       var cw = [], state, inp;
-      if (pv === null) { state = 'KEEP'; inp = false; }
+      if (name === 'type' && opts && opts.type_input === false) { state = 'NOINPUT'; inp = false; }
+      else if (pv === null) { state = 'KEEP'; inp = false; }
       else if (nv === null) { state = 'FILL'; inp = true; }
+      else if (opts && opts.plan_fill && PLAN_FIELDS.indexOf(name) >= 0 && !normText(cell.crcf9_container_no) && nv !== pc) { state = 'PLAN'; inp = true; }
       else if (nv === pc) { state = 'SAME'; inp = false; }
       else {
         state = 'DIFF'; inp = true;
@@ -157,7 +162,7 @@
     var outRows = (rows || []).map(function (r) {
       if (!follow) {
         var cell = r.ct_id ? (cells || {})[r.ct_id] : null;
-        return compareRow(r, cell === undefined ? null : cell, (dups || {})[r.ct_id] || null);
+        return compareRow(r, cell === undefined ? null : cell, (dups || {})[r.ct_id] || null, opts);
       }
       var ft = followTarget(r, cells), tgt = ft[0], o;
       if (ft[1]) {
@@ -166,13 +171,15 @@
       } else {
         var r2 = {}; Object.keys(r).forEach(function (k2) { r2[k2] = r[k2]; }); r2.ct_id = tgt;
         var c2 = tgt ? (cells || {})[tgt] : null;
-        o = compareRow(r2, c2 === undefined ? null : c2, (dups || {})[tgt] || null);
+        o = compareRow(r2, c2 === undefined ? null : c2, (dups || {})[tgt] || null, opts);
         if (ft[2]) o.warnings = uniqSorted(o.warnings.concat(['SLOT_FOLLOWED']), WARN_CODES);
       }
       o.slot_from = ft[2] ? r.ct_id : null;
       return o;
     });
     var cnt = { SAME: 0, FILL: 0, DIFF: 0, KEEP: 0 }, warn = {}, skip = {};
+    if (opts && opts.plan_fill) cnt.PLAN = 0;
+    if (opts && opts.type_input === false) cnt.NOINPUT = 0;
     outRows.forEach(function (r) {
       r.cells.forEach(function (c) { if (cnt[c.state] !== undefined) cnt[c.state] += 1; });
       r.warnings.forEach(function (w) { warn[w] = (warn[w] || 0) + 1; });
