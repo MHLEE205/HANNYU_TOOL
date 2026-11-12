@@ -1113,7 +1113,7 @@ def r7z_checks(page, root, shots):
     ok("R7Z 이 화면에 없는 버튼 (別のコンテナ) = 꺼짐", sug.nth(1).is_disabled())
     sug.nth(0).click()
     page.wait_for_timeout(300)
-    ok("R7Z 값 버튼 = 값 칸만 채움 (確認은 담당자 · _actions 새 파일 0)", page.locator(f".c01-field[data-vq='{qid}'] input").first.input_value() == target
+    ok("R7Z 값 버튼 = 값 칸만 채움 (확인은 담당자 · _actions 새 파일 0)", page.locator(f".c01-field[data-vq='{qid}'] input").first.input_value() == target
        and not [x for x in actions(root) if x.get("queue_id") == vq], target)
     page.screenshot(path=str(shots / "r7z_ask.png"), full_page=False)
     page.locator("#ask-box summary").click() if not page.locator("#ask-box").evaluate("e => e.open") else None
