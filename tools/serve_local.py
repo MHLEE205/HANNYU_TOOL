@@ -86,6 +86,8 @@ class H(BaseHTTPRequestHandler):
             q = parse_qs(u.query)
             days = q.get("day") or []
             return self._send(200, {"items": self.list_actions(days)})
+        if path == "/api/ask":                        # v0.3.25 (R7Z Part A): AI 相談 (質問 + 答え)
+            return self._send(200, {"items": self.list_asks(parse_qs(u.query).get("day") or [])})
         if path.startswith("/data/"):
             rel = path[len("/data/"):]
             if rel.startswith(ACTIONS + "/"):
@@ -113,8 +115,46 @@ class H(BaseHTTPRequestHandler):
                 out.append({"file": f"{d.name}/{p.name}", "done": p.with_name(p.name + ".done").exists(), "action": a})
         return out
 
+    def list_asks(self, days):
+        base = self.server.actions / ACTIONS
+        out = []
+        for d in days:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) or not (base / "ask" / d).is_dir():
+                continue
+            for p in sorted((base / "ask" / d).glob("*.json")):
+                try:
+                    a = json.loads(p.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                rp = base / "ask_reply" / p.name
+                try:
+                    r = json.loads(rp.read_text(encoding="utf-8")) if rp.is_file() else None
+                except (OSError, ValueError):
+                    r = None
+                out.append({"ask": a, "reply": r})
+        return out
+
+    def post_ask(self, a):
+        if not ACTION_ID_RE.match(str(a.get("ask_id") or "")) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(a.get("at") or "")[:10]):
+            return self._send(400, {"error": "schema"})
+        d = self.server.actions / ACTIONS / "ask" / str(a["at"])[:10]
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{a['ask_id']}.json"
+        if p.exists():
+            return self._send(409, {"error": "exists"})
+        p.write_text(json.dumps(a, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return self._send(201, {"file": p.name})
+
     def do_POST(self):
         u = urlparse(self.path)
+        if u.path == "/api/ask":
+            n = int(self.headers.get("Content-Length") or 0)
+            if n <= 0 or n > 16 * 1024:
+                return self._send(400, {"error": "size"})
+            try:
+                return self.post_ask(json.loads(self.rfile.read(n).decode("utf-8")))
+            except ValueError:
+                return self._send(400, {"error": "json"})
         if u.path != "/api/actions":
             return self._send(404, {"error": "not found"})
         n = int(self.headers.get("Content-Length") or 0)

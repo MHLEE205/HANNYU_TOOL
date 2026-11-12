@@ -6,7 +6,9 @@
      fileUrl(rel)          → 写真・原本を表示する URL (rel = PHOTO_V2 ルートからの相対パス)
      listActions(days)     → [{file, done, action}]  (_actions/{day}/*.json)
      writeAction(a)        → 1 件書く (_actions/{YYYY-MM-DD}/{action_id}.json)
-     getStaff()            → pol_staff マスター (local: フォルダの _masters/pol_staff.json) */
+     getStaff()            → pol_staff マスター (local: フォルダの _masters/pol_staff.json)
+     listAsks(days)        → [{ask, reply|null}]  (v0.3.25 · {C01.ASK.base}/ask/{day}/*.json + ask_reply/{id}.json)
+     writeAsk(a)           → 質問 1 件 ({base}/ask/{YYYY-MM-DD}/{ask_id}.json) */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -18,6 +20,8 @@ C01.sources = (function () {
     });
   }
   function enc(rel) { return rel.split('/').map(encodeURIComponent).join('/'); }
+  function askBase() { return String((C01.ASK && C01.ASK.base) || '_actions').split('/').filter(Boolean); }
+  function askOk(a) { return a && /^[A-Za-z0-9_-]{6,64}$/.test(String(a.ask_id)) && /^\d{4}-\d{2}-\d{2}/.test(String(a.at)); }
 
   /* ── local ①: 127.0.0.1 の serve_local.py ── */
   function LocalServer() {}
@@ -35,6 +39,14 @@ C01.sources = (function () {
       .then(function (r) { if (!r.ok) throw new Error('書き込み失敗 (' + r.status + ')'); return r.json(); });
   };
   LocalServer.prototype.getStaff = function () { return jget('/api/staff'); };
+  LocalServer.prototype.listAsks = function (days) {
+    var q = (days || []).map(function (d) { return 'day=' + encodeURIComponent(d); }).join('&');
+    return jget('/api/ask' + (q ? '?' + q : '')).then(function (r) { return r.items || []; });
+  };
+  LocalServer.prototype.writeAsk = function (a) {
+    return fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) })
+      .then(function (r) { if (!r.ok) throw new Error('送信失敗 (' + r.status + ')'); return r.json(); });
+  };
   LocalServer.prototype.sendMailTest = function () { return Promise.reject(new Error('ローカルプレビューでは送信しません')); };   /* v0.3.22 (R7V Part B) */
 
   /* ── local ②: フォルダ選択 (File System Access API · Chrome/Edge) ── */
@@ -108,6 +120,34 @@ C01.sources = (function () {
     }).then(function (fh) { return fh.createWritable(); }).then(function (w) {
       return w.write(JSON.stringify(a, null, 1) + '\n').then(function () { return w.close(); });
     }).then(function () { return { file: day + '/' + a.action_id + '.json' }; });
+  };
+  Folder.prototype._readJson = function (dirParts, name) {
+    return this._dir(dirParts).then(function (d) { return d.getFileHandle(name); }).then(function (fh) { return fh.getFile(); })
+      .then(function (f) { return f.text(); }).then(JSON.parse);
+  };
+  Folder.prototype.listAsks = function (days) {
+    var self = this, base = askBase(), out = [];
+    return Promise.all((days || []).map(function (day) {
+      return self._dir(base.concat(['ask', day])).then(function (d) {
+        var names = [], it = d.values();
+        function next() { return it.next().then(function (r) { if (r.done) return; names.push(r.value.name); return next(); }); }
+        return next().then(function () {
+          return Promise.all(names.filter(function (n) { return /^[A-Za-z0-9_-]+\.json$/.test(n); }).map(function (n) {
+            return self._readJson(base.concat(['ask', day]), n).then(function (a) {
+              return self._readJson(base.concat(['ask_reply']), n).catch(function () { return null; }).then(function (rp) { out.push({ ask: a, reply: rp }); });
+            }).catch(function () {});
+          }));
+        });
+      }).catch(function () {});
+    })).then(function () { return out; });
+  };
+  Folder.prototype.writeAsk = function (a) {
+    var day = String(a.at).slice(0, 10);
+    return this._dir(askBase().concat(['ask', day]), true).then(function (d) {
+      return d.getFileHandle(a.ask_id + '.json', { create: true });
+    }).then(function (fh) { return fh.createWritable(); }).then(function (w) {
+      return w.write(JSON.stringify(a, null, 1) + '\n').then(function () { return w.close(); });
+    }).then(function () { return { file: day + '/' + a.ask_id + '.json' }; });
   };
   Folder.prototype.getStaff = function () {
     return this._file('_masters/pol_staff.json').then(function (f) { return f.text(); }).then(JSON.parse);
@@ -228,6 +268,38 @@ C01.sources = (function () {
       if (r.status === 409) throw new Error('同じ記録がすでにあります (409)');
       if (!r.ok) throw new Error('書き込み失敗 (' + r.status + ')');
       return { file: day + '/' + a.action_id + '.json' };
+    });
+  };
+  /* v0.3.25 (R7Z Part A · #207): AI 相談 — 質問一覧 (今日 · 昨日) と 答え (ask_reply · eTag が同じ答えは読み直さない) · 書く = 質問 1 件だけ */
+  Graph.prototype.listAsks = function (days) {
+    var self = this, base = askBase().join('/'), out = [];
+    self.askCache = self.askCache || {}; self.replyCache = self.replyCache || {};
+    var replies = self._children(base + '/ask_reply').then(function (xs) { var m = {}; (xs || []).forEach(function (x) { m[x.name] = x.eTag; }); return m; }).catch(function () { return {}; });
+    return replies.then(function (rm) {
+      return Promise.all((days || []).map(function (day) {
+        return self._children(base + '/ask/' + day).then(function (items) {
+          return Promise.all((items || []).filter(function (x) { return !x.folder && /^[A-Za-z0-9_-]+\.json$/.test(x.name); }).map(function (x) {
+            var k = day + '/' + x.name;
+            var pa = self.askCache[k] ? Promise.resolve(self.askCache[k]) : self._json(base + '/ask/' + k).then(function (a) { self.askCache[k] = a; return a; });
+            return pa.then(function (a) {
+              if (!rm[x.name]) { out.push({ ask: a, reply: null }); return null; }
+              var c = self.replyCache[x.name];
+              var pr = c && c.eTag === rm[x.name] ? Promise.resolve(c.reply) : self._json(base + '/ask_reply/' + x.name).then(function (r) { self.replyCache[x.name] = { eTag: rm[x.name], reply: r }; return r; });
+              return pr.then(function (r) { out.push({ ask: a, reply: r }); }, function () { out.push({ ask: a, reply: null }); });
+            }).catch(function () {});
+          }));
+        }).catch(function () {});
+      }));
+    }).then(function () { return out; });
+  };
+  Graph.prototype.writeAsk = function (a) {
+    if (!askOk(a)) return Promise.reject(new Error('質問の日付・id が不正'));
+    var rel = askBase().join('/') + '/ask/' + String(a.at).slice(0, 10) + '/' + a.ask_id + '.json';
+    return this._fetch(this._item(rel) + '/content?@microsoft.graph.conflictBehavior=fail',
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a, null, 1) + '\n' }).then(function (r) {
+      if (r.status === 403) throw new Error('SharePoint (HANNYU_TOOL) に書く権限がありません (403)');
+      if (!r.ok) throw new Error('送信失敗 (' + r.status + ')');
+      return { file: rel };
     });
   };
   /* v0.3.22 (R7V Part B · 決定 #191 · #135): 催促の試験送信 — Graph /me/sendMail (ログインした職員のメール)。2 番目の鍵: 宛先は 1 件 = 試験用アドレス

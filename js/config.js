@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.24',
+  version: '0.3.25',
   date: '2026-11-12',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
@@ -22,7 +22,7 @@ C01.RULES = {
   adminUsers: [],
   /* ③ チェックデジットが合わない CT の手入力: 'warn' = 確認窓のあと保存 (#109 ③ · CT_CHECKDIGIT_OVERRIDE · 確認済 · 自動OK にしない) / 'reject' = 受け付けない (旧) */
   ctCheckDigitWrong: 'warn',
-  /* ④ v0.3.23 (R7W Part A · 形님 15:3x): 自動OK · 確認済 の行も 修正 — 状況を押す → 警告 1 回 → 修正フォーム · 人の値があっても新しい値 (mode edit) · 元に戻す。
+  /* ④ v0.3.23 (R7W Part A · 형님 15:3x): 自動OK · 確認済 の行も 修正 — 状況を押す → 警告 1 回 → 修正フォーム · 人の値があっても新しい値 (mode edit) · 元に戻す。
         エンジン v0.5.50 actions_value_edit が on の時だけ true にする (off のエンジンは mode を知らず 先の値が勝つ) */
   valueEdit: true,
   /* ⑤ v0.3.23 (R7W Part D · 決定 #206): 業者・IV 未定 カード = 「IVに連結」 (BKG/IV + 枠を担当者が選ぶ) — エンジン s2_human_link_iv が on の時だけ true */
@@ -71,4 +71,14 @@ C01.PDF = {
    受信日 = エンジン queue 項目の received_at (無い項目は隠さない) · 0 = 隠さない */
 C01.QUEUE = {
   faxHideAfterDays: 7
+};
+
+/* v0.3.25 (R7Z Part A · 決定 #207 · #209 · #210 · #211): 確認・入力 の右の欄 「その他（AIに相談）」 — 質問 = {base}/ask/{日付}/{ask_id}.json ·
+   答え = エンジン (RPA PC · claude-sonnet-5-5) が {base}/ask_reply/{ask_id}.json に書く。AI は値を変えない — 答えのボタン = この画面の今のボタンだけ。
+   enabled: false = 欄を出さない · trial = 「試験表示」 */
+C01.ASK = {
+  enabled: true,
+  base: '_actions',
+  pollMs: 10000,          /* 答え待ちの間だけ 10 秒ごと */
+  trial: true
 };

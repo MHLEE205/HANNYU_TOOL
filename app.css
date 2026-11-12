@@ -376,3 +376,13 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-cst.PLAN, .c01-cell.PLAN { background: var(--row-ok); }
 .c01-cst.NOINPUT, .c01-cell.NOINPUT { background: transparent; color: var(--text3); }
 .c01-call { display: inline-flex; align-items: center; gap: 3px; font-weight: 400; font-size: 11px; white-space: nowrap; }
+/* v0.3.25 (R7Z Part A): その他（AIに相談） — 普段は閉じている · 欄の幅 · 高さは変えない (#193) */
+.c01-ask { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 6px; font-size: 13px; }
+.c01-ask summary { cursor: pointer; color: var(--text2); font-weight: 600; }
+.c01-trialtag { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #fff3cd; color: #8a6d00; font-weight: 600; }
+.c01-ask-log { max-height: 260px; overflow-y: auto; display: grid; gap: 6px; margin: 6px 0; }
+.c01-ask-q { color: var(--text); } .c01-ask-a { background: var(--surface2); color: var(--text); padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; }
+.c01-ask-a.wait { color: var(--text2); font-style: italic; } .c01-ask-apr { margin-top: 4px; color: var(--warn); }
+.c01-ask-sug { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.c01-ask-quick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.c01-ask-in { display: flex; gap: 6px; } .c01-ask-in input { flex: 1; min-width: 0; }

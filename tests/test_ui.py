@@ -1064,6 +1064,68 @@ def r7n_checks(page, root, shots, engine):
     page.click("#tab-main")
 
 
+def r7z_checks(page, root, shots):
+    """v0.3.25 (R7Z Part A · #207 · #209 · #210 · #211): 確認・入力 「その他（AIに相談）」 — 닫힌 채 · 빠른 질문 → ask 파일 (카드 · 열린 원본) ·
+    답 표시 · 목록 밖 동작 = 버튼 없음 · 이 화면에 없는 버튼 = 꺼짐 · 값 버튼 = 칸만 채움 (확인은 담당자) · 한국어 질문 lang ko."""
+    qp = root / "_data" / "queue.json"
+    q2 = json.loads(qp.read_text(encoding="utf-8"))
+    jk = json.loads((root / "_data" / "jikkyou.json").read_text(encoding="utf-8"))
+    iv2 = next(x for x in jk["ivs"] if x["iv_no"] == "TST2611-02")
+    r = iv2["rows"][0]
+    qid = "z" * 15 + "7"
+    q2["items"].append({"queue_id": qid, "kind": "値の違い", "iv_no": iv2["iv_no"], "ct": r["ct"], "field": "seal", "container_id": r["container_id"],
+                        "values": {"写真": ["TS112233"], "搬入票": ["TS112283"]}, "candidates": [], "files": [], "note": "SOURCE_MISMATCH", "resolved": None,
+                        "superseded": [], "cy_cut": iv2.get("cy_cut"), "issuer": None})
+    qp.write_text(json.dumps(q2, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    page.click("#tab-input")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.click("[data-kind='all']")
+    page.wait_for_timeout(300)
+    page.locator(f"[data-q='{qid}']").first.click()
+    page.wait_for_timeout(400)
+    box = page.locator("#ask-box")
+    ok("R7Z 「その他（AIに相談）」 欄 있음 · 처음엔 닫힘 · 試験表示", box.count() == 1 and not box.evaluate("e => e.open") and "試験表示" in box.locator("summary").inner_text())
+    box.locator("summary").click()
+    page.locator("[data-askq='0']").click()
+    page.wait_for_timeout(500)
+    files = sorted((root / "_actions" / "ask").rglob("*.json"))
+    a = json.loads(files[-1].read_text(encoding="utf-8")) if files else {}
+    card = a.get("card") or {}
+    ok("R7Z 빠른 질문 → _actions/ask/{날짜}/{ask_id}.json (질문 · 담당자 · 카드 IV·CT·key · 열린 원본)", len(files) == 1 and a.get("question") == "どの値が正しい？"
+       and a.get("by") and card.get("iv") and card.get("key") and "open" in card and files[-1].parent.name == str(a.get("at"))[:10], a)
+    ok("R7Z 보낸 뒤 「回答待ち…」", page.locator(".c01-ask-a.wait").count() == 1)
+    vq = qid
+    q = page.evaluate("id => (C01.state.queue.items || []).filter(x => x.queue_id === id)[0]", vq)
+    alts = [v for vs in (q.get("values") or {}).values() for v in vs]
+    target = "TS112233"
+    rep = {"ask_id": a["ask_id"], "status": "ok", "answer": "写真で読める値が正しいと思われます。", "kind": "value", "approval_request": "",
+           "suggestions": [{"action": "pick_value", "field": q["field"], "value": target, "iv": "", "label": "この値を選ぶ"},
+                           {"action": "delete_file", "field": "", "value": "", "iv": "", "label": "削除"},
+                           {"action": "not_same", "field": "", "value": "", "iv": "", "label": "別のコンテナ"}]}
+    (root / "_actions" / "ask_reply").mkdir(parents=True, exist_ok=True)
+    (root / "_actions" / "ask_reply" / f"{a['ask_id']}.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    sug = page.locator("[data-asksug]")
+    ok("R7Z 답 표시 · 목록 밖 동작 (delete_file) = 버튼 없음 · 버튼 2", "写真で読める値" in page.locator(".c01-ask-log").inner_text() and sug.count() == 2
+       and "削除" not in page.locator(".c01-ask-sug").inner_text(), sug.count())
+    ok("R7Z 이 화면에 없는 버튼 (別のコンテナ) = 꺼짐", sug.nth(1).is_disabled())
+    sug.nth(0).click()
+    page.wait_for_timeout(300)
+    ok("R7Z 값 버튼 = 값 칸만 채움 (確認은 담당자 · _actions 새 파일 0)", page.locator(f".c01-field[data-vq='{qid}'] input").first.input_value() == target
+       and not [x for x in actions(root) if x.get("queue_id") == vq], target)
+    page.screenshot(path=str(shots / "r7z_ask.png"), full_page=False)
+    page.locator("#ask-box summary").click() if not page.locator("#ask-box").evaluate("e => e.open") else None
+    page.fill("#ask-in", "이 값이 맞나요?")
+    page.press("#ask-in", "Enter")
+    page.wait_for_timeout(500)
+    files = sorted((root / "_actions" / "ask").rglob("*.json"), key=lambda x: x.stat().st_mtime)
+    k = json.loads(files[-1].read_text(encoding="utf-8")) if files else {}
+    ok("R7Z 한국어 질문 · Enter = 보냄 · lang ko · 같은 카드 key", len(files) == 2 and k.get("lang") == "ko" and (k.get("card") or {}).get("key") == card.get("key"), k.get("lang"))
+    ok("R7Z 같은 카드 대화 2건 표시", page.locator(".c01-ask-q").count() == 2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -1583,6 +1645,7 @@ def main():
             r7w_checks(page, ctx, root, shots)
             r7x_checks(page, ctx, root, shots)
             compass_r7x_checks(page)
+            r7z_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

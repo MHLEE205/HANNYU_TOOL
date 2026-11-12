@@ -127,7 +127,8 @@ window.C01 = window.C01 || {};
     sel: null, picks: {}, panelInput: '', lb: null,
     actions: [], mine: [], lastPoll: null, lastLoad: null,
     qkind: 'all', qiv: null, qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false, qfile: {},
-    timer: null, remind: null, modal: null
+    timer: null, remind: null, modal: null,
+    asks: [], askOpen: {}, askDraft: {}, askTimer: null     /* v0.3.25 (R7Z Part A): AI 相談 */
   };
   C01.state = S;
 
@@ -2238,6 +2239,7 @@ window.C01 = window.C01 || {};
           (linkIvOn() && !st.done ? linkIvForm(q) :
             linkIvOn() ? '' : '<p class="c01-note2">IV への連結はエンジン側の次の版で入ります。今は 原本を確認して、搬入票でなければ「搬入票ではない」、あとで見るなら「スキップ」。</p>') + '</div>';
       }
+      if (askOn() && q.kind !== '写真のCT') html += askBlock(q);          /* v0.3.25 (R7Z Part A · #210): 選択肢の一番下 · 普段は閉じている */
       html += '</div>';
       html += '<div class="c01-form-f"><span class="c01-foot">確認した内容は実況表にすぐ反映 · 記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</span></div>';
       /* v0.3.7 (R7D Part U-3): 判断ボタン = 右パネルの一番上 · v0.3.11 (R7J Part B): 「搬入票ではない」 = 書類のある全種類 · 完了 = 「元に戻す」 */
@@ -2328,6 +2330,7 @@ window.C01 = window.C01 || {};
     var sph = $('same-ph');
     if (sph && q.same) sph.onclick = function (ev) { var ivx = ivById(q.iv_no); if (ivx) openPhotos(ev, rowKey(ivx, q.same.photo), 0); };
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
+    if (askOn()) askBind(q);
     if (q.kind === HOLD) bindLinkIv(q);                           /* v0.3.23 (R7W Part D) */
     var erow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
     if (erow && (VALUE_KINDS[q.kind] || q.kind === VCHK)) bindEdits(root, iv, erow);
@@ -2630,6 +2633,133 @@ window.C01 = window.C01 || {};
     });
   }
 
+  /* ── v0.3.25 (R7Z Part A · 決定 #207 · #209 · #210 · #211): その他（AIに相談）
+     質問 = {base}/ask/{日付}/{ask_id}.json (カード: IV · CT · 行 · 項目 · 今開いている原本と頁) → RPA PC のエンジンが答える ({base}/ask_reply/) ·
+     会話はカード単位 (他の担当者も見える) · 答えのボタン = この画面の今のボタン (押すのは担当者 · 記録 · 元に戻す は今のまま) ·
+     Compass入力 · 催促 送信 = 案内の文だけ · 業者 · 別名 · 連絡先の登録 = 「管理者の承認依頼」 だけ · 削除 · 原本の移動 = できない */
+  var ASK_QUICK = ['どの値が正しい？', 'この書類は違う', '写真が見えない'];
+  var ASK_ACT = { pick_value: 1, fix_value: 1, merge_same: 1, not_same: 1, link_iv: 1, not_hannyuhyo: 1, not_ours: 1, reload_view: 1 };
+  function askOn() { return !!(C01.ASK && C01.ASK.enabled && S.src && typeof S.src.listAsks === 'function'); }
+  function askKey(q) { return (q.iv_no || '') + '|' + cardKey(q); }
+  function askId() { return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+  function loadAsks(days) {
+    return S.src.listAsks(days).then(function (xs) {
+      var mine = (S.asks || []).filter(function (x) { return x.local && !xs.some(function (y) { return y.ask && y.ask.ask_id === x.ask.ask_id; }); });
+      var sig = function (l) { return (l || []).map(function (x) { return x.ask.ask_id + (x.reply ? '+' : '-'); }).sort().join(','); };
+      var changed = sig(S.asks) !== sig(xs.concat(mine));
+      S.asks = xs.concat(mine);
+      askSchedule();
+      if (changed && S.view === 'input' && !busy()) render({ auto: true });     /* 答えが来た · 他の人の質問 = 描き直す (入力中は後で) */
+    }).catch(function () { /* 読めない時は次回 */ });
+  }
+  function askPending() { return (S.asks || []).some(function (x) { return !x.reply; }); }
+  function askSchedule() {
+    if (S.askTimer || !askPending()) return;
+    S.askTimer = setTimeout(function () {
+      S.askTimer = null;
+      var t = jstNow().slice(0, 10);
+      loadAsks([addDays(t, -1), t]).then(function () { render(); });
+    }, (C01.ASK && C01.ASK.pollMs) || 10000);
+  }
+  function askThread(q) {
+    var k = askKey(q);
+    return (S.asks || []).filter(function (x) { return x.ask && x.ask.card && x.ask.card.key === k; })
+      .sort(function (a, b) { return String(a.ask.at) < String(b.ask.at) ? -1 : 1; });
+  }
+  function askBlock(q) {
+    var th = askThread(q), k = askKey(q);
+    var open = !!S.askOpen[k];
+    var h = '<details class="c01-ask" id="ask-box"' + (open ? ' open' : '') + '><summary>その他（AIに相談）' +
+      (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') + (th.length ? ' <span class="t2">' + th.length + '件</span>' : '') + '</summary>';
+    h += '<div class="c01-ask-log">' + th.map(function (x) {
+      var a = x.ask, r = x.reply;
+      var who = esc(a.by_name || a.by || '') + ' · ' + esc(String(a.at || '').slice(11, 16));
+      var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
+      if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
+      var sug = (r.suggestions || []).filter(function (s) { return ASK_ACT[s.action]; });
+      return body + '<div class="c01-ask-a">' + esc(r.answer || '') +
+        (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') +
+        (sug.length ? '<div class="c01-ask-sug">' + sug.map(function (s, i) {
+          var ok = askCan(q, s);
+          return '<button class="c01-btn-ghost2" data-asksug="' + esc(a.ask_id) + '|' + i + '"' + (ok ? '' : ' disabled title="この画面では使えません"') + '>' +
+            esc(s.label || s.action) + (s.value ? ' <span class="mono">' + esc(s.value) + '</span>' : '') + (s.iv ? ' <span class="mono">' + esc(s.iv) + '</span>' : '') + '</button>';
+        }).join('') + '<span class="t2">押すと この画面の今のボタンと同じ (記録 · 元に戻す)</span></div>' : '') + '</div>';
+    }).join('') + '</div>';
+    h += '<div class="c01-ask-quick">' + ASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-askq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
+    h += '<div class="c01-ask-in"><input id="ask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.askDraft[k] || '') + '" aria-label="AI への質問">' +
+      '<button id="ask-send" class="c01-btn-ghost2">送信</button></div></details>';
+    return h;
+  }
+  /* 答えのボタンが この画面で使えるか (今の画面にそのボタン · 欄があるか) */
+  function askCan(q, s) {
+    if (s.action === 'pick_value' || s.action === 'fix_value') return VALUE_KINDS[q.kind] && openValueItems(q).some(function (y) { return y.field === s.field; });
+    if (s.action === 'merge_same') return q.kind === SAME;
+    if (s.action === 'not_same') return !!$('q-notsame');
+    if (s.action === 'not_hannyuhyo') return !!$('q-notours');
+    if (s.action === 'not_ours') return q.kind === FOREIGN || !!$('q-notours');
+    if (s.action === 'link_iv') return !!$('q-iv') || q.kind === HOLD;
+    return s.action === 'reload_view';
+  }
+  function askApply(q, s) {
+    if (!askCan(q, s)) { toast('この画面では使えません', 'warn'); return; }
+    if (s.action === 'pick_value' || s.action === 'fix_value') {
+      var y = openValueItems(q).filter(function (z) { return z.field === s.field; })[0];
+      var src = null;
+      if (s.action === 'pick_value') Object.keys(y.values || {}).forEach(function (k) { (y.values[k] || []).forEach(function (v) { if (String(v) === String(s.value)) src = src || k; }); });
+      var o = {}; o[y.field] = String(s.value); if (src) o._src = src;
+      S.qvals[y.queue_id] = o; delete S.qmsg[q.queue_id];
+      render(); toast('値を入れました — 原本で確かめてから「確認して次へ」', 'success'); return;
+    }
+    if (s.action === 'merge_same') { $('q-submit').click(); return; }
+    if (s.action === 'not_same') { $('q-notsame').click(); return; }
+    if (s.action === 'not_hannyuhyo') { $('q-notours').click(); return; }
+    if (s.action === 'not_ours') { (q.kind === FOREIGN ? $('q-submit') : $('q-notours')).click(); return; }
+    if (s.action === 'link_iv') {
+      var el = $('q-iv');
+      if (el) { el.value = s.iv; el.dispatchEvent(new Event('input')); toast('IV を入れました — 確かめてから連結', 'success'); }
+      return;
+    }
+    if (s.action === 'reload_view') { S.photoSig = {}; loadAll().then(function () { render(); toast('画面を作り直しました', 'success'); }); }
+  }
+  function askSend(q, text) {
+    text = String(text || '').trim();
+    if (!text) return;
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    var f = (q.kind === '写真のCT' || q.kind === PHOTO_SET) ? null : qFiles(q)[curFileIdx(q)];
+    var a = { schema_version: 1, ask_id: askId(), at: jstNow(), by: S.me.email, by_name: S.me.name || '', lang: /[가-힣]/.test(text) ? 'ko' : 'ja', question: text.slice(0, 1000),
+      card: { key: askKey(q), queue_id: q.queue_id, iv: q.iv_no || null, ct: q.ct || null, container_id: q.container_id || null, kind: q.kind, field: q.field || null,
+        open: f && f.path ? { file: f.path, page: S.pdfPage[f.path] || 1 } : {} } };
+    S.asks.push({ ask: a, reply: null, local: true });
+    S.askDraft[askKey(q)] = '';
+    S.askOpen[askKey(q)] = true;
+    render();
+    S.src.writeAsk(a).then(function () { askSchedule(); }).catch(function (e) {
+      S.asks = S.asks.filter(function (x) { return x.ask.ask_id !== a.ask_id; });
+      toast('送信できませんでした: ' + e.message, 'error'); render();
+    });
+  }
+  function askBind(q) {
+    var box = $('ask-box');
+    if (!box) return;
+    var k = askKey(q);
+    box.addEventListener('toggle', function () { S.askOpen[k] = box.open; });
+    var inp = $('ask-in');
+    if (inp) {
+      inp.oninput = function () { S.askDraft[k] = inp.value; };
+      inp.onkeydown = function (ev) { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); askSend(q, inp.value); } };
+    }
+    if ($('ask-send')) $('ask-send').onclick = function () { askSend(q, inp && inp.value); };
+    box.querySelectorAll('[data-askq]').forEach(function (el) { el.onclick = function () { askSend(q, ASK_QUICK[+el.getAttribute('data-askq')]); }; });
+    box.querySelectorAll('[data-asksug]').forEach(function (el) {
+      el.onclick = function () {
+        var pr = el.getAttribute('data-asksug').split('|');
+        var x = (S.asks || []).filter(function (y) { return y.ask.ask_id === pr[0]; })[0];
+        var s = x && x.reply && (x.reply.suggestions || []).filter(function (z) { return ASK_ACT[z.action]; })[+pr[1]];
+        if (s) askApply(q, s);
+      };
+    });
+  }
+
   /* ── _actions 書き込み (設計 §5 の形) ── */
   function mkAction(action, f) {
     var a = { schema_version: 1, action_id: actionId(), action: action, iv: f.iv == null ? null : f.iv, ct: f.ct == null ? null : f.ct,
@@ -2684,6 +2814,7 @@ window.C01 = window.C01 || {};
     var days = [addDays(t, -1), t];
     var nowDay = jstNow().slice(0, 10);
     if (days.indexOf(nowDay) < 0) days.push(nowDay);
+    if (askOn()) loadAsks(days);                       /* v0.3.25 (R7Z Part A): AI 相談 (失敗しても他は続ける) */
     return S.src.listActions(days).then(function (items) {
       S.actions = items;
       var ids = {};
