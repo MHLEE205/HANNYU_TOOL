@@ -1064,6 +1064,75 @@ def r7n_checks(page, root, shots, engine):
     page.click("#tab-main")
 
 
+def r8b_checks(page, root, shots):
+    """v0.3.26 (R8B Part E-1 · #216): 未受信アドレス = 별 줄 · 받는 사람이 未受信 뿐이면 확인 체크 전 送信 꺼짐 · 회신 표시 · 제목 [test] RE: ·
+    보낸 곳 = 시험 주소 1개 (未受信 주소 0) · reminder_sent 에 unreceived · reply 기록.  (Part E-2 · #219): 通関書類 버튼 · 창 = 참고 · 값에 안 씀."""
+    rp, jp = root / "_data" / "remind.json", root / "_data" / "jikkyou.json"
+    rt0, jt0 = rp.read_text(encoding="utf-8"), jp.read_text(encoding="utf-8")
+    TEST_TO, UN = "test.box@example.invalid", "never.received@example.invalid"
+    r2 = json.loads(rt0)
+    r2["send_mode"] = {"test": True, "to": TEST_TO, "tag": "[test]"}
+    d0 = r2["ivs"]["TST2611-03"][0]
+    d0.update(to=[], cc=[], to_unreceived=[UN], cc_unreceived=[], reply_to={"internet_message_id": "<x@example.invalid>", "received_at": "2026-11-10T09:30:00+09:00",
+                                                                          "from": "a@example.invalid"}, unreceived_note="未受信アドレス — 確認して送信")
+    d0.pop("ready_at", None)
+    rp.write_text(json.dumps(r2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    j2 = json.loads(jt0)
+    for iv in j2["ivs"]:
+        if iv["iv_no"] == "TST2611-03":
+            iv["customs_docs"] = [{"path": "TST2611-03/_通関書類/DR_test.pdf", "name": "DR_test.pdf", "received_at": "2026-11-11T10:00:00+09:00", "sha16": "0" * 16}]
+    jp.write_text(json.dumps(j2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("""() => { C01.app.tick(); }""")
+    page.wait_for_timeout(600)
+    page.evaluate("""() => { window.__sent = []; C01.state.info.mode = 'graph';
+        C01.state.src.sendMailTest = function (m) { window.__sent.push(m); return C01.sources.Graph.prototype.sendMailTest.call({ _fetch: function (u, o) {
+            window.__sent.push({ url: u, body: JSON.parse(o.body) }); return Promise.resolve({ status: 202, ok: true }); } }, m); }; }""")
+    cb = page.locator("tbody[data-iv='TST2611-03'] [data-customs]")
+    ok("E-2 通関書類 버튼 (customs_docs 1)", cb.count() == 1 and "通関書類 1" in cb.inner_text(), cb.inner_text() if cb.count() else None)
+    cb.click()
+    page.wait_for_selector("[data-cusopen]")
+    mb = page.locator("#c01-modal").inner_text()
+    ok("E-2 通関書類 창 = 이름 · 받은 시각 · 「値には使いません」 · 試験表示", "DR_test.pdf" in mb and "2026-11-11 10:00" in mb and "には使いません" in mb and "試験表示" in mb, mb.replace(chr(10), " / ")[:300])
+    page.screenshot(path=str(shots / "r8b_customs.png"))
+    page.click("[data-close]")
+    page.click("tbody[data-iv='TST2611-03'] [data-remind]")
+    page.wait_for_selector("[data-rsend]")
+    md = page.locator("#c01-modal")
+    ok("E-1 未受信 줄 · 회신 줄 표시", md.locator(".c01-runrec").count() == 1 and UN in md.locator(".c01-runrec").inner_text()
+       and md.locator(".c01-rreply").count() == 1 and "2026-11-10 09:30" in md.locator(".c01-rreply").inner_text(), md.inner_text()[:200])
+    b0 = page.locator("[data-rsend='0']")
+    ok("E-1 받는 사람 = 未受信 뿐 → 확인 체크 전 送信 꺼짐 · 이유 문구", b0.is_disabled() and "未受信アドレスを確認" in page.locator("[data-rwhy='0']").inner_text(),
+       page.locator("[data-rwhy='0']").inner_text())
+    page.locator("[data-runrec='0']").check()
+    ok("E-1 확인 체크 → 送信 켜짐", b0.is_enabled())
+    page.locator("[data-rskip='0']").check()
+    ok("E-1 「この業者には送らない」 = 다시 꺼짐", b0.is_disabled())
+    page.locator("[data-rskip='0']").uncheck()
+    b0.click()
+    for _ in range(30):
+        if any(x.get("action") == "reminder_sent" and x.get("iv") == "TST2611-03" for x in actions(root)):
+            break
+        time.sleep(0.1)
+    sent = page.evaluate("window.__sent")
+    post = [x for x in sent if isinstance(x, dict) and x.get("url")]
+    msg = post[0]["body"]["message"] if post else {}
+    allr = json.dumps(sent, ensure_ascii=False)
+    ok("E-1 송신 = 시험 주소 1개 · 제목 [test] RE: · 未受信 주소 0 · 본문 앞 「未受信 1件（確認済）」 · 「返信」",
+       len(post) == 1 and [r["emailAddress"]["address"] for r in msg.get("toRecipients", [])] == [TEST_TO] and msg.get("subject", "").startswith("[test] RE: ")
+       and UN not in allr and "未受信 1件（確認済）" in msg.get("body", {}).get("content", "") and "返信" in msg.get("body", {}).get("content", ""), [len(post), msg.get("subject")])
+    rec = [x for x in actions(root) if x.get("action") == "reminder_sent" and x.get("iv") == "TST2611-03"]
+    ok("E-1 reminder_sent 기록 (unreceived 1 · unreceived_ok true · reply true · test true)", len(rec) == 1 and rec[0]["value"].get("unreceived") == 1
+       and rec[0]["value"].get("unreceived_ok") is True and rec[0]["value"].get("reply") is True and rec[0]["value"]["test"] is True, rec)
+    page.screenshot(path=str(shots / "r8b_remind_unreceived.png"))
+    page.click("[data-close]")
+    rp.write_text(rt0, encoding="utf-8")
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.state.info.mode = 'local'; C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r7z_checks(page, root, shots):
     """v0.3.25 (R7Z Part A · #207 · #209 · #210 · #211): 確認・入力 「その他（AIに相談）」 — 닫힌 채 · 빠른 질문 → ask 파일 (카드 · 열린 원본) ·
     답 표시 · 목록 밖 동작 = 버튼 없음 · 이 화면에 없는 버튼 = 꺼짐 · 값 버튼 = 칸만 채움 (확인은 담당자) · 한국어 질문 lang ko."""
@@ -1176,11 +1245,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.24", page.title() == "LEENAI C-01 搬入票 v0.3.24", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.26", page.title() == "LEENAI C-01 搬入票 v0.3.26", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.24" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.26" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1646,6 +1715,7 @@ def main():
             r7x_checks(page, ctx, root, shots)
             compass_r7x_checks(page)
             r7z_checks(page, root, shots)
+            r8b_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

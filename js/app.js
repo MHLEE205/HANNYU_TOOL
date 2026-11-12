@@ -825,6 +825,8 @@ window.C01 = window.C01 || {};
         (g.over ? '<span class="c01-overhead" title="行が COMPASS の枠 ' + g.total + ' より多い — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違いの可能性（赤の行）">枠外 ' + g.over + '</span>' : '') +
         '<span class="c01-flex"></span>' +
         (iv.hold_docs ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + (+iv.hold_docs) + ')</button>' : '') +
+        /* v0.3.26 (R8B Part E-2 · 決定 #219): 通関書類 (D/R · E/D · 輸出許可書) = 参考 · 値には使わない (エンジン customs_docs) */
+        ((iv.customs_docs || []).length ? '<button class="c01-btn-sub c01-customs" data-customs="' + esc(iv.iv_no) + '" title="通関業者から届いた書類（参考 · 値には使いません）">通関書類 ' + iv.customs_docs.length + '</button>' : '') +
         (g.remind ? '<button class="c01-btn-sub" data-remind="' + esc(iv.iv_no) + '">✉ 催促</button>' : '') +
         (g.compassDone ? '<button class="c01-done" data-compass="' + esc(iv.iv_no) + '" title="Compass入力の記録 · 元に戻す">✓ 入力済</button>' :
           g.allOk ? '<button class="c01-btn-pri" data-compass="' + esc(iv.iv_no) + '">⬇ Compass入力</button>' :
@@ -879,6 +881,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-docs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openDocs(el.getAttribute('data-docs')); }; });
     root.querySelectorAll('[data-compass]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCompass(el.getAttribute('data-compass')); }; });
     root.querySelectorAll('[data-remind]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRemind(el.getAttribute('data-remind')); }; });
+    root.querySelectorAll('[data-customs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCustoms(el.getAttribute('data-customs')); }; });
     root.querySelectorAll('[data-same]').forEach(function (el) {
       el.onclick = function (ev) { ev.stopPropagation(); S.view = 'input'; S.qkind = SAME; S.qiv = null; S.qsel = el.getAttribute('data-same'); render(); };
     });
@@ -1471,6 +1474,11 @@ window.C01 = window.C01 || {};
       html += '<section class="c01-rmd" data-rmd="' + i + '"><div class="c01-rmeta">' +
         '<div><span class="k">宛先</span><span class="mono">' + esc((d.to || []).join(', ') || '（送信先未登録）') + '</span></div>' +
         '<div><span class="k">CC</span><span class="mono">' + esc((d.cc || []).join(', ')) + '</span></div>' +
+        /* v0.3.26 (R8B Part E-1 · 決定 #216): 受け取ったことのないアドレス = 別の行 · 担当者が確認してチェックしないと宛先に入らない */
+        (remindUnrec(d).length ? '<div class="c01-runrec"><span class="k">未受信</span><span class="mono">' + esc(remindUnrec(d).join(', ')) +
+          '</span><span class="t2">（このアドレスからメールを受け取ったことがありません — 確認して送信）</span></div>' : '') +
+        (d.reply_to ? '<div class="c01-rreply"><span class="k">返信</span><span>同じ BKG の受信メール（' + esc(String(d.reply_to.received_at || '').slice(0, 16).replace('T', ' ')) +
+          ' 受信）への返信として送ります</span></div>' : '') +
         '<div><span class="k">差出人</span><span>' + esc(S.me ? S.me.email || S.me.name : '（ログイン者）') + '</span></div>' +
         '<div><span class="k">件名</span><span class="rsub">' + esc(d.subject) + '</span></div>' +
         '<div><span class="k">回数</span><span>' + esc(d.round) + ' 回目 · ' + esc(STAGE[d.stage] || d.stage) + ' · ' + esc(d.packer) + '</span></div></div>' +
@@ -1487,11 +1495,23 @@ window.C01 = window.C01 || {};
         '<button id="remind-send" class="c01-btn-pri" disabled aria-disabled="true" title="試験モードではありません — 送信できません">送信できません</button>') + '</div>';
     showModal(html);
     $('c01-modal').querySelectorAll('[data-rsend]').forEach(function (b) {
-      b.onclick = function () { sendRemindTest(ivNo, ds[+b.getAttribute('data-rsend')], b); };
+      b.onclick = function () {
+        var un = $('c01-modal').querySelector('[data-runrec="' + b.getAttribute('data-rsend') + '"]');
+        sendRemindTest(ivNo, ds[+b.getAttribute('data-rsend')], b, !!(un && un.checked));
+      };
     });
-    $('c01-modal').querySelectorAll('[data-rskip]').forEach(function (c) {
-      c.onchange = function () { var b = $('c01-modal').querySelector('[data-rsend="' + c.getAttribute('data-rskip') + '"]'); if (b && !b.hasAttribute('data-done')) b.disabled = c.checked || !remindCanSend(); };
-    });
+    function upd(i) {
+      var md = $('c01-modal'), b = md.querySelector('[data-rsend="' + i + '"]'), d = ds[+i];
+      if (!b || b.hasAttribute('data-done')) return;
+      var skip = md.querySelector('[data-rskip="' + i + '"]'), un = md.querySelector('[data-runrec="' + i + '"]');
+      var needUn = remindUnrec(d).length > 0 && !(d.to || []).length && !(un && un.checked);
+      var ready = !d.ready_at || jstNow() >= d.ready_at;
+      b.disabled = (skip && skip.checked) || !remindCanSend() || !ready || needUn;
+      var w = md.querySelector('[data-rwhy="' + i + '"]');
+      if (w && remindCanSend() && ready) w.textContent = needUn ? '未受信アドレスを確認してチェックすると送信できます' : '';
+    }
+    $('c01-modal').querySelectorAll('[data-rskip]').forEach(function (c) { c.onchange = function () { upd(c.getAttribute('data-rskip')); }; });
+    $('c01-modal').querySelectorAll('[data-runrec]').forEach(function (c) { c.onchange = function () { upd(c.getAttribute('data-runrec')); }; });
   }
   /* ── v0.3.22 (R7V Part B · 決定 #191 · #135): 催促 = エンジンの下書き → 担当者が「送信」。
      試験モード (11/16〜22 · 2 重の鍵): ① C01.SEND.remindTest (この画面のコード) ② エンジン remind.json send_mode.test。
@@ -1503,6 +1523,7 @@ window.C01 = window.C01 || {};
     return !!(C01.SEND && C01.SEND.remind && C01.SEND.remindTest !== false && m && m.test === true && typeof m.to === 'string' && /^[^@\s]+@[^@\s]+$/.test(m.to));
   }
   function remindCanSend() { return remindTest() && graphMode() && !!(S.me && S.me.email); }
+  function remindUnrec(d) { return [].concat((d && d.to_unreceived) || [], (d && d.cc_unreceived) || []); }
   function remindSent(iv, d) {
     var xs = ((iv && iv.reminders) || []).map(function (x) { return x.value || {}; });
     (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'reminder_sent' && a.iv === d.iv_no) xs.push(a.value || {}); });
@@ -1514,22 +1535,31 @@ window.C01 = window.C01 || {};
     var ready = !d.ready_at || jstNow() >= d.ready_at;
     var why = sent ? '送信済（' + (sent.test ? '試験 · ' : '') + d.round + '回目）' : !ready ? String(d.ready_at).slice(11, 16) + ' から送信できます' :
       !remindCanSend() ? 'ログインした職員だけ送信できます' : '';
+    var un = remindUnrec(d).length > 0;
+    var needUn = un && !(d.to || []).length;           /* 宛先が未受信アドレスだけ = 確認のチェックが必要 */
+    if (!why && needUn) why = '未受信アドレスを確認してチェックすると送信できます';
     return '<div class="c01-rsendrow"><label class="t2"><input type="checkbox" data-rskip="' + i + '"' + (sent ? ' disabled' : '') + '> この業者には送らない</label>' +
-      '<span class="c01-flex"></span><span class="t2">' + esc(why) + '</span>' +
-      '<button class="c01-btn-pri" data-rsend="' + i + '"' + (sent ? ' data-done disabled' : (!ready || !remindCanSend() ? ' disabled' : '')) + '>送信（試験）</button></div>';
+      (un ? '<label class="t2 c01-runrec-ok"><input type="checkbox" data-runrec="' + i + '"' + (sent ? ' disabled' : '') + '> 未受信アドレスを確認した（宛先に入れる）</label>' : '') +
+      '<span class="c01-flex"></span><span class="t2" data-rwhy="' + i + '">' + esc(why) + '</span>' +
+      '<button class="c01-btn-pri" data-rsend="' + i + '"' + (sent ? ' data-done disabled' : (!ready || !remindCanSend() || needUn ? ' disabled' : '')) + '>送信（試験）</button></div>';
   }
-  function sendRemindTest(ivNo, d, btn) {
+  function sendRemindTest(ivNo, d, btn, unOk) {
     var m = remindMode();
     var iv = ivById(ivNo);
     if (!remindCanSend() || !d || remindSent(iv, d)) return;
-    var subj = '[test] ' + d.subject;
-    var orig = '[test] 実際の宛先 To ' + (d.to || []).length + '件 · CC ' + (d.cc || []).length + '件（試験送信 · 業者には送っていません）';
+    var nUn = remindUnrec(d).length;
+    if (nUn && !(d.to || []).length && !unOk) return;          /* 未受信アドレスだけの宛先 = 確認のチェックなしでは送らない (#216) */
+    var subj = '[test] ' + (d.reply_to ? 'RE: ' : '') + d.subject;
+    var orig = '[test] 実際の宛先 To ' + (d.to || []).length + '件 · CC ' + (d.cc || []).length + '件' +
+      (nUn ? ' · 未受信 ' + nUn + '件（' + (unOk ? '確認済' : '入れない') + '）' : '') + (d.reply_to ? ' · 返信（同じ BKG の受信メール）' : '') +
+      '（試験送信 · 業者には送っていません）';
     var html = '<p style="color:#888">' + esc(orig) + '</p>' + signed(d.body_html || ('<pre>' + esc(d.body_text || '') + '</pre>'));
     btn.disabled = true;
     btn.textContent = '送信中…';
     S.src.sendMailTest({ subject: subj, html: html, to: m.to }).then(function () {
       return writeAction(mkAction('reminder_sent', { iv: ivNo, ct: null, field: null, source: null,
-        value: { packer: d.packer, round: +d.round, stage: d.stage, subject: subj, to: [m.to], cc: [], test: true } }));
+        value: { packer: d.packer, round: +d.round, stage: d.stage, subject: subj, to: [m.to], cc: [], test: true,
+          unreceived: nUn, unreceived_ok: !!(nUn && unOk), reply: !!d.reply_to } }));
     }).then(function () {
       toast('試験送信しました（' + d.packer + ' · ' + d.round + '回目 · 試験用アドレス）', 'ok');
       openRemind(ivNo);
@@ -1538,6 +1568,22 @@ window.C01 = window.C01 || {};
       btn.textContent = '送信（試験）';
       toast('送信できませんでした: ' + e.message, 'error');
     });
+  }
+
+  /* ── v0.3.26 (R8B Part E-2 · 決定 #219): 通関書類 (参考) — 通関業者のメール (D/R · E/D · 輸出許可書) · 値には使わない · 開くだけ ── */
+  function openCustoms(ivNo) {
+    var iv = ivById(ivNo);
+    var xs = (iv && iv.customs_docs) || [];
+    S.modal = { kind: 'customs', iv: ivNo };
+    var html = '<div class="c01-mh"><b>通関書類（参考）</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
+      '<span class="c01-trial" data-trial>試験表示</span><span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<p class="c01-note2">通関業者から届いた書類です。搬入票の値（seal · 重量など）には使いません。</p><ul class="c01-customs-list">' +
+      xs.map(function (x, i) {
+        return '<li><button class="c01-btn-sub" data-cusopen="' + i + '">開く</button> <span>' + esc(x.name) + '</span> <span class="t2">' +
+          esc(String(x.received_at || '').slice(0, 16).replace('T', ' ')) + ' 受信</span></li>';
+      }).join('') + '</ul></div>';
+    showModal(html);
+    $('c01-modal').querySelectorAll('[data-cusopen]').forEach(function (b) { b.onclick = function () { openTab(xs[+b.getAttribute('data-cusopen')].path); }; });
   }
 
   /* ── v0.3.17 (R7P · 決定 #175 · #176): 使い方 (1 画面) — 並行期間 (2026-11-16〜11-22) の職員向け。人の名前・メールは書かない ── */
