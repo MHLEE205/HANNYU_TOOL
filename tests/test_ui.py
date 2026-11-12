@@ -263,6 +263,139 @@ def rot_checks(page, shots):
 
 
 
+def r7w_checks(page, ctx, root, shots):
+    """v0.3.23 (R7W): Part A 自動OK · 確認済 줄 修正 (状況 클릭 → 경고 → 修正 폼 · mode edit · 確認済 · 元に戻す · COMPASS 입력済 경고) · Part B 📄 서류 탭 (搬入票 먼저)."""
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
+    j2 = json.loads(jt0)
+    iv1 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    r0 = next(r for r in iv1["rows"] if r.get("status") == "自動OK" and r.get("ct") and not r.get("human"))
+    docs_dir = [p.relative_to(root).as_posix() for p in sorted((root / "TST2611-01" / "搬入票").glob("*.svg"))]
+    r0["docs"] = [{"path": docs_dir[1], "name": "EIR_" + docs_dir[1].split("/")[-1], "page": None, "sha16": "e" * 16, "fields": ["t_w"], "doc_type": "eir"},
+                  {"path": docs_dir[0], "name": docs_dir[0].split("/")[-1], "page": None, "sha16": "a" * 16, "fields": ["n_w", "seal"], "doc_type": "hannyuhyo"}]
+    iv1["compass_input"] = [{"action_id": "cmp-r7w-0001", "by": "staff1@example.invalid", "at": "2026-11-08T09:00:00+09:00", "value": {"rows": 1}}]
+    jp.write_text(dump(j2), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    tr = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{r0['ct']}')").first
+    btn = tr.locator(".c01-okedit")
+    ok("A 自動OK 줄 状況 = 누를 수 있음 (修正)", btn.count() == 1 and btn.inner_text() == "自動OK", btn.count())
+    btn.click()
+    page.wait_for_selector(".c01-modal-okedit")
+    mt = page.locator(".c01-modal-okedit").inner_text()
+    ok("A 경고 1번 = 「この行は 自動OK です · 確認済（手入力）に変わり、記録されます · 修正しますか？」 + COMPASS 입력済 경고 · [修正する] [やめる]",
+       "この行は 自動OK です" in mt and "確認済（手入力）に変わり、記録されます。修正しますか？" in mt and "COMPASS には入力済み — 修正後に Compass入力 をもう一度" in mt
+       and page.locator("#okedit-go").inner_text() == "修正する" and "やめる" in mt, mt)
+    page.screenshot(path=str(shots / "r7w_okedit_warn.png"))
+    page.click("#okedit-go")
+    page.wait_for_selector(".c01-side")
+    side = page.locator(".c01-side")
+    ok("A 修正 폼 = 옆 창 머리 「修正（自動OK）」 · 6 칸 ✎ (CT · seal · 正味 · 風袋 · ベール数 · 作業日) · 원본 · 사진",
+       "修正（自動OK）" in side.inner_text() and side.locator(".c01-pf-edit .c01-edit").count() == 6 and side.locator("#panel-doc").count() == 1
+       and side.locator("#panel-photo").count() == 1 and "COMPASS には入力済み" in side.inner_text(), side.locator(".c01-pf-edit .c01-edit").count())
+    ids0 = {x["action_id"] for x in actions(root)}
+    side.locator("[data-ef='seal'] .c01-edit").click()
+    page.wait_for_selector("#edit-in")
+    page.fill("#edit-in", "ZZ 9999")
+    page.click("#edit-save")
+    page.wait_for_timeout(500)
+    new = [x for x in actions(root) if x["action_id"] not in ids0]
+    ok("A 저장 = manual_input · mode edit · source 手入力 · 원래 값은 엔진이 기록 (resolved.replace)", len(new) == 1 and new[0]["action"] == "manual_input"
+       and new[0].get("mode") == "edit" and new[0]["field"] == "seal" and new[0]["source"] == "手入力", new)
+    st_now = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{r0['ct']}')").first.get_attribute("data-status")
+    ok("A 저장 뒤 실황표 상태 = 確認済 (엔진 반영 전에도 바로)", st_now == "確認済", st_now)
+    page.screenshot(path=str(shots / "r7w_okedit_saved.png"))
+    ub = page.locator(".c01-side [data-vundo='seal']")
+    ok("A 修正한 칸 = 「元に戻す」", ub.count() == 1, ub.count())
+    page.once("dialog", lambda d: d.accept())
+    ub.click()
+    page.wait_for_timeout(500)
+    un = [x for x in actions(root) if x["action_id"] not in ids0 and x["action"] == "undo"]
+    st2 = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{r0['ct']}')").first.get_attribute("data-status")
+    ok("A 元に戻す = undo (value.action_id = 修正) → 상태 自動OK 로", len(un) == 1 and un[0]["value"]["action_id"] == new[0]["action_id"] and st2 == "自動OK", [un, st2])
+    page.evaluate("C01.state.sel = null; C01.state.editRow = null; C01.app.render()")
+    # Part B 📄
+    db = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{r0['ct']}') .c01-docbtn").first
+    ok("B 写真 옆 「📄2」 (그 줄 출처 서류 수 · 칸 폭 그대로)", db.count() == 1 and db.inner_text().strip() == "📄2", db.count() and db.inner_text())
+    nodoc = page.locator("tbody[data-iv='TST2611-02'] tr.c01-row td:nth-child(14) .t2")
+    ok("B 서류 없는 줄 = 「—」", nodoc.count() >= 1 and nodoc.first.inner_text().strip() == "—", nodoc.count())
+    with ctx.expect_page(timeout=10000) as pi:
+        db.click()
+    tab = pi.value
+    watch(tab, "DOC")
+    tab.wait_for_selector(".c01-dv-tabs", timeout=10000)
+    tabs = tab.eval_on_selector_all(".c01-dv-tabs [data-go]", "els => els.map(e => e.textContent)")
+    ok("B 새 탭 doc.html?k=해시 · 탭 = 搬入票 먼저 · EIR 다음", re.search(r"/doc\.html\?k=[0-9a-f]{8}$", tab.url) and tabs and tabs[0].startswith("搬入票") and tabs[1].startswith("EIR")
+       and r0["ct"] not in tab.url, [tab.url, tabs])
+    tab.wait_for_function("() => { const i = document.querySelector('.c01-pv-img'); return i && i.complete && i.naturalWidth > 0; }", timeout=10000)
+    ok("B 서류 = 원래 탭에서 받은 Blob (새 탭 로그인 · Graph 0)", tab.evaluate("document.querySelector('.c01-pv-img').src.slice(0,5)") == "blob:"
+       and tab.evaluate("typeof window.LEENAI") == "undefined" and r0["ct"] in tab.locator("#pv-head").inner_text(), "")
+    tab.keyboard.press("ArrowRight")
+    tab.wait_for_timeout(200)
+    ok("B → 키 = 다음 서류 (EIR)", "on" in (tab.locator(".c01-dv-tabs [data-go='1']").get_attribute("class") or ""), "")
+    tab.screenshot(path=str(shots / "r7w_doc_tab.png"))
+    tab.close()
+
+    # Part D 「IVに連結」 (config linkIv · 엔진 s2_human_link_iv 켠 뒤)
+    qp = root / "_data" / "queue.json"
+    qt0 = qp.read_text(encoding="utf-8")
+    qj = json.loads(qt0)
+    hq = next(x for x in qj["items"] if x["kind"] == "業者・IV未定")
+    hq["packer_guess"] = "PACKER_Z"
+    qp.write_text(dump(qj), encoding="utf-8")
+    page.evaluate("C01.RULES.linkIv = true; C01.app.tick()")
+    page.wait_for_timeout(400)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_selector("#link-iv")
+    ok("D 業者・IV未定 = 「IVに連結」 (BKG/IV 입력 · 후보 칩) · 확인 버튼 = 「IV と枠を選んでください」 (꺼짐)",
+       page.locator(".c01-linkiv [data-linkiv='TST2611-01']").count() == 1 and page.locator("#q-submit").is_disabled()
+       and "IV と枠を選んでください" in page.locator("#q-submit").inner_text(), page.locator("#q-submit").inner_text())
+    page.fill("#link-iv", "NOPE-9999")
+    page.press("#link-iv", "Enter")
+    page.wait_for_timeout(200)
+    ok("D 없는 BKG / IV = 고를 수 없음 (안내)", "進行中のブッキングにありません" in page.locator(".c01-linkiv").inner_text() and page.locator("input[name='link-slot']").count() == 0, "")
+    page.click(".c01-linkiv [data-linkiv='TST2611-01']")
+    page.wait_for_timeout(200)
+    opts = page.locator("input[name='link-slot']")
+    used = page.locator(".c01-slotopt.used input")
+    ok("D 칸 목록 = 그 부킹 칸 전부 (빈 칸 · 使用中 표시)", opts.count() >= 2 and used.count() >= 1, [opts.count(), used.count()])
+    used.first.check()
+    page.wait_for_timeout(200)
+    t = page.locator(".c01-linkiv").inner_text()
+    ok("D 업체 다름 · 이미 찬 칸 = 경고 표시 · 확인 버튼 켜짐", "業者（PACKER_Z）" in t and "もう行があります" in t and not page.locator("#q-submit").is_disabled(), t[-200:])
+    ids0 = {x["action_id"] for x in actions(root)}
+    dl = []
+
+    def acc(d):
+        dl.append(d.message)
+        d.accept()
+    page.on("dialog", acc)
+    page.click("#q-submit")
+    page.wait_for_timeout(600)
+    new = [x for x in actions(root) if x["action_id"] not in ids0]
+    ok("D 저장 = link_iv (iv · sha16 · slot_guid · warn · 확인창 2번)", len(new) == 1 and new[0]["action"] == "link_iv" and new[0]["iv"] == "TST2611-01"
+       and new[0]["value"]["sha16"] == [hq["files"][0]["sha16"]] and new[0]["value"]["slot_guid"] and sorted(new[0]["value"]["warn"]) == ["packer", "slot_used"]
+       and len(dl) == 2 and new[0]["queue_id"] == hq["queue_id"], [new, dl])
+    page.evaluate("q => { C01.state.qkind = 'done'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_timeout(300)
+    ok("D 연결 뒤 = 「IV に連結しました」 · 元に戻す", "IV に連結しました" in page.locator("#c01-main").inner_text() and page.locator("#q-undo").count() == 1, "")
+    page.screenshot(path=str(shots / "r7w_link_iv.png"))
+    page.click("#q-undo")
+    page.wait_for_timeout(400)
+    un = [x for x in actions(root) if x["action_id"] not in ids0 and x["action"] == "undo"]
+    ok("D 元に戻す = undo (value.action_id = link_iv)", len(un) == 1 and un[0]["value"]["action_id"] == new[0]["action_id"], un)
+    page.remove_listener("dialog", acc)
+    page.evaluate("C01.RULES.linkIv = false; C01.state.qkind = 'all'")
+    qp.write_text(qt0, encoding="utf-8")
+    page.click("#tab-main")
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r7v_side_checks(br, url, shots):
     """v0.3.21 (R7V F-1): 실황표 옆 창 머리 (CT) 가 상단 공통 바에 가리지 않음 · 패널 안 스크롤에도 머리 고정.
     넓이 1366 · 1600 · 1920 × 확대 100 % / 125 % (확대 = CSS 넓이 ÷ 1.25 + deviceScaleFactor 1.25 — 브라우저 확대와 같은 배치)."""
@@ -702,8 +835,9 @@ def r7n_checks(page, root, shots, engine):
        len(new) == 1 and new[0]["action"] == "manual_input" and new[0]["field"] == "t_w" and new[0]["value"] == 3700 and new[0]["source"] == "手入力"
        and re.fullmatch(r"[0-9a-f]{16}", new[0]["queue_id"] or "") is not None and new[0]["queue_id"] not in {x["queue_id"] for x in qj["items"]} and new[0]["ct"] == r3["ct"], new)
     fv = page.locator(".c01-form .c01-field[data-ef='t_w']")
-    ok("G-4 修正 뒤 = 새 값 · 「✓ 修正」 · 그 칸 ✎ 잠김 (사람 값 · 이유)", "3,700" in fv.inner_text() and "修正" in fv.locator(".c01-hm2").inner_text()
-       and fv.locator(".c01-edit").is_disabled() and "人が確認した値" in (fv.locator(".c01-edit").get_attribute("title") or ""), fv.inner_text())
+    # v0.3.23 (R7W Part A): valueEdit = 사람 값이 있어도 다시 ✎ 修正 (mode edit) + 「元に戻す」 (옛 규칙 = 잠김)
+    ok("G-4 修正 뒤 = 새 값 · 「✓ 修正」 · 그 칸 ✎ 다시 가능 + 元に戻す (R7W valueEdit) · action mode edit", "3,700" in fv.inner_text() and "修正" in fv.locator(".c01-hm2").inner_text()
+       and not fv.locator(".c01-edit").is_disabled() and fv.locator("[data-vundo='t_w']").count() == 1 and new and new[0].get("mode") == "edit", fv.inner_text())
     sys.path.insert(0, engine)
     from engine.output import schema_check  # noqa: E402
     errs = schema_check.errors(new[0], schema_check.load("action")) if new else ["없음"]
@@ -822,11 +956,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.22", page.title() == "LEENAI C-01 搬入票 v0.3.22", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.23", page.title() == "LEENAI C-01 搬入票 v0.3.23", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.22" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.23" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1282,6 +1416,7 @@ def main():
             r7v_side_checks(br, url, shots)
             r7v_checks(page, root, shots)
             r7v_remind_checks(page, root, shots)
+            r7w_checks(page, ctx, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

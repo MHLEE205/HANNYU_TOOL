@@ -2,6 +2,12 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.23 (2026-11-12) — R7W: 自動OK·確認済 줄 修正 · 📄 서류 탭 · IVに連結
+- Part A (형님 15:3x): 実況表 「状況」 의 自動OK / 確認済 를 누르면 경고 1번 (「この行は 自動OK です。値を変えると 確認済（手入力）に変わり、記録されます。修正しますか？」 [修正する] [やめる] · Compass入力 끝난 IV 면 「COMPASS には入力済み — 修正後に Compass入力 をもう一度」) → 옆 창 修正 폼 (CT · シール · 正味 · 風袋 · ベール数 · 作業日 ✎ · 원본 · 사진). 저장 = `manual_input` + `mode: "edit"` (사람 값이 있어도 새 값 · 엔진 v0.5.50 `actions_value_edit`) · 自動OK 를 고친 줄 = 確認済 (바로) · 「元に戻す」 = `undo`. 설정 `C01.RULES.valueEdit`.
+- Part B (형님 15:2x): 写真 칸 「📷 9枚」 옆 「📄n」 (그 줄 값의 출처 서류 수 · 없으면 「—」 · 칸 폭 그대로) → 같은 창 새 탭 `doc.html` (photo.html 방식 · 로그인 · Graph 0 · Blob) · 그 줄 쪽만 (PDF = 그 쪽 · 엔진 쪽 방향) · 탭 = 搬入票 → 計量伝票 → 納品書 · 그 밖 → EIR → Excel (Excel = SharePoint で開く). 옆 창 원본도 搬入票 먼저.
+- Part D (#206): 業者・IV未定 카드 「IVに連結」 — BKG / IV 입력 (진행 중 IV 자동 완성 · 엔진 후보 · ★ 전에 같은 파일 이름 · 업체로 연결한 IV) → 그 부킹 칸 목록 (빈 칸 · 使用中) → 칸 선택 필수 → `link_iv` (sha16 · slot_guid · warn). 없는 BKG 불가 · 업체 다름 / 이미 찬 칸 = 확인창 · 元に戻す. 설정 `C01.RULES.linkIv` (엔진 `s2_human_link_iv` 켠 뒤 true).
+- 시험 `r7w_checks` — ui 199 (+19) · graph 47 · layout 32 · photoset 16 · compass_live 22.
+
 ## 0.3.22 (2026-11-12) — R7V: CY CUT 지난 IV 숨김 · 作業日 「?」 · 作業日 修正 · 催促 試験送信
 - Part 0-2 (#194): 実況表 · 確認・入力 · 건수 = CY CUT ≥ 오늘 (JST · `_data` today) 인 IV 만 (지난 IV 는 숨김만 · 데이터 그대로). 옛 `phase4_report.py:569` 와 같음. CY CUT 없는 IV 는 표시 (옛 엔진은 뺌 — 일이 남은 줄을 숨기지 않으려고)
 - F-2 (#188): 엔진 info 「作業日要確認」 줄 = 작업일 칸 회색 「?」 (카드 아님) · WORK_DATE 사유 줄 옆 창 = 作業日 ✎ 修正 (다른 값과 같은 방식 · 人の値が優先)

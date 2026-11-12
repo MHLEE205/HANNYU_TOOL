@@ -72,6 +72,8 @@ class H(BaseHTTPRequestHandler):
             return self._file(TOOL, "index.html")
         if path == "/photo.html":                    # v0.3.13 (R7L Part E): 写真ページ (新しいタブ)
             return self._file(TOOL, "photo.html")
+        if path == "/doc.html":                      # v0.3.23 (R7W Part B): 書類ページ (新しいタブ)
+            return self._file(TOOL, "doc.html")
         if path == "/api/config":
             return self._send(200, {"mode": "local", "today": s.today or dt.date.today().isoformat(), "root_name": s.root.name,
                                     "actions_separate": s.actions != s.root})

@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.22',
+  version: '0.3.23',
   date: '2026-11-12',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
@@ -21,7 +21,12 @@ C01.RULES = {
   slotChange: 'all',
   adminUsers: [],
   /* ③ チェックデジットが合わない CT の手入力: 'warn' = 確認窓のあと保存 (#109 ③ · CT_CHECKDIGIT_OVERRIDE · 確認済 · 自動OK にしない) / 'reject' = 受け付けない (旧) */
-  ctCheckDigitWrong: 'warn'
+  ctCheckDigitWrong: 'warn',
+  /* ④ v0.3.23 (R7W Part A · 形님 15:3x): 自動OK · 確認済 の行も 修正 — 状況を押す → 警告 1 回 → 修正フォーム · 人の値があっても新しい値 (mode edit) · 元に戻す。
+        エンジン v0.5.50 actions_value_edit が on の時だけ true にする (off のエンジンは mode を知らず 先の値が勝つ) */
+  valueEdit: true,
+  /* ⑤ v0.3.23 (R7W Part D · 決定 #206): 業者・IV 未定 カード = 「IVに連結」 (BKG/IV + 枠を担当者が選ぶ) — エンジン s2_human_link_iv が on の時だけ true */
+  linkIv: true
 };
 
 /* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */

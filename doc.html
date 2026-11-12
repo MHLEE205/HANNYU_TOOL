@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL 書類ページ (v0.3.23 · R7W Part B · photo.html と同じ方式 D-65)
+     実況表 の 「📄」 を押すと 同じウィンドウの新しいタブで その行の値の出典書類 (その行のページだけ) を開く。搬入票 が先 · 計量伝票 · 納品書 · EIR · Excel はタブ。
+     データ・トークンはこのファイルに入れない: 書類は 元の画面 (実況表) から postMessage で受け取る (このタブではログインしない · Graph を呼ばない)。 -->
+<title>書類 — LEENAI C-01 搬入票</title>
+<link rel="stylesheet" href="https://mhlee205.github.io/LEENAI_COMMON/v1/leenai-common.css">
+<link rel="stylesheet" href="app.css">
+<script src="js/config.js"></script>
+<script src="js/doc.js"></script>
+</head>
+<body class="c01-pv-body">
+<header class="c01-pv-top">
+  <div class="ln-logo">LEEN<span>AI</span></div>
+  <span class="c01-pv-sys" id="pv-sys">C-01</span>
+  <div class="c01-pv-head" id="pv-head"><span class="c01-pv-wait">読み込み中…</span></div>
+  <span class="c01-flex"></span>
+  <span class="c01-pv-ver" id="pv-ver"></span>
+  <button class="ln-btn-ghost" id="pv-theme">🌙 ダーク</button>
+</header>
+<main class="c01-pv-main" id="pv-main"></main>
+<footer class="c01-pv-foot">← → で書類を切り替え · ホイールで拡大 · ✦ Powered by LEENAI Automation System</footer>
+</body>
+</html>

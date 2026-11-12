@@ -345,3 +345,23 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-chist { margin-top: 8px; font-size: 12px; color: var(--text2); }
 .c01-chist b { display: block; margin-bottom: 2px; }
 .c01-wddoubt { color: var(--text2); }   /* v0.3.22 (R7V F-2): 作業日要確認 = 灰色 「?」 */
+
+/* v0.3.23 (R7W Part A): 自動OK · 確認済 を押して 修正 (警告 1 回) · 元に戻す */
+.c01-okedit { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; }
+.c01-okedit:hover { text-decoration: underline; }
+.c01-undo2 { margin-left: 4px; padding: 1px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text2, var(--text)); cursor: pointer; font-family: inherit; }
+.c01-modal-okedit { max-width: 460px; }
+.c01-modal-okedit .c01-mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.c01-warn2 { color: var(--warn, #b26a00); font-weight: 600; }
+/* v0.3.23 (R7W Part B): 写真 の横の 📄 (その行の値の出典書類 · 新しいタブ) */
+.c01-docbtn { margin-left: 3px; padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font-family: inherit; font-size: 11px; white-space: nowrap; }
+.c01-table td.c-ph { white-space: nowrap; overflow: hidden; } .c01-table td.c-ph .c01-phbtn { font-size: 11px; }
+.c01-docbtn:hover { text-decoration: underline; }
+/* v0.3.23 (R7W Part D): 業者・IV 未定 = IVに連結 (BKG / IV → 枠を選ぶ) */
+.c01-linkiv { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.c01-linkiv .k { font-weight: 700; margin-bottom: 4px; }
+.c01-linkrec { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.c01-linkslots { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; max-height: 220px; overflow-y: auto; }
+.c01-slotopt { display: grid; grid-template-columns: 18px 22px 1fr auto auto; gap: 6px; align-items: center; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 12px; }
+.c01-slotopt.free { border-color: var(--ok); } .c01-slotopt.on { outline: 2px solid var(--accent); }
+.c01-free { color: var(--ok); font-weight: 600; }
