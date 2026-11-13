@@ -308,6 +308,23 @@ window.C01 = window.C01 || {};
     try { localStorage.setItem(ROTMEM_KEY, JSON.stringify(m)); } catch (e) { /* 保存できない時は覚えない */ }
   }
   function normRot(v) { v = Math.round(+v || 0); v = ((v % 360) + 360) % 360; return v % 90 === 0 ? v : 0; }
+  /* v0.3.29 (R8G Part A ④ · 決定 #234 · エンジン out_hold_fax_read): 業者・IV未定 = エンジンが FAX の各ページで読んだ値 (向き · BKG · CT · シール · 重量 · ベール数 · 発行 · FAX 送信元) — 表示だけ */
+  var DOC_JA = { hannyuhyo: '搬入票', keiryo: '計量票', eir: 'EIR', vanning_list: 'バンニング表', inspection: '検査', fax_cover: 'FAX 送付状', other: 'その他' };
+  function holdReadTable(q) {
+    var pg = (q.fax_read && q.fax_read.pages) || [];
+    if (!pg.length) return '';
+    var v = function (x) { return x == null || x === '' ? '—' : String(x); };
+    var tr = function (k, x, mono) { return '<tr><th>' + k + '</th><td' + (mono ? ' class="mono"' : '') + '>' + esc(v(x)) + '</td></tr>'; };
+    return '<div class="c01-holdread"><div><span class="k">エンジンが読んだ値</span> <span class="t2">（判定には使っていません）</span></div>' + pg.map(function (p) {
+      var rows = (p.rows && p.rows.length) ? p.rows : [{}];
+      return '<table class="c01-same"><thead><tr><th colspan="2">p.' + esc(v(p.page)) + ' · ' + esc(DOC_JA[p.doc_type] || v(p.doc_type)) + (p.rotation ? ' · 向き ' + esc(p.rotation) + '°' : '') + '</th></tr></thead><tbody>' +
+        tr('発行', p.issuer) + tr('FAX 送信元', p.fax_from) + tr('BKG', (p.bkg || []).join(' / '), true) +
+        rows.map(function (r, k) {
+          return (rows.length > 1 ? '<tr><th colspan="2">' + (k + 1) + '行目</th></tr>' : '') + tr('CT番号', r.ct, true) + tr('シール番号', r.seal, true) + tr('正味重量', r.n_w, true) +
+            tr('風袋重量', r.t_w, true) + tr('ベール数', r.bales, true);
+        }).join('') + '</tbody></table>';
+    }).join('') + '</div>';
+  }
   function rotMap(f) {
     var r = f && f.rotation, m = {};
     if (r == null) return m;
@@ -2372,7 +2389,7 @@ window.C01 = window.C01 || {};
           '<p class="c01-note2">他の会社の搬入票なら「他社の書類」（この書類の値を使いません · ファイルは消しません · 元に戻せます）。当社の書類なら「当社の書類」（値をもう一度使います）。写真はそのままです。</p></div>';
       } else if (q.kind === HOLD) {
         html += '<div class="c01-hold"><div><span class="k">保留の理由</span> ' + esc(String(q.hold_code || q.note || '').split(',').map(function (c) { return HOLD_TEXT[c] || c; }).join(' · ')) + '</div>' +
-          '<div><span class="k">候補の IV</span> <span class="mono">' + esc((q.candidates || []).join(' / ') || '—') + '</span></div>' +
+          '<div><span class="k">候補の IV</span> <span class="mono">' + esc((q.candidates || []).join(' / ') || '—') + '</span></div>' + holdReadTable(q) +
           (linkIvOn() && !st.done ? linkIvForm(q) :
             linkIvOn() ? '' : '<p class="c01-note2">IV への連結はエンジン側の次の版で入ります。今は 原本を確認して、搬入票でなければ「搬入票ではない」、あとで見るなら「スキップ」。</p>') + '</div>';
       }

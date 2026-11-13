@@ -1268,6 +1268,41 @@ def r8f_checks(page, root, shots):
     page.wait_for_timeout(400)
 
 
+def r8g_checks(page, root, shots):
+    """v0.3.29 (R8G Part A ④ · #234): 業者・IV未定 = 엔진 fax_read.pages (쪽 각도 · 읽은 값) 표 + 파일 rotation 으로 바로 세움 (向き補正 180°) · fax_read 없으면 표 없음."""
+    qp = root / "_data" / "queue.json"
+    qt0 = qp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    q2 = json.loads(qt0)
+    hq = next(x for x in q2["items"] if x["kind"] == "業者・IV未定")
+    hq["resolved"] = None
+    if hq.get("files"):
+        hq["files"][0]["rotation"] = {"1": 180}
+    hq["fax_read"] = {"ct": ["TSTU0000001"], "pages": [{"file": None, "page": 1, "rotation": 180, "doc_type": "hannyuhyo", "issuer": "テスト商店",
+                                                        "fax_from": "(株)テスト本社", "bkg": ["TSTBKG0001"],
+                                                        "rows": [{"ct": "TSTU0000001", "seal": "TS0001", "n_w": 1000, "t_w": 3000, "bales": 20}]}]}
+    qp.write_text(dump(q2), encoding="utf-8")
+    page.click("#tab-main")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_selector(".c01-holdread")
+    t = page.locator(".c01-holdread").inner_text()
+    ok("R8G 業者・IV未定 = 엔진이 읽은 값 표 (搬入票 · 발행 · FAX 送信元 · BKG · CT · シール · 重量 · ベール 20)",
+       all(x in t for x in ("エンジンが読んだ値", "搬入票", "テスト商店", "(株)テスト本社", "TSTBKG0001", "TSTU0000001", "TS0001", "20")), t)
+    if hq.get("files"):
+        ok("R8G 파일 rotation 180 = 向き補正 180°", page.locator("#q-autorot").count() == 1 and "180" in page.locator("#q-autorot").inner_text(), "")
+    page.screenshot(path=str(shots / "r8g_hold_read.png"))
+    q3 = json.loads(qt0)
+    qp.write_text(dump(q3), encoding="utf-8")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_timeout(300)
+    ok("R8G fax_read 없음 = 표 없음 (옛 화면 그대로)", page.locator(".c01-holdread").count() == 0, "")
+    page.evaluate("() => { C01.state.view = 'main'; C01.state.qsel = null; }")
+
+
 def r8b_checks(page, root, shots):
     """v0.3.26 (R8B Part E-1 · #216): 未受信アドレス = 별 줄 · 받는 사람이 未受信 뿐이면 확인 체크 전 送信 꺼짐 · 회신 표시 · 제목 [test] RE: ·
     보낸 곳 = 시험 주소 1개 (未受信 주소 0) · reminder_sent 에 unreceived · reply 기록.  (Part E-2 · #219): 通関書類 버튼 · 창 = 참고 · 값에 안 씀."""
@@ -1449,11 +1484,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.28", page.title() == "LEENAI C-01 搬入票 v0.3.28", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.29", page.title() == "LEENAI C-01 搬入票 v0.3.29", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.28" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.29" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1923,6 +1958,7 @@ def main():
             r8c_checks(page, root, shots)
             r8d_checks(page, root, shots)
             r8f_checks(page, root, shots)
+            r8g_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
