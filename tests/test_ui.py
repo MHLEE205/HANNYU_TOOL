@@ -1150,6 +1150,123 @@ def r8c_checks(page, root, shots):
     page.evaluate("C01.app.tick()")
     page.wait_for_timeout(300)
 
+def r8d_checks(page, root, shots):
+    """v0.3.28 (R8D Part A · #227): 未分類 FAX 카드 = 「IVに連結」 — 엔진 후보 IV (끝난 부킹 = link_target 칸) 칩 · FAX CT 같은 칸 ★ · 칸 고르기 → link_iv
+    (sha16 · slot_guid · fax 학습 기록) · RULES.faxLinkIv 끄면 옛 IV 고르기 그대로."""
+    qp = root / "_data" / "queue.json"
+    qt0 = qp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    q2 = json.loads(qt0)
+    docs_dir = [p_.relative_to(root).as_posix() for p_ in sorted((root / "TST2611-01" / "搬入票").glob("*.svg"))]
+    fq = {"queue_id": "8d8d8d8d8d8d8d81", "kind": "未分類FAX", "iv_no": None, "ct": None, "field": None, "container_id": None, "values": {},
+          "candidates": ["TST2609-09"], "files": [{"path": docs_dir[0], "name": "fax-0001.pdf", "page": None, "bbox": None, "sha16": "8d8d8d8d8d8d8d8d"}],
+          "note": "保留", "resolved": None, "superseded": [], "cy_cut": None, "cy_open": None, "issuer": None, "field_sources": {}, "field_source_text": {},
+          "received_at": "2026-11-12T10:00:00+09:00", "link_iv": True, "fax_read": {"ct": ["AAAU1234565"]},
+          "link_target": {"iv_no": "TST2609-09", "bkg_no": "BKGTEST09", "state": "종료", "slots": [
+              {"slot_guid": "slot-r8d-1", "seq": 0, "packer": "PACKER_A", "plant": None, "item": "X", "work_date": "2026-09-20", "row_ct": None, "match": []},
+              {"slot_guid": "slot-r8d-2", "seq": 1, "packer": "PACKER_A", "plant": None, "item": "X", "work_date": "2026-09-20", "row_ct": "BBBU1234560",
+               "compass_ct": "AAAU1234565", "match": ["CT(COMPASS)"]}]}}
+    q2["items"].append(fq)
+    if "未分類FAX" not in q2["kinds"]:
+        q2["kinds"] = list(q2["kinds"]) + ["未分類FAX"]
+    qp.write_text(dump(q2), encoding="utf-8")
+    page.evaluate("C01.RULES.linkIv = true; C01.RULES.faxLinkIv = true; C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qiv = null; C01.state.showOldFax = true; C01.state.qsel = q; C01.app.render(); }", fq["queue_id"])
+    page.wait_for_selector("#link-iv")
+    ok("A 未分類FAX = 「IVに連結」 · FAX の CT · 후보 칩 · 확인 버튼 꺼짐", page.locator(".c01-linkiv [data-linkiv='TST2609-09']").count() == 1
+       and "AAAU1234565" in page.locator(".c01-hold").inner_text() and page.locator("#q-submit").is_disabled(),
+       [page.locator(".c01-hold").first.inner_text()[:120], page.evaluate("() => [C01.state.qsel, C01.state.qiv, C01.state.qkind, (C01.state.queue.items || []).filter(x => x.kind === '未分類FAX').map(x => x.queue_id + ':' + !!x.link_iv), JSON.stringify(C01.RULES)]")])
+    page.evaluate("C01.RULES.faxLinkIv = false; C01.app.render()")
+    page.wait_for_timeout(200)
+    ok("A RULES.faxLinkIv 끔 = 옛 IV 고르기 (q-iv)", page.locator("#link-iv").count() == 0 and page.locator("#q-iv").count() == 1, "")
+    page.evaluate("C01.RULES.faxLinkIv = true; C01.app.render()")
+    page.wait_for_selector("#link-iv")
+    page.click(".c01-linkiv [data-linkiv='TST2609-09']")
+    page.wait_for_timeout(200)
+    opts = page.locator("input[name='link-slot']")
+    m = page.locator(".c01-slotopt.match")
+    ok("A 끝난 부킹 = 후보 칸 목록 (2) · FAX CT 같은 칸 ★", opts.count() == 2 and m.count() == 1 and "FAX の CT と同じ" in m.inner_text(),
+       [opts.count(), m.count()])
+    page.screenshot(path=str(shots / "r8d_fax_link.png"))
+    m.locator("input").check()
+    page.wait_for_timeout(200)
+    ids0 = {x.get("action_id") for x in actions(root)}
+    dl = []
+
+    def acc(d):
+        dl.append(d.message)
+        d.accept()
+    page.on("dialog", acc)
+    page.click("#q-submit")
+    page.wait_for_timeout(600)
+    page.remove_listener("dialog", acc)
+    new = [x for x in actions(root) if x.get("action_id") not in ids0]
+    v = new[0]["value"] if new else {}
+    ok("A 저장 = link_iv (IV · sha16 · slot_guid · fax 학습 기록 · 이미 찬 칸 확인창 1)", len(new) == 1 and new[0]["action"] == "link_iv" and new[0]["iv"] == "TST2609-09"
+       and v.get("slot_guid") == "slot-r8d-2" and v.get("sha16") == ["8d8d8d8d8d8d8d8d"] and v.get("fax", {}).get("engine_cand") is True and v["fax"].get("past") is True
+       and v["fax"].get("ct") == ["AAAU1234565"] and new[0]["queue_id"] == fq["queue_id"] and len(dl) == 1, [new, dl])
+    page.evaluate("C01.RULES.linkIv = false; C01.RULES.faxLinkIv = true; C01.state.qkind = 'all'; C01.state.showOldFax = false")
+    qp.write_text(qt0, encoding="utf-8")
+
+
+
+def r8f_checks(page, root, shots):
+    """v0.3.28 (R8F · #233 D-142): 엔진 row.link_single (사람 연결 human · 회전 다시 읽기 연결 rot) = MIN_SOURCES 이유 줄이
+    「連結した書類だけの値です（…）。確認が必要です。」 (値の確認 카드 · 実況表 줄) · link_single 없는 줄 = 옛 문구 그대로."""
+    jp, qp = root / "_data" / "jikkyou.json", root / "_data" / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    j2, q2 = json.loads(jt0), json.loads(qt0)
+    iv1 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    r1, r2 = iv1["rows"][0], iv1["rows"][1]
+    r1.update({"status": "再確認", "engine_status": "再確認", "reasons": ["MIN_SOURCES"], "reason_text": ["x"], "human": None,
+               "link_single": {"by": "human", "fields": ["seal", "bales"]}})
+    r2.update({"status": "再確認", "engine_status": "再確認", "reasons": ["MIN_SOURCES"], "reason_text": ["x"], "human": None})
+    r2.pop("link_single", None)
+    vq = {"queue_id": "f" * 14 + "81", "kind": "値の確認", "iv_no": "TST2611-01", "ct": r1["ct"], "field": None, "container_id": r1["container_id"], "values": {},
+          "candidates": [], "files": [], "note": "MIN_SOURCES", "resolved": None, "superseded": [], "cy_cut": iv1.get("cy_cut"), "issuer": None,
+          "field_sources": {"bales": [{"src": "搬入票", "value": r1["bales"], "agree": True}]}, "field_source_text": {}, "final": {"ct": r1["ct"]},
+          "reason_codes": ["MIN_SOURCES"]}
+    q2["items"].append(vq)
+    if "値の確認" not in q2["kinds"]:
+        q2["kinds"] = list(q2["kinds"]) + ["値の確認"]
+    jp.write_text(dump(j2), encoding="utf-8")
+    qp.write_text(dump(q2), encoding="utf-8")
+    page.click("#tab-main")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, picks: {}, panelInput: '', sel: null, qvals: {}, qchoice: {}, editRow: null, filter: null}); C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", vq["queue_id"])
+    page.wait_for_selector(".c01-vchk")
+    t = page.locator(".c01-vchk .c01-rdesc").first.inner_text()
+    ok("R8F 値の確認 카드 = 「連結した書類だけの値です（シール番号・ベール数）。確認が必要です。」 + ?",
+       "連結した書類だけの値です（シール番号・ベール数）。確認が必要です。" in t and page.locator(".c01-vchk .c01-rq").count() >= 1, t)
+    page.screenshot(path=str(shots / "r8f_vchk_link_single.png"))
+    j3 = json.loads(dump(j2))
+    iv3 = next(x for x in j3["ivs"] if x["iv_no"] == "TST2611-01")
+    iv3["rows"][0]["link_single"] = {"by": "rot", "fields": ["n_w"]}
+    jp.write_text(dump(j3), encoding="utf-8")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", vq["queue_id"])
+    page.wait_for_selector(".c01-vchk")
+    t2 = page.locator(".c01-vchk .c01-rdesc").first.inner_text()
+    ok("R8F rot = 「向きを直して読んだ FAX だけの値です（正味重量）。」", "向きを直して読んだ FAXだけの値です（正味重量）。確認が必要です。" in t2, t2)
+    vq2 = dict(vq, queue_id="f" * 14 + "82", container_id=r2["container_id"], ct=r2["ct"])
+    q3 = json.loads(dump(q2)); q3["items"].append(vq2)
+    qp.write_text(dump(q3), encoding="utf-8")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", vq2["queue_id"])
+    page.wait_for_selector(".c01-vchk")
+    t3 = page.locator(".c01-vchk .c01-rdesc").first.inner_text()
+    ok("R8F link_single 없는 줄 = 옛 MIN_SOURCES 문구 그대로", "1つだけです" in t3 and "連結" not in t3, t3)
+    page.evaluate("() => { C01.state.view = 'main'; C01.state.qsel = null; }")
+    jp.write_text(jt0, encoding="utf-8")
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(400)
+
 
 def r8b_checks(page, root, shots):
     """v0.3.26 (R8B Part E-1 · #216): 未受信アドレス = 별 줄 · 받는 사람이 未受信 뿐이면 확인 체크 전 送信 꺼짐 · 회신 표시 · 제목 [test] RE: ·
@@ -1332,11 +1449,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.27", page.title() == "LEENAI C-01 搬入票 v0.3.27", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.28", page.title() == "LEENAI C-01 搬入票 v0.3.28", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.27" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.28" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1804,6 +1921,8 @@ def main():
             r7z_checks(page, root, shots)
             r8b_checks(page, root, shots)
             r8c_checks(page, root, shots)
+            r8d_checks(page, root, shots)
+            r8f_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

@@ -365,6 +365,7 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-slotopt { display: grid; grid-template-columns: 18px 22px 1fr auto auto; gap: 6px; align-items: center; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 12px; }
 .c01-slotopt.free { border-color: var(--ok); } .c01-slotopt.on { outline: 2px solid var(--accent); }
 .c01-free { color: var(--ok); font-weight: 600; }
+.c01-slotopt { grid-template-columns: 18px 22px 1fr auto auto auto; } .c01-slotopt.match { background: var(--accent-soft, rgba(80,140,255,.10)); } .c01-match { color: var(--accent); font-weight: 600; white-space: nowrap; }   /* v0.3.28 (R8D Part A): FAX の CT と同じ枠 */
 /* v0.3.24 (R7X Part B · #212): 理由 = 説明 1 行 + 「?」 (やること = hover · クリック / タッチで横に 1 行) · Part A: 「このまま確認（OK）」 */
 .c01-rdesc { display: inline; }
 .c01-rq { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; margin-left: 3px; border-radius: 50%; border: 1px solid var(--line, #bbb); background: transparent; color: var(--text2, #666); font-size: 10px; line-height: 1; cursor: pointer; vertical-align: 1px; }

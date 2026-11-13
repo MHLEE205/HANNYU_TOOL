@@ -71,9 +71,19 @@ window.C01 = window.C01 || {};
     var fill = function (x) { return String(x).split('{A}').join(A || '書類').split('{B}').join(B || '別の書類').split('{項目}').join(item || '値').split('{ない種類}').join((r && r.photo_missing) || '—'); };
     return { code: code, short: REASON_SHORT[code] || code, desc: fill(t[0]), todo: fill(t[1]) };
   }
+  /* v0.3.28 (R8F · #233 D-142 · エンジン row.link_single): 連結した書類 (人 = IVに連結 · rot = 向きを直して読んだ FAX) の値が その項目の唯一の出典 → 確認が必要 */
+  function linkSingleInfo(r) {
+    var ls = r && r.link_single;
+    if (!ls || !(ls.fields || []).length) return null;
+    var item = ls.fields.map(function (f) { return FIELD_LABEL[f] || f; }).join('・');
+    var who = ls.by === 'rot' ? '向きを直して読んだ FAX' : '連結した書類';
+    return { code: 'MIN_SOURCES', short: REASON_SHORT.MIN_SOURCES || 'MIN_SOURCES', link: true,
+      desc: who + 'だけの値です（' + item + '）。確認が必要です。', todo: '原本を見て値が合っていれば「確認する」。違えば ✎ 修正。' };
+  }
   function reasonInfos(r, qs) {
     var rt = reasonTexts(r);
-    return (r.reasons || []).map(function (c, i) { return reasonInfo(c, r, qs) || { code: c, short: REASON_SHORT[c] || c, desc: rt[i] || c, todo: '' }; });
+    var ls = linkSingleInfo(r);
+    return (r.reasons || []).map(function (c, i) { return (c === 'MIN_SOURCES' && ls) || reasonInfo(c, r, qs) || { code: c, short: REASON_SHORT[c] || c, desc: rt[i] || c, todo: '' }; });
   }
   /* 説明 1 行 + 「?」 (やること: hover = title · クリック / タッチ = その横に 1 行) */
   function reasonLine(ri) {
@@ -2333,6 +2343,10 @@ window.C01 = window.C01 || {};
             esc(r ? (r.photos ? '写真あり ' + r.photos + '枚（重複の可能性）' : '写真待ち') + (r.seal ? ' · ' + r.seal : '') + (r.work_date ? ' · ' + md(r.work_date) : '') : '') + '</span></button>';
         }).join('') + (cands.length ? '' : '<p class="c01-note2">候補がありません</p>') +
           '<label class="c01-direct">CT 番号を入力して指定<input id="q-ct" placeholder="CT 番号" value="' + esc((S.qvals[q.queue_id] || {}).ct || '') + '"></label></fieldset>';
+      } else if (faxLinkOn(q)) {
+        /* v0.3.28 (R8D Part A · 決定 #227): 未分類 FAX = 「IVに連結」 と同じ (BKG / IV → 枠 · 印刷 BKG の候補が上 · FAX の CT と同じ枠に印) */
+        html += '<div class="c01-hold">' + (q.fax_read && (q.fax_read.ct || []).length ? '<div><span class="k">FAX の CT</span> <span class="mono">' + esc(q.fax_read.ct.join(' / ')) + '</span></div>' : '') +
+          (!st.done ? linkIvForm(q) : '') + '</div>';
       } else if (q.kind === '未分類FAX') {
         var ivc = q.candidates || [];
         html += '<fieldset class="c01-choices"><legend>どのインボイスに連結しますか</legend>' + ivc.map(function (c, i) {
@@ -2464,7 +2478,7 @@ window.C01 = window.C01 || {};
     if (sph && q.same) sph.onclick = function (ev) { var ivx = ivById(q.iv_no); if (ivx) openPhotos(ev, rowKey(ivx, q.same.photo), 0); };
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
     if (askOn()) askBind(q);
-    if (q.kind === HOLD) bindLinkIv(q);                           /* v0.3.23 (R7W Part D) */
+    if (q.kind === HOLD || faxLinkOn(q)) bindLinkIv(q);           /* v0.3.23 (R7W Part D) · v0.3.28 (R8D Part A): 未分類 FAX も */
     var erow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
     if (erow && (VALUE_KINDS[q.kind] || q.kind === VCHK)) bindEdits(root, iv, erow);
   }
@@ -2486,7 +2500,7 @@ window.C01 = window.C01 || {};
   }
   function submitLabel(q) {
     if (VALUE_KINDS[q.kind]) return '未入力の項目があります';
-    if (q.kind === HOLD) return linkIvOn() ? 'IV と枠を選んでください' : 'IV 連結は準備中';
+    if (q.kind === HOLD || faxLinkOn(q)) return linkIvOn() ? 'IV と枠を選んでください' : 'IV 連結は準備中';
     return '選んでください';
   }
   function refreshSubmit(q) {
@@ -2505,6 +2519,7 @@ window.C01 = window.C01 || {};
     if (q.kind === '写真のCT') return S.qchoice[q.queue_id] !== undefined || !!String(v.ct || '').trim();
     if (q.kind === PHOTO_SET) return !!q.ct;
     if (q.kind === VCHK) { var vr = rowByCid(q.container_id); return !!(vr && vr.r && (vr.r.ct || q.ct)); }
+    if (faxLinkOn(q)) return !!linkIvOf(q) && !!v.slot && (q.files || []).some(function (f) { return f.sha16; });
     if (q.kind === '未分類FAX') return S.qchoice[q.queue_id] !== undefined || !!String(v.iv || '').trim();
     if (q.kind === SAME) return !!q.same;
     if (q.kind === FOREIGN) return (q.files || []).some(function (f) { return f.sha16; });
@@ -2631,7 +2646,25 @@ window.C01 = window.C01 || {};
       return String(iv.iv_no || '').toUpperCase() === t || String(iv.bkg_no || '').toUpperCase().replace(/\s/g, '') === t;
     })[0] || null;
   }
-  function linkIvOf(q) { return ivByAny((S.qvals[q.queue_id] || {}).iv); }
+  /* v0.3.28 (R8D Part A · 決定 #227): 未分類 FAX カードも 「IVに連結」 — エンジン out_fax_link_iv (q.link_iv) と RULES.faxLinkIv が両方 on の時だけ */
+  function faxLinkOn(q) { return !!(q && q.kind === '未分類FAX' && q.link_iv && linkIvOn() && (C01.RULES || {}).faxLinkIv); }
+  function targetIv(q, t) {
+    /* 終わったブッキング (実況表にない) = エンジンが渡した候補の枠 (q.link_target) */
+    var lt = q.link_target;
+    t = String(t || '').trim().toUpperCase().replace(/\s/g, '');
+    if (!lt || !t || (String(lt.iv_no || '').toUpperCase() !== t && String(lt.bkg_no || '').toUpperCase().replace(/\s/g, '') !== t)) return null;
+    return { iv_no: lt.iv_no, bkg_no: lt.bkg_no, state: lt.state, packer: null, fromTarget: true,
+      slots: (lt.slots || []).map(function (x) { return { slot_guid: x.slot_guid, packer: x.packer, plant: x.plant, item: x.item, work_date: x.work_date, seq: x.seq }; }),
+      rows: (lt.slots || []).filter(function (x) { return x.row_ct; }).map(function (x) { return { slot_guid: x.slot_guid, ct: x.row_ct }; }) };
+  }
+  function linkIvOf(q) { var t = (S.qvals[q.queue_id] || {}).iv; return ivByAny(t) || (q.kind === '未分類FAX' ? targetIv(q, t) : null); }
+  function slotMatch(q, iv, s, r) {
+    /* FAX の CT と同じ CT の行がある枠 — 表示だけ (エンジン link_target.match · 実況表の IV は行の CT) */
+    var lt = q.link_target && iv && iv.fromTarget ? (q.link_target.slots || []).filter(function (x) { return x.slot_guid === s.slot_guid; })[0] : null;
+    if (lt) return lt.match || [];
+    var cts = (q.fax_read && q.fax_read.ct) || [];
+    return r && r.ct && cts.indexOf(r.ct) >= 0 ? ['CT'] : [];
+  }
   function linkIvRecs(q) {
     /* 前に連結した IV (同じファイル名 · 同じ業者候補) — 学習の記録 (_actions link_iv) */
     var names = (q.files || []).map(function (f) { return f.name; }).filter(Boolean);
@@ -2658,7 +2691,7 @@ window.C01 = window.C01 || {};
       '<datalist id="link-iv-list">' + live.map(function (x) { return '<option value="' + esc(x.iv_no) + '">' + esc((x.bkg_no || '') + ' · ' + (x.packer || '')) + '</option>'; }).join('') + '</datalist>' +
       (recs.length || cands.length ? '<div class="c01-linkrec">' + recs.map(function (x) { return '<button class="c01-chip on" data-linkiv="' + esc(x) + '" title="前に同じファイル名 · 業者で連結した IV">★ ' + esc(x) + '</button>'; }).join('') +
         cands.map(function (x) { return '<button class="c01-chip" data-linkiv="' + esc(x) + '" title="エンジンの候補">' + esc(x) + '</button>'; }).join('') + '</div>' : '');
-    if (v.iv && !iv) h += '<p class="c01-err">この BKG / IV は進行中のブッキングにありません（選べません）</p>';
+    if (v.iv && !iv) h += '<p class="c01-err">この BKG / IV は進行中のブッキングにありません（選べません）' + (q.kind === '未分類FAX' && q.link_target ? ' · 終わったブッキングは 候補の IV だけ選べます' : '') + '</p>';
     if (iv) {
       var used = slotRows(iv), seq = slotSeq(iv);
       var sl = (iv.slots || []).slice().sort(function (a, b) { return (seq[a.slot_guid] || 0) - (seq[b.slot_guid] || 0); });
@@ -2666,9 +2699,11 @@ window.C01 = window.C01 || {};
         sl.map(function (s, i) {
           var r = used[s.slot_guid];
           var on = v.slot === s.slot_guid;
-          return '<label class="c01-slotopt' + (r ? ' used' : ' free') + (on ? ' on' : '') + '"><input type="radio" name="link-slot" value="' + esc(s.slot_guid) + '"' + (on ? ' checked' : '') + '>' +
+          var mt = q.kind === '未分類FAX' ? slotMatch(q, iv, s, r) : [];
+          return '<label class="c01-slotopt' + (r ? ' used' : ' free') + (on ? ' on' : '') + (mt.length ? ' match' : '') + '"><input type="radio" name="link-slot" value="' + esc(s.slot_guid) + '"' + (on ? ' checked' : '') + '>' +
             '<span>' + (i + 1) + '</span><span>' + esc(s.packer || '') + ' ' + esc(s.plant || '') + '</span><span class="t2">' + esc((s.item || '') + ' · ' + md(s.work_date || '')) + '</span>' +
-            '<span class="' + (r ? 'c01-over' : 'c01-free') + '">' + (r ? '使用中 ' + esc(r.ct || '（CT 不明）') : '空き') + '</span></label>';
+            '<span class="' + (r ? 'c01-over' : 'c01-free') + '">' + (r ? '使用中 ' + esc(r.ct || '（CT 不明）') : '空き') + '</span>' +
+            (mt.length ? '<span class="c01-match" title="この枠の今の行の CT が FAX の CT と同じ">★ FAX の CT と同じ</span>' : '') + '</label>';
         }).join('') + '</div>';
       var sel = sl.filter(function (s) { return s.slot_guid === v.slot; })[0];
       if (sel && q.packer_guess && sel.packer && q.packer_guess.split('・').indexOf(sel.packer) < 0) h += '<p class="c01-warn2">書類の業者（' + esc(q.packer_guess) + '）と枠の業者（' + esc(sel.packer) + '）が違います</p>';
@@ -2711,7 +2746,8 @@ window.C01 = window.C01 || {};
     var hs = (q.files || []).map(function (f) { return f.sha16; }).filter(function (h, i, a) { return h && a.indexOf(h) === i; });
     var a = mkAction('link_iv', { iv: iv.iv_no, ct: null, field: null, source: null, queue_id: q.queue_id,
       value: { sha16: hs, slot_guid: sl.slot_guid, bkg: iv.bkg_no || null, names: (q.files || []).map(function (f) { return f.name; }).filter(Boolean),
-        packer_guess: q.packer_guess || null, warn: warn } });
+        packer_guess: q.packer_guess || null, warn: warn,
+        fax: q.kind === '未分類FAX' ? { issuer: q.issuer || null, ct: (q.fax_read && q.fax_read.ct) || [], engine_cand: (q.candidates || []).indexOf(iv.iv_no) >= 0, past: !!iv.fromTarget } : null } });
     writeAction(a).then(function () { toast('IV に連結しました（次の判定で反映）', 'success'); S.qsel = nextQueueId(q); render(); });
   }
   function submitQueue(q, special) {
@@ -2721,6 +2757,7 @@ window.C01 = window.C01 || {};
     if (q.kind === SAME) { sameAction(q, 'merge_same'); return; }
     if (q.kind === FOREIGN) { foreignAction(q, 'not_hannyuhyo'); return; }
     if (q.kind === HOLD) { if (linkIvOn()) linkIvAction(q); return; }
+    if (faxLinkOn(q)) { linkIvAction(q); return; }                 /* v0.3.28 (R8D Part A · #227) */
     if (q.kind === VCHK) {                                       /* v0.3.24 (R7X Part A ②): 値の確認 = このまま確認 */
       var vx = rowByCid(q.container_id);
       if (vx && vx.r) keepRow(vx.iv, vx.r, function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); });
