@@ -497,7 +497,7 @@ window.C01 = window.C01 || {};
     return out;
   }
   function overlay() {
-    var byQueue = {}, byCell = {}, rejected = {}, bySlot = {}, excl = {};
+    var byQueue = {}, byCell = {}, rejected = {}, bySlot = {}, excl = {}, other = {};
     var qById = {};
     ((S.queue && S.queue.items) || []).forEach(function (q) { qById[q.queue_id] = q; });
     /* v0.3.11 (R7J Part B): 「元に戻す」 (undo) された 「搬入票ではない」 は無かったことに */
@@ -506,6 +506,7 @@ window.C01 = window.C01 || {};
     allActions().forEach(function (a) {
       if (a.action === 'undo' || undone[a.action_id]) return;
       if (a.action === 'not_hannyuhyo' && a.value && a.value.sha16) a.value.sha16.forEach(function (h) { excl[h] = { queue_id: a.queue_id, action_id: a.action_id }; });
+      if (a.action === 'other_ct' && a.value && a.value.container_id) other[a.value.container_id] = a;    /* v0.3.27 (R8C Part F): 他社のコンテナ */
       var q = a.queue_id ? qById[a.queue_id] : null;
       if (a.queue_id) {
         if (!byQueue[a.queue_id]) byQueue[a.queue_id] = { win: a, later: [] };
@@ -523,7 +524,7 @@ window.C01 = window.C01 || {};
         else if (a.queue_id && byQueue[a.queue_id] && byQueue[a.queue_id].win !== a) rejected[a.action_id] = 1;
       }
     });
-    return { byQueue: byQueue, byCell: byCell, bySlot: bySlot, excl: excl, undone: undone };
+    return { byQueue: byQueue, byCell: byCell, bySlot: bySlot, excl: excl, undone: undone, other: other };
   }
   function sameDone(pid, ov) { var w = ov && ov.byQueue ? ov.byQueue[pid] : null; return !!(w && !(ov.undone && ov.undone[w.win.action_id])); }
   function queueState(q, ov) {
@@ -536,6 +537,21 @@ window.C01 = window.C01 || {};
     return { done: true, by: w.win.by, engine: false, mineLost: lost, act: w.win.action, aid: w.win.action_id };
   }
   /* v0.3.11 (R7J Part B): 「搬入票ではない」 を押したファイルだけの別の項目は出さない (押した項目は 完了 に残る) */
+  /* v0.3.27 (R8C Part F): 「他社のコンテナ」 にした行の 他の カード は出さない (押したカードは 完了 に残る · 元に戻す) */
+  function otherHidden(q, ov) {
+    var a = q.container_id && ov.other ? ov.other[q.container_id] : null;
+    return !!(a && a.queue_id !== q.queue_id);
+  }
+  function pnFiles(qs, ov) {     /* v0.3.27: 横の窓の 「搬入票ではない」 = この行のまだ開いている確認カードのうち 書類ファイル (sha) のあるもの */
+    return (qs || []).filter(function (q) { return !queueState(q, ov).done && (q.files || []).some(function (x) { return x.sha16; }); });
+  }
+  function otherCtOn() { return !!(C01.RULES || {}).otherCt; }
+  /* v0.3.27 (R8C Part G): 「候補書類あり (n)」 = まだ処理していない 業者・IV 未定 だけ数える (処理済み = 0 ならボタンを出さない) */
+  function holdOpenN(ivNo, ov) {
+    return ((S.queue && S.queue.items) || []).filter(function (q) {
+      return q.kind === HOLD && (q.candidates || []).indexOf(ivNo) >= 0 && !queueState(q, ov).done && !exclHidden(q, ov);
+    }).length;
+  }
   function exclHidden(q, ov) {
     var fs = (q.files || []).filter(function (f) { return f && f.sha16; });
     if (!fs.length || !ov.excl) return false;
@@ -620,7 +636,7 @@ window.C01 = window.C01 || {};
     return x.r.status === '受信中' && (x.r.has_docs === false || x.r.has_docs === 0);
   }
   function queueCards(ov) {
-    var all = qItems().concat(sameItems()).filter(function (q) { return queuePortOk(q) && !faxHidden(q) && !exclHidden(q, ov) && !noDocWait(q); });
+    var all = qItems().concat(sameItems()).filter(function (q) { return queuePortOk(q) && !faxHidden(q) && !exclHidden(q, ov) && !otherHidden(q, ov) && !noDocWait(q); });
     return { all: all, cards: buildCards(all, ov) };
   }
 
@@ -659,7 +675,7 @@ window.C01 = window.C01 || {};
     var ivs = ((S.jik && S.jik.ivs) || []).filter(function (iv) { return portOk(iv.pol) && ivLive(iv); })
       .slice().sort(function (a, b) { return (a.cy_cut || '') < (b.cy_cut || '') ? -1 : (a.cy_cut || '') > (b.cy_cut || '') ? 1 : (a.iv_no < b.iv_no ? -1 : 1); });
     ivs.forEach(function (iv) {
-      var rows = iv.rows.map(function (r) {
+      var rows = iv.rows.filter(function (r) { return !(ov.other && ov.other[r.container_id]); }).map(function (r) {   /* v0.3.27 (R8C Part F): 他社のコンテナ = 表から外す */
         var x = statusOf(r, iv, ov);
         var vals = {};
         ['ct', 'seal', 'n_w', 't_w', 'bales', 'work_date'].forEach(function (f) { vals[f] = x.human[f] ? x.human[f].value : r[f]; });
@@ -697,7 +713,7 @@ window.C01 = window.C01 || {};
       if (S.filter === 'check' && !hasCheck) return;
       if (S.filter === 'compass' && !(allOk && !compassDone)) return;
       if (S.filter === 'remind' && !remind) return;
-      /* v0.3.9 (R7E 形님 ②): 行の順 = COMPASS 枠の順 (slots[].seq · 無ければ slots の並び)。枠が決まった行はその枠の位置 · メール未着の枠も同じ位置 ·
+      /* v0.3.9 (R7E 형님 ②): 行の順 = COMPASS 枠の順 (slots[].seq · 無ければ slots の並び)。枠が決まった行はその枠の位置 · メール未着の枠も同じ位置 ·
          枠のない行 (未割当) はそのブッキングの一番下。台数 = 枠の数 (未割当の行を別に数えない · 二重に数えない)。No = ブッキングごとに 1 から (D-42) */
       var seqOf = slotSeq(iv);
       var slotted = [], free = [];
@@ -779,6 +795,7 @@ window.C01 = window.C01 || {};
   /* ── 描画: 実況表 ── */
   function renderMain() {
     var b = buildGroups();
+    var ov = overlay();                                            /* v0.3.27 (R8C): 候補書類あり · 他社のコンテナ の数 */
     var mp = myPorts();
     var ports = [['mine', '自分の担当' + (mp ? (mp.admin ? '（全港 · 管理者）' : '（' + (mp.ports.join(' · ') || 'なし') + (mp.star ? ' · *' : '') + '）') : '（担当者未選択）')], ['all', '全港']];
     /* v0.3.18 (R7S #16): 「なし」 の理由 (小さく) — マスターに該当なし / マスターを読めない (この時は これまでどおり全港を表示) */
@@ -824,7 +841,8 @@ window.C01 = window.C01 || {};
         '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
         (g.over ? '<span class="c01-overhead" title="行が COMPASS の枠 ' + g.total + ' より多い — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違いの可能性（赤の行）">枠外 ' + g.over + '</span>' : '') +
         '<span class="c01-flex"></span>' +
-        (iv.hold_docs ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + (+iv.hold_docs) + ')</button>' : '') +
+        (holdOpenN(iv.iv_no, ov) ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + holdOpenN(iv.iv_no, ov) + ')</button>' : '') +
+        (otherList(iv, ov).length ? '<button class="c01-btn-sub c01-otherct" data-otherct="' + esc(iv.iv_no) + '" title="「他社のコンテナ」にした行（写真・書類をこの IV から外しています · 元に戻せます）">他社のコンテナ ' + otherList(iv, ov).length + '</button>' : '') +
         /* v0.3.26 (R8B Part E-2 · 決定 #219): 通関書類 (D/R · E/D · 輸出許可書) = 参考 · 値には使わない (エンジン customs_docs) */
         ((iv.customs_docs || []).length ? '<button class="c01-btn-sub c01-customs" data-customs="' + esc(iv.iv_no) + '" title="通関業者から届いた書類（参考 · 値には使いません）">通関書類 ' + iv.customs_docs.length + '</button>' : '') +
         (g.remind ? '<button class="c01-btn-sub" data-remind="' + esc(iv.iv_no) + '">✉ 催促</button>' : '') +
@@ -882,6 +900,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-compass]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCompass(el.getAttribute('data-compass')); }; });
     root.querySelectorAll('[data-remind]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRemind(el.getAttribute('data-remind')); }; });
     root.querySelectorAll('[data-customs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCustoms(el.getAttribute('data-customs')); }; });
+    root.querySelectorAll('[data-otherct]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openOtherCts(el.getAttribute('data-otherct')); }; });
     root.querySelectorAll('[data-same]').forEach(function (el) {
       el.onclick = function (ev) { ev.stopPropagation(); S.view = 'input'; S.qkind = SAME; S.qiv = null; S.qsel = el.getAttribute('data-same'); render(); };
     });
@@ -1228,7 +1247,7 @@ window.C01 = window.C01 || {};
      queue_id = この行 · 項目から作る 16 桁 (queue に無い id → エンジンは IV + CT で行を探す · apply.py container_by)。
      すでに人の値がある欄 = エンジンは先に入った人の値を残す (apply.py: 同じ行 · 項目の human_value が先勝ち) → ここでは押せない (理由を表示) */
   var EDIT_FIELDS = ['ct', 'seal', 'n_w', 't_w', 'bales', 'work_date'];
-  /* v0.3.23 (R7W Part A · 形님 15:3x): 自動OK · 確認済 の行も 修正 (警告 1 回 → 修正フォーム) · 人の値があっても新しい値 (mode edit) · 元に戻す */
+  /* v0.3.23 (R7W Part A · 형님 15:3x): 自動OK · 確認済 の行も 修正 (警告 1 回 → 修正フォーム) · 人の値があっても新しい値 (mode edit) · 元に戻す */
   function valueEditOn() { return !!(C01.RULES || {}).valueEdit; }
   function okEditConfirm(iv, r, st) {
     var cdone = compassIsDone(iv);
@@ -1571,6 +1590,52 @@ window.C01 = window.C01 || {};
   }
 
   /* ── v0.3.26 (R8B Part E-2 · 決定 #219): 通関書類 (参考) — 通関業者のメール (D/R · E/D · 輸出許可書) · 値には使わない · 開くだけ ── */
+  /* ── v0.3.27 (R8C Part F · 決定 #226): 「他社のコンテナ」 — 他の会社のコンテナ 1 台 (写真 + 書類) が当社のメールに混ざった時。
+     その CT の写真と書類だけ この IV から外す (同じメールの他の CT はそのまま · 原本は消さない · 元に戻す · 次の判定で枠が空く) ── */
+  function otherList(iv, ov) {
+    var out = (iv.other_cts || []).filter(function (x) { return !(ov.undone && ov.undone[x.action_id]); });
+    var seen = {};
+    out.forEach(function (x) { seen[x.container_id] = 1; });
+    Object.keys(ov.other || {}).forEach(function (cid) {
+      var a = ov.other[cid];
+      if (!seen[cid] && a.iv === iv.iv_no) out.push({ container_id: cid, ct: a.ct, action_id: a.action_id, by: a.by, at: a.at, pending: true });
+    });
+    return out;
+  }
+  function otherCtAction(iv, r, qid) {
+    if (!S.me) { toast('担当者を選んでください（右上）', 'warn'); return null; }
+    if (!window.confirm('この行（' + (r.ct || 'CT 不明') + '）を「他社のコンテナ」にしますか？\n' +
+      '（この CT の写真と書類だけ この IV から外します · 同じメールの他の CT はそのまま · ファイルは消しません · 次の判定で枠が空きます · 元に戻せます）')) return null;
+    var a = mkAction('other_ct', { iv: iv.iv_no, ct: r.ct || null, field: null, value: { container_id: r.container_id }, source: null, queue_id: qid || null });
+    return writeAction(a).then(function () { toast('「他社のコンテナ」にしました（次の判定で反映 · 元に戻す = IV の「他社のコンテナ」）', 'success'); return a; });
+  }
+  function openOtherCts(ivNo) {
+    var iv = ivById(ivNo), ov = overlay();
+    var xs = iv ? otherList(iv, ov) : [];
+    S.modal = { kind: 'otherct', iv: ivNo };
+    var html = '<div class="c01-mh"><b>他社のコンテナ</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<p class="c01-note2">この IV から外した他社のコンテナです（写真・書類は消していません）。間違いなら「元に戻す」— 次の判定で行に戻ります。</p><ul class="c01-customs-list">' +
+      xs.map(function (x, i) {
+        return '<li><span class="mono">' + esc(x.ct || 'CT 不明') + '</span> <span class="t2">' + esc(staffName(x.by)) + ' · ' + esc(String(x.at || '').slice(0, 16).replace('T', ' ')) +
+          (x.pending ? ' · 反映待ち' : '') + '</span> <button class="c01-btn-sub" data-othundo="' + i + '">元に戻す</button></li>';
+      }).join('') + '</ul></div>';
+    showModal(html);
+    $('c01-modal').querySelectorAll('[data-othundo]').forEach(function (b) {
+      b.onclick = function () {
+        if (!S.me) { toast('担当者を選んでください（右上）', 'warn'); return; }
+        var x = xs[+b.getAttribute('data-othundo')];
+        var a = mkAction('undo', { iv: ivNo, ct: x.ct || null, field: null, value: { action_id: x.action_id }, source: null, queue_id: null });
+        writeAction(a).then(function () { closeModal(); render(); toast('元に戻しました（次の判定で行に戻ります）', 'success'); });
+      };
+    });
+  }
+  function otherCandNote(r) {
+    var w = r && r.other_ct_cand;
+    return w && w.length ? '<p class="c01-note2 c01-othcand">他社のコンテナ候補 — ' + esc(w.map(function (k) { return OTHER_WHY[k] || k; }).join(' · ')) +
+      '（他の会社のコンテナなら「他社のコンテナ」）</p>' : '';
+  }
+  var OTHER_WHY = { 'シール形式': 'シールの形がこのブッキングの船社と違う', '他社搬入票候補': '書類の宛名・荷主が他の会社', '搬入票ではない(人)': 'この CT の書類が「搬入票ではない」になっている' };
   function openCustoms(ivNo) {
     var iv = ivById(ivNo);
     var xs = (iv && iv.customs_docs) || [];
@@ -1675,6 +1740,11 @@ window.C01 = window.C01 || {};
       (needPick.length || psQ || editMode ? '' : wdNeed ? '<p class="c01-note2">作業日を原本で確認し、違っていれば ✎ 修正 で直してください</p>' :
           statusOf(r, iv, ov).st === '再確認' ? '<p class="c01-note2">値が合っていれば 「このまま確認（OK）」 · 違っていれば ✎ 修正</p>' : '<p class="c01-note2">ここで確認できる項目はありません — 確認・入力 で処理してください</p>') +
       (!editMode && statusOf(r, iv, ov).st === '再確認' ? '<button id="panel-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') +
+      otherCandNote(r) +
+      /* v0.3.27 (R8C Part F · #226): 実況表の横の窓にも 「搬入票ではない」 (この行の 確認 カードの書類) · 「他社のコンテナ」 */
+      ((pnFiles(qs, ov).length || otherCtOn()) && !editMode ? '<div class="c01-side-btns c01-side-other">' +
+        (pnFiles(qs, ov).length ? '<button id="panel-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
+        (otherCtOn() ? '<button id="panel-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' : '') + '</div>' : '') +
       '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + (editMode ? ' hidden' : '') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
       '<button id="panel-later" class="c01-btn-ghost2">' + (editMode ? '閉じる' : 'あとで') + '</button></div>' +
       '<p class="c01-foot">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</p>' +
@@ -1689,6 +1759,12 @@ window.C01 = window.C01 || {};
     };
     if (firstPhoto) $('panel-photo').onclick = function (ev) { openPhotos(ev, S.sel, 0); };
     if ($('panel-keep')) $('panel-keep').onclick = function () { keepRow(iv, r, function () { S.sel = null; S.picks = {}; S.panelInput = ''; render(); }); };
+    if ($('panel-notours')) $('panel-notours').onclick = function () { var pq = pnFiles(qs, ov)[0]; if (pq) notHannyuhyo(pq, null); };
+    if ($('panel-otherct')) $('panel-otherct').onclick = function () {
+      var oq = qs.filter(function (q) { return !queueState(q, ov).done; })[0];
+      var p = otherCtAction(iv, r, oq ? oq.queue_id : null);
+      if (p) p.then(function () { S.sel = null; render(); });
+    };
     el.querySelectorAll('[data-pick]').forEach(function (b2) {
       b2.onclick = function () {
         var fd = b2.getAttribute('data-pick'), i = +b2.getAttribute('data-i');
@@ -1748,7 +1824,7 @@ window.C01 = window.C01 || {};
     ((S.jik && S.jik.ivs) || []).forEach(function (iv) { (iv.rows || []).forEach(function (r) { var k = rowKey(iv, r); if (!out && hkey(k) === h) out = k; }); });
     return out;
   }
-  /* ── v0.3.23 (R7W Part B · 形님 15:2x): 「📄」 = その行の値の出典書類 (rows[].docs) を 同じウィンドウの新しいタブ (doc.html · photo.html と同じ方式) ──
+  /* ── v0.3.23 (R7W Part B · 형님 15:2x): 「📄」 = その行の値の出典書類 (rows[].docs) を 同じウィンドウの新しいタブ (doc.html · photo.html と同じ方式) ──
      並び: 搬入票 → 計量伝票 → 納品書 · その他 → EIR → Excel (エンジン doc_type · 無ければファイル名で) · 書類が無い行 = 「—」 */
   var DOC_KIND = { hannyuhyo: ['搬入票', 0], keiryo: ['計量伝票', 1], eir: ['EIR', 2], excel: ['Excel', 3], nouhin: ['納品書', 4], vanning_list: ['バンニング表', 4],
     other: ['書類', 5], inspection: ['検査', 9] };   /* v0.3.24 (R7X Part H ②): 検査書類 (COTECNA 等) は最後 · 📄 の数 = 開ける書類 (path あり) */
@@ -1904,7 +1980,7 @@ window.C01 = window.C01 || {};
   /* ── 確認・入力 ── */
   function openQueue() {
     var ov = overlay();
-    return qItems().filter(function (q) { return !queueState(q, ov).done && queuePortOk(q) && !faxHidden(q) && !exclHidden(q, ov) && !noDocWait(q); });
+    return qItems().filter(function (q) { return !queueState(q, ov).done && queuePortOk(q) && !faxHidden(q) && !exclHidden(q, ov) && !otherHidden(q, ov) && !noDocWait(q); });
   }
   /* v0.3.2 (R7B): 未分類 FAX — 受信から C01.QUEUE.faxHideAfterDays 日を過ぎたものは既定で隠す (隠すだけ · 消さない) */
   function faxOld(q) {
@@ -2097,7 +2173,7 @@ window.C01 = window.C01 || {};
           '<span class="mono t">' + esc(x.kind === '写真のCT' ? 'CT 不明の写真 ' + (x.files || []).length + '枚' : (x.kind === '未分類FAX' || x.kind === HOLD) ? ((x.files || [])[0] || {}).name || 'FAX' : (x.ct || '（CT 不明）')) + '</span>' +
           '<span class="s">' + esc((x.iv_no ? x.iv_no + ' · ' : (x.kind === HOLD && (x.candidates || []).length ? '候補 ' + x.candidates.join(' / ') + ' · ' : '')) + flds.join('・') + (x.issuer ? ' · ' + x.issuer : '') +
             ((x.kind === '未分類FAX' || x.kind === HOLD) && x.received_at ? '受信 ' + md(String(x.received_at).slice(0, 10)) : '') + (cd.items.length > 1 ? ' · ' + cd.items.length + '項目' : '')) + '</span>' +
-          (cd.done ? '<span class="d">' + (last.mineLost ? '他の人が先に確認しました' : (last.act === 'not_hannyuhyo' || last.act === 'not_ours' ? '搬入票ではない' : '完了') + (last.by ? ' · ' + esc(last.by) : '')) + '</span>' : '') + '</button>';
+          (cd.done ? '<span class="d">' + (last.mineLost ? '他の人が先に確認しました' : (last.act === 'not_hannyuhyo' || last.act === 'not_ours' ? '搬入票ではない' : last.act === 'other_ct' ? '他社のコンテナ' : '完了') + (last.by ? ' · ' + esc(last.by) : '')) + '</span>' : '') + '</button>';
       }).join('') + (vis.length ? '' : '<p class="c01-empty">' + (S.qkind === 'done' ? '完了した作業はまだありません' : '作業はありません') + '</p>') + '</div></aside>';
     /* 原本 */
     html += '<section class="c01-orig" aria-label="原本">';
@@ -2212,8 +2288,9 @@ window.C01 = window.C01 || {};
       html += ACT_MARK + '<div class="c01-form-b">';
       if (st.done) html += '<p class="' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? 'c01-lost' : 'c01-okmsg') + '">' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? '他の人が先に確認しました' :
         (st.act === 'not_hannyuhyo' || st.act === 'not_ours' ? '「搬入票ではない」にしました' : st.act === 'merge_same' ? '同じコンテナとして合わせました（次の判定で反映）' :
-          st.act === 'not_same' ? '別のコンテナにしました' : st.act === 'link_iv' ? 'IV に連結しました（次の判定で反映 · 10 分ほど）' : '完了しました')) + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
+          st.act === 'not_same' ? '別のコンテナにしました' : st.act === 'other_ct' ? '「他社のコンテナ」にしました（次の判定で反映）' : st.act === 'link_iv' ? 'IV に連結しました（次の判定で反映 · 10 分ほど）' : '完了しました')) + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
       html += '<p class="c01-qnote k-' + KC.key + '">' + esc(noteOf(q, vItems.length)) + '</p>';
+      if (q.container_id) { var ocx = rowByCid(q.container_id); if (ocx && ocx.r) html += otherCandNote(ocx.r); }    /* v0.3.27 (R8C Part F ③) */
       var msg = S.qmsg[q.queue_id];
       if (msg) html += '<p class="c01-err" id="q-err">' + esc(msg) + '</p>';
       if (VALUE_KINDS[q.kind]) {
@@ -2290,10 +2367,12 @@ window.C01 = window.C01 || {};
       html += '<div class="c01-form-f"><span class="c01-foot">確認した内容は実況表にすぐ反映 · 記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</span></div>';
       /* v0.3.7 (R7D Part U-3): 判断ボタン = 右パネルの一番上 · v0.3.11 (R7J Part B): 「搬入票ではない」 = 書類のある全種類 · 完了 = 「元に戻す」 */
       var ready = readyOf(q);
-      var canNot = DOC_KINDS[q.kind] && !st.done && (q.kind === '未分類FAX' || (curF && (curF.sha16 || (q.files || []).some(function (x) { return x.sha16; }))));
-      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv') && st.aid;
+      /* v0.3.27 (R8C Part F · #226): 「搬入票ではない」 = 書類ファイルのある全てのカード (値の確認 · 写真不足 なども) */
+      var canNot = !st.done && (q.kind === '未分類FAX' || (curF && curF.sha16) || (q.files || []).some(function (x) { return x.sha16; }));
+      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv' || st.act === 'other_ct') && st.aid;
       if (q.kind === FOREIGN) canNot = false;              /* v0.3.20: 他社搬入票候補 = 「他社の書類」 · 「当社の書類」 の 2 つだけ */
       var krow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
+      var canOther = otherCtOn() && !st.done && krow && q.kind !== SAME;    /* v0.3.27 (R8C Part F): 他社のコンテナ = 行のある全てのカード */
       var canKeep = !st.done && krow && q.kind !== VCHK && q.kind !== FOREIGN && q.kind !== SAME && statusOf(krow, iv, ov).st === '再確認' && !keepPlan(iv, krow, ov).block.length;   /* v0.3.24 (R7X Part A ①) */
       var acts = '<div class="c01-form-a"><button id="q-submit" class="c01-btn-big' + (ready || st.done ? ' ready' : '') + '"' + (ready || st.done ? '' : ' disabled') + '>' +
         (st.done ? '完了しました — 次へ' : q.kind === SAME ? '同じコンテナとして合わせる' : q.kind === FOREIGN ? '他社の書類' : ready ? '確認して次へ' : submitLabel(q)) + '</button>' +
@@ -2301,6 +2380,7 @@ window.C01 = window.C01 || {};
         (q.kind === FOREIGN && !st.done ? '<button id="q-ours" class="c01-btn-ghost2" title="当社の書類です（値をもう一度使います · 元に戻せます）">当社の書類</button>' : '') +
         (q.kind === SAME && !st.done ? '<button id="q-notsame" class="c01-btn-ghost2" title="この 2 行は別のコンテナです（候補を出さなくなります · 元に戻せます）">別のコンテナ</button>' : '') +
         (canNot ? '<button id="q-notours" class="c01-btn-ghost2 danger" title="この書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
+        (canOther ? '<button id="q-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' : '') +
         (canUndo ? '<button id="q-undo" class="c01-btn-ghost2">元に戻す</button>' : '') +
         (canKeep ? '<button id="q-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') + '</div></div>';
       html = html.replace(ACT_MARK, acts);
@@ -2362,6 +2442,13 @@ window.C01 = window.C01 || {};
     $('q-skip').onclick = function () { S.qsel = nextQueueId(q); render(); };
     var no = $('q-notours');
     if (no) no.onclick = function () { notHannyuhyo(q, curF); };
+    var oc = $('q-otherct');
+    if (oc) oc.onclick = function () {
+      var ivx = ivById(q.iv_no), kr = ivx && ivx.rows.filter(function (r) { return r.container_id === q.container_id; })[0];
+      if (!ivx || !kr) return;
+      var p = otherCtAction(ivx, kr, q.queue_id);
+      if (p) p.then(function () { S.qsel = nextQueueId(q); render(); });
+    };
     var ud = $('q-undo');
     if (ud) ud.onclick = function () { undoAction(q); };
     var qo = $('q-ours');

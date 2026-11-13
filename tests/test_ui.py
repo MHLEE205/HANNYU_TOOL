@@ -1064,6 +1064,93 @@ def r7n_checks(page, root, shots, engine):
     page.click("#tab-main")
 
 
+def r8c_checks(page, root, shots):
+    """v0.3.27 (R8C Part F · #226): 「搬入票ではない」 = 値の確認 카드에도 · 「他社のコンテナ」 (카드 · 옆 창) → other_ct (container_id) · 줄 숨김 ·
+    IV 머리 「他社のコンテナ 1」 → 元に戻す (undo) · 候補 문구.  (Part G): 「候補書類あり (n)」 = 열린 業者・IV未定 만 (처리한 것 0 → 버튼 없음)."""
+    jp, qp = root / "_data" / "jikkyou.json", root / "_data" / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    j2, q2 = json.loads(jt0), json.loads(qt0)
+    iv1 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    r1, r2 = iv1["rows"][0], iv1["rows"][1]
+    r1.update({"status": "再確認", "engine_status": "再確認", "reasons": ["SEAL_FORMAT"], "reason_text": ["x"], "human": None,
+               "other_ct_cand": ["シール形式", "他社搬入票候補"]})
+    docs_dir = [p_.relative_to(root).as_posix() for p_ in sorted((root / "TST2611-01" / "搬入票").glob("*.svg"))]
+    vq = {"queue_id": "e" * 15 + "1", "kind": "値の確認", "iv_no": "TST2611-01", "ct": r1["ct"], "field": None, "container_id": r1["container_id"], "values": {},
+          "candidates": [], "files": [{"path": docs_dir[0], "name": docs_dir[0].split("/")[-1], "page": None, "bbox": None, "sha16": "e" * 16}],
+          "note": "SEAL_FORMAT", "resolved": None, "superseded": [], "cy_cut": iv1.get("cy_cut"), "issuer": None,
+          "field_sources": {"seal": [{"src": "写真", "value": r1["seal"], "agree": True}]}, "field_source_text": {}, "final": {"ct": r1["ct"]}, "reason_codes": ["SEAL_FORMAT"]}
+    q2["items"].append(vq)
+    if "値の確認" not in q2["kinds"]:
+        q2["kinds"] = list(q2["kinds"]) + ["値の確認"]
+    hq = next(x for x in q2["items"] if x["kind"] == "業者・IV未定")
+    hq.update(candidates=["TST2611-02"], resolved=None)
+    hq2 = dict(hq, queue_id="e" * 15 + "2", candidates=["TST2611-03"],
+               resolved={"action_id": "done-hold-0001", "by": "staff.a@example.invalid", "at": "2026-11-11T17:00:00+09:00", "action": "not_hannyuhyo"})
+    q2["items"].append(hq2)
+    for iv in j2["ivs"]:
+        if iv["iv_no"] in ("TST2611-02", "TST2611-03"):
+            iv["hold_docs"] = 1                                   # 옛 엔진 수 (처리한 것 포함) — TOOL 은 열린 것만 셈
+    jp.write_text(dump(j2), encoding="utf-8")
+    qp.write_text(dump(q2), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, picks: {}, panelInput: '', sel: null, qvals: {}, qchoice: {}, editRow: null, filter: null}); C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    h2 = page.locator("tbody[data-iv='TST2611-02'] [data-holdiv]")
+    h3 = page.locator("tbody[data-iv='TST2611-03'] [data-holdiv]")
+    ok("G 候補書類あり = 열린 것만 (02 = (1) · 03 처리됨 = 버튼 없음)", h2.count() == 1 and "(1)" in h2.inner_text() and h3.count() == 0,
+       [h2.inner_text() if h2.count() else None, h3.count()])
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", vq["queue_id"])
+    page.wait_for_selector("#q-otherct")
+    ok("F 値の確認 카드 = 「搬入票ではない」 · 「他社のコンテナ」 · 候補 문구", page.locator("#q-notours").count() == 1 and page.locator("#q-otherct").count() == 1
+       and "他社のコンテナ候補" in page.locator(".c01-othcand").inner_text() and "シールの形" in page.locator(".c01-othcand").inner_text(),
+       page.locator(".c01-othcand").inner_text() if page.locator(".c01-othcand").count() else None)
+    page.screenshot(path=str(shots / "r8c_vchk_other.png"))
+    ids0 = {x.get("action_id") for x in actions(root)}
+    dl = []
+
+    def acc(d):
+        dl.append(d.message)
+        d.accept()
+    page.on("dialog", acc)
+    page.click("#q-otherct")
+    page.wait_for_timeout(600)
+    new = [x for x in actions(root) if x.get("action_id") not in ids0]
+    ok("F 「他社のコンテナ」 = other_ct (iv · ct · value.container_id · queue_id) · 확인창 1", len(new) == 1 and new[0]["action"] == "other_ct"
+       and new[0]["value"] == {"container_id": r1["container_id"]} and new[0]["iv"] == "TST2611-01" and new[0]["ct"] == r1["ct"] and new[0]["queue_id"] == vq["queue_id"]
+       and len(dl) == 1 and "他社のコンテナ" in dl[0], [new, dl])
+    page.click("#tab-main")
+    page.wait_for_timeout(300)
+    rows_ct = page.eval_on_selector_all("tbody[data-iv='TST2611-01'] tr.c01-row", "els => els.map(e => e.getAttribute('data-key'))")
+    ob = page.locator("tbody[data-iv='TST2611-01'] [data-otherct]")
+    ok("F 줄 숨김 · IV 머리 「他社のコンテナ 1」", not any(r1["ct"] in (k or "") for k in rows_ct) and ob.count() == 1 and "他社のコンテナ 1" in ob.inner_text(),
+       [rows_ct, ob.inner_text() if ob.count() else None])
+    ob.click()
+    page.wait_for_selector("[data-othundo]")
+    ok("F 목록 창 = CT · 元に戻す", r1["ct"] in page.locator("#c01-modal").inner_text(), page.locator("#c01-modal").inner_text()[:200])
+    page.screenshot(path=str(shots / "r8c_other_list.png"))
+    page.click("[data-othundo='0']")
+    page.wait_for_timeout(500)
+    un = [x for x in actions(root) if x.get("action_id") not in ids0 and x.get("action") == "undo"]
+    rows_ct = page.eval_on_selector_all("tbody[data-iv='TST2611-01'] tr.c01-row", "els => els.map(e => e.getAttribute('data-key'))")
+    ok("F 元に戻す = undo (value.action_id = other_ct) · 줄 다시 보임", len(un) == 1 and un[0]["value"]["action_id"] == new[0]["action_id"]
+       and any(r1["ct"] in (k or "") for k in rows_ct), [un, rows_ct])
+    k2 = page.eval_on_selector_all("tbody[data-iv='TST2611-01'] tr.c01-row", "els => els.map(e => e.getAttribute('data-key'))")
+    kk = next((k for k in k2 if r2["ct"] and r2["ct"] in (k or "")), None)
+    if kk:
+        page.evaluate("k => { C01.state.sel = k; C01.app.render(); }", kk)
+        page.wait_for_timeout(300)
+    ok("F 実況表 옆 창 = 「他社のコンテナ」 버튼", page.locator("#panel-otherct").count() == 1, kk)
+    page.screenshot(path=str(shots / "r8c_side_other.png"))
+    page.remove_listener("dialog", acc)
+    page.evaluate("() => { C01.state.sel = null; C01.app.render(); }")
+    qp.write_text(qt0, encoding="utf-8")
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r8b_checks(page, root, shots):
     """v0.3.26 (R8B Part E-1 · #216): 未受信アドレス = 별 줄 · 받는 사람이 未受信 뿐이면 확인 체크 전 送信 꺼짐 · 회신 표시 · 제목 [test] RE: ·
     보낸 곳 = 시험 주소 1개 (未受信 주소 0) · reminder_sent 에 unreceived · reply 기록.  (Part E-2 · #219): 通関書類 버튼 · 창 = 참고 · 값에 안 씀."""
@@ -1245,11 +1332,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.26", page.title() == "LEENAI C-01 搬入票 v0.3.26", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.27", page.title() == "LEENAI C-01 搬入票 v0.3.27", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.26" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.27" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1716,6 +1803,7 @@ def main():
             compass_r7x_checks(page)
             r7z_checks(page, root, shots)
             r8b_checks(page, root, shots)
+            r8c_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

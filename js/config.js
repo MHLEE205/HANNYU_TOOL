@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.26',
+  version: '0.3.27',
   date: '2026-11-12',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
 };
@@ -26,7 +26,9 @@ C01.RULES = {
         エンジン v0.5.50 actions_value_edit が on の時だけ true にする (off のエンジンは mode を知らず 先の値が勝つ) */
   valueEdit: true,
   /* ⑤ v0.3.23 (R7W Part D · 決定 #206): 業者・IV 未定 カード = 「IVに連結」 (BKG/IV + 枠を担当者が選ぶ) — エンジン s2_human_link_iv が on の時だけ true */
-  linkIv: true
+  linkIv: true,
+  /* ⑥ v0.3.27 (R8C Part F · 決定 #226): 「他社のコンテナ」 — その CT の写真 + 書類だけ IV から外す (原本は消さない · 元に戻す) — エンジン s3_human_other_ct が on の時だけ true */
+  otherCt: true
 };
 
 /* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */
