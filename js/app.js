@@ -793,7 +793,7 @@ window.C01 = window.C01 || {};
       '<span class="c01-flex"></span>' +
       '<button id="help-open" class="c01-btn-sub c01-helpbtn" title="この TOOL の使い方（並行期間中の注意）">使い方</button>' +
       (graphMode()
-        ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spRoot) + '</span>' +
+        ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spLabel || C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spLabel || C01.SOURCE.spRoot) + '</span>' +
           '<span class="c01-me' + (S.me && S.me.unregistered ? ' c01-warn' : '') + '" id="me-name"' + (S.me && S.me.unregistered ? ' title="ログインしたメール (' + esc(S.me.email) + ') が職員マスター (staff) にありません — マスターの確認が必要"' : '') + '>担当者 ' + esc(S.me ? S.me.name : '?') + '</span>'
         : '<span class="c01-local" title="データは選んだフォルダから読んでいます (SharePoint には接続しません)">ローカルプレビュー · ' + esc(S.info ? S.info.label : '') + '</span>' +
           '<label class="c01-me">担当者 <select id="me-select" aria-label="担当者">' + staffOpts + '</select></label>'), 3);

@@ -60,7 +60,7 @@
     box.innerHTML = '<div class="c01-local-title">ローカルプレビュー（ログインなし · データは選んだフォルダから）</div>' +
       (server ? '<button class="ln-login-btn c01-local-btn" id="c01-open-server">ローカルプレビューで開く</button>' : '') +
       '<button class="ln-btn-ghost c01-local-btn2" id="c01-open-folder">フォルダを選んで開く（_data があるフォルダ）</button>' +
-      '<div class="ln-login-note">' + (C01.SOURCE.graphEnabled ? '本番データは上の「Microsoft 365 でログイン」から (SharePoint ' + C01.SOURCE.spRoot + ')' : 'Microsoft 365 ログイン (SharePoint) は無効です') + '</div>';
+      '<div class="ln-login-note">' + (C01.SOURCE.graphEnabled ? '本番データは上の「Microsoft 365 でログイン」から (SharePoint ' + (C01.SOURCE.spLabel || C01.SOURCE.spRoot) + ')' : 'Microsoft 365 ログイン (SharePoint) は無効です') + '</div>';
     card.insertBefore(box, card.querySelector('.ln-splash-theme'));
     var bs = document.getElementById('c01-open-server');
     if (bs) bs.onclick = function () { openApp(new C01.sources.LocalServer()); };
@@ -93,7 +93,7 @@
       sys: I.sys, name: I.name, version: I.version, date: I.date, desc: I.desc,
       needGraph: true,
       onReady: function () {
-        /* graph モード (R7A): ログイン後 SharePoint HANNYU_TOOL から読む (ヘッダーは LEENAI_COMMON) */
+        /* graph モード (R7A): ログイン後 SharePoint C01.SOURCE.spRoot (v0.3.30 = PHOTO_V2) から読む (ヘッダーは LEENAI_COMMON) */
         if (C01.SOURCE.graphEnabled) { var b = document.getElementById('c01-local-box'); if (b) b.style.display = 'none'; C01.app.start(new C01.sources.Graph()); }
       }
     });

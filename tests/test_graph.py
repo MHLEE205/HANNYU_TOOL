@@ -1,8 +1,8 @@
 # ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL graph 모드 시험 (R7A · Playwright · 가명 fixtures · 가짜 Graph — 실제 SharePoint 호출 0)
 """TOOL 을 127.0.0.1 로 열고, LEENAI_COMMON 로그인 결과 (토큰 · 사용자 · 마스터) 는 가짜로 바꾸고,
-https://graph.microsoft.com/ 요청은 page.route 로 가로채 가명 fixtures 폴더 (임시 사본 = HANNYU_TOOL 흉내) 에서 돌려준다.
-확인: 로그인 버튼 활성 · graph 로 実況表 · 사진 blob 표시 · 로그인한 사람 = 担当者 · _actions 쓰기 = HANNYU_TOOL/_actions/{날짜}/ 만 ·
-      같은 id 다시 쓰기 거부 (409) · 처리 표시 (.done) 읽기 · Graph 주소는 모두 drives/{드라이브}/root:/HANNYU_TOOL/ 아래 · 콘솔 오류 0.
+https://graph.microsoft.com/ 요청은 page.route 로 가로채 가명 fixtures 폴더 (임시 사본 = TOOL 뿌리 흉내 · v0.3.30 = PHOTO_V2) 에서 돌려준다.
+확인: 로그인 버튼 활성 · graph 로 実況表 · 사진 blob 표시 · 로그인한 사람 = 担当者 · _actions 쓰기 = PHOTO_V2/_actions/{날짜}/ 만 ·
+      같은 id 다시 쓰기 거부 (409) · 처리 표시 (.done) 읽기 · Graph 주소는 모두 drives/{드라이브}/root:/{PHOTO_V2}/ 아래 · 콘솔 오류 0.
       v0.3.3 (R7C): 別タブで開く = webUrl 새 탭 · 없는 파일 이유 표시 · 파일 칩 · 파일 지정 없는 항목 = IV 서류.
       v0.3.2 (R7B): PDF (搬入票 · 未分類 FAX) = pdf.js 로 canvas 에 그림 (빈 화면 아님) · 페이지 넘김 · 회전 · 확대 · 別タブで開く ·
       pdf.js 를 못 읽으면 iframe 로 물러남 · 오래된 未分類 FAX 숨김 + 「古い未分類 FAX も表示」.
@@ -23,6 +23,7 @@ from playwright.sync_api import sync_playwright
 TOOL = Path(__file__).resolve().parent.parent
 RES = {"checks": [], "console_errors": [], "graph_urls": []}
 DRIVE = "b!TESTDRIVE"
+SP = "古紙/-. 古紙書類/▲ LEENAI 通関作業中/PHOTO_V2"        # v0.3.30 (R8U · #251): TOOL 뿌리 = PHOTO_V2 (라이브러리 기준)
 
 
 def ok(name, cond, detail=""):
@@ -63,7 +64,7 @@ INK = """(sel) => { const c = document.querySelector(sel); if (!c) return null; 
 
 
 def make_handler(root, web="https://sp.example.invalid/view?spview=1"):
-    pre = f"/v1.0/drives/{DRIVE}/root:/HANNYU_TOOL/"
+    pre = f"/v1.0/drives/{DRIVE}/root:/{SP}/"
 
     def handle(route, request):
         u = urlparse(request.url)
@@ -169,15 +170,15 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").count() == 1 and page.locator("#ln-login-btn").is_enabled())
-            ok("탭 제목 v0.3.24", page.title() == "LEENAI C-01 搬入票 v0.3.24", page.title())
-            ok("config: graph 켜짐 · HANNYU_TOOL", page.evaluate("C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === 'HANNYU_TOOL' && C01.SOURCE.mode === 'graph'"))
+            ok("탭 제목 v0.3.30", page.title() == "LEENAI C-01 搬入票 v0.3.30", page.title())
+            ok("config: graph 켜짐 · PHOTO_V2 (#251)", page.evaluate("(sp) => C01.SOURCE.graphEnabled === true && C01.SOURCE.spRoot === sp && C01.SOURCE.spLabel === 'PHOTO_V2' && C01.SOURCE.mode === 'graph'", SP))
             page.evaluate(STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
                           "C01.app.start(new C01.sources.Graph())")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
             n_iv = page.locator("tbody[data-iv]").count()
             ok("graph 로 実況表 (가명 IV 표시)", n_iv >= 1, n_iv)
-            ok("상단 = SharePoint · HANNYU_TOOL · 担当者 = 로그인한 사람", "SharePoint · HANNYU_TOOL" in page.locator("#c01-nav").inner_text()
+            ok("상단 = SharePoint · PHOTO_V2 · 担当者 = 로그인한 사람", "SharePoint · PHOTO_V2" in page.locator("#c01-nav").inner_text()
                and "STAFF A" in page.locator("#me-name").inner_text() and page.locator("#me-select").count() == 0, page.locator("#c01-nav").inner_text())
             ok("担当 港 = 로그인한 사람 (自分の担当)", "自分の担当" in page.locator("body").inner_text())
             # 사진 (blob)
@@ -206,7 +207,7 @@ def main():
             act = {"action_id": "agraphtest01", "at": "2026-11-08T10:00:00+09:00", "by": "staff.a@example.invalid", "action": "confirm_value"}
             r1 = page.evaluate("(a) => new C01.sources.Graph().writeAction(a).then(r => r.file, e => 'ERR ' + e.message)", act)
             f = root / "_actions" / "2026-11-08" / "agraphtest01.json"
-            ok("_actions 쓰기 = HANNYU_TOOL/_actions/{날짜}/{id}.json", r1 == "2026-11-08/agraphtest01.json" and f.exists()
+            ok("_actions 쓰기 = PHOTO_V2/_actions/{날짜}/{id}.json", r1 == "2026-11-08/agraphtest01.json" and f.exists()
                and json.loads(f.read_text(encoding="utf-8"))["action_id"] == "agraphtest01", r1)
             r2 = page.evaluate("(a) => new C01.sources.Graph().writeAction(a).then(r => 'OK', e => 'ERR ' + e.message)", act)
             ok("같은 id 다시 쓰기 = 거부 (409 · 덮어쓰기 0)", r2.startswith("ERR") and "409" in r2, r2)
@@ -216,8 +217,9 @@ def main():
             (f.parent / "agraphtest01.json.done").write_text('{"result":"applied"}', encoding="utf-8")
             la = page.evaluate("new C01.sources.Graph().listActions(['2026-11-08','2026-11-09'])")
             ok("_actions 읽기 + 처리 표시 (.done)", len(la) == 1 and la[0]["done"] is True and la[0]["action"]["action_id"] == "agraphtest01", la)
-            bad = [u for u in RES["graph_urls"] if f"/v1.0/drives/{DRIVE}/root:/HANNYU_TOOL/" not in unquote(u)]
-            ok("Graph 주소 = 모두 HANNYU_TOOL 아래", RES["graph_urls"] and not bad, bad[:3])
+            bad = [u for u in RES["graph_urls"] if f"/v1.0/drives/{DRIVE}/root:/{SP}/" not in unquote(u)]
+            ok("Graph 주소 = 모두 PHOTO_V2 아래 (HANNYU_TOOL 0)", RES["graph_urls"] and not bad
+               and not any("HANNYU_TOOL" in unquote(u) for u in RES["graph_urls"]), bad[:3])
             puts = [u for u in RES["graph_urls"] if u.startswith("PUT")]
             ok("쓰기 (PUT) = _actions 만", puts and all("/_actions/" in unquote(u) for u in puts), puts)
             nf = [x for x in RES.get("not_found", []) if x != "NO_SUCH/x.jpg"]

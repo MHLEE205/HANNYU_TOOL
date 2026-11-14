@@ -20,6 +20,8 @@ C01.sources = (function () {
     });
   }
   function enc(rel) { return rel.split('/').map(encodeURIComponent).join('/'); }
+  /* v0.3.30 (R8U): 画面 · エラーに出す場所の名前 (spLabel · 無ければ spRoot) */
+  function spName() { return (C01.SOURCE && (C01.SOURCE.spLabel || C01.SOURCE.spRoot)) || ''; }
   function askBase() { return String((C01.ASK && C01.ASK.base) || '_actions').split('/').filter(Boolean); }
   function askOk(a) { return a && /^[A-Za-z0-9_-]{6,64}$/.test(String(a.ask_id)) && /^\d{4}-\d{2}-\d{2}/.test(String(a.at)); }
 
@@ -176,7 +178,7 @@ C01.sources = (function () {
   };
   Graph.prototype._json = function (rel) {
     return this._fetch(this._item(rel) + '/content').then(function (r) {
-      if (r.status === 403) throw new Error('SharePoint (HANNYU_TOOL) を読む権限がありません (403)');
+      if (r.status === 403) throw new Error('SharePoint (' + spName() + ') を読む権限がありません (403)');
       if (!r.ok) throw new Error(rel + ' → ' + r.status);
       return r.json();
     });
@@ -187,7 +189,7 @@ C01.sources = (function () {
     var st = LEENAI.auth.status || {};
     if (st.graph !== 'ok') return Promise.reject(new Error('Microsoft 365 (Graph) に接続できませんでした: ' + (st.graphError || st.graph)));
     return this._json('_data/meta.json').then(function (m) {
-      return { mode: 'graph', today: m.today, label: 'SharePoint ' + C01.SOURCE.spRoot, files: String(st.graphError || '').indexOf('files:') === 0 ? 'narrow' : 'ok' };
+      return { mode: 'graph', today: m.today, label: 'SharePoint ' + spName(), files: String(st.graphError || '').indexOf('files:') === 0 ? 'narrow' : 'ok' };
     });
   };
   Graph.prototype.getJson = function (rel) { return this._json('_data/' + rel); };
@@ -264,7 +266,7 @@ C01.sources = (function () {
     var rel = '_actions/' + day + '/' + a.action_id + '.json';
     return this._fetch(this._item(rel) + '/content?@microsoft.graph.conflictBehavior=fail',
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a, null, 1) + '\n' }).then(function (r) {
-      if (r.status === 403) throw new Error('SharePoint (HANNYU_TOOL) に書く権限がありません (403)');
+      if (r.status === 403) throw new Error('SharePoint (' + spName() + ') に書く権限がありません (403)');
       if (r.status === 409) throw new Error('同じ記録がすでにあります (409)');
       if (!r.ok) throw new Error('書き込み失敗 (' + r.status + ')');
       return { file: day + '/' + a.action_id + '.json' };
@@ -297,7 +299,7 @@ C01.sources = (function () {
     var rel = askBase().join('/') + '/ask/' + String(a.at).slice(0, 10) + '/' + a.ask_id + '.json';
     return this._fetch(this._item(rel) + '/content?@microsoft.graph.conflictBehavior=fail',
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a, null, 1) + '\n' }).then(function (r) {
-      if (r.status === 403) throw new Error('SharePoint (HANNYU_TOOL) に書く権限がありません (403)');
+      if (r.status === 403) throw new Error('SharePoint (' + spName() + ') に書く権限がありません (403)');
       if (!r.ok) throw new Error('送信失敗 (' + r.status + ')');
       return { file: rel };
     });

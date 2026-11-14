@@ -2,6 +2,11 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.30 (2026-11-14) — R8U: 読む・書く場所 = PHOTO_V2 の 1 か所 (決定 #251)
+- `C01.SOURCE.spRoot` = `古紙/-. 古紙書類/▲ LEENAI 通関作業中/PHOTO_V2` (ドキュメント ライブラリから) · 画面の名前 `spLabel` = PHOTO_V2。_data · 写真 · 搬入票 · _unassigned · _hold · _fax_unmatched · _actions · AI 相談 すべて PHOTO_V2 から読み、_actions · 質問は PHOTO_V2 に書く (HANNYU_TOOL は読まない・書かない)。エンジン v0.5.74 `sp_tool_root = PHOTO_V2` と同時に切り替え。
+- 元に戻す = `spRoot: 'HANNYU_TOOL'` (エンジン設定も同時に戻す)。
+- 시험 `test_graph` (가짜 Graph 주소 = PHOTO_V2 아래 · HANNYU_TOOL 0) 47 · `test_ui` 251.
+
 ## 0.3.29 (2026-11-13) — R8G: 業者・IV未定 = エンジンが読んだ値 + 向きを直して表示 (#234 D-143 ④)
 - 業者・IV未定 カード: エンジン `fax_read.pages` (1段階 L5 の各ページ — 書類 · 発行 · FAX 送信元 (外側のヘッダー) · BKG · CT · シール · 正味 · 風袋 · ベール数) を表で表示 (表示だけ · 判定に使わない)。ページの向きはエンジンの `files[].rotation` (0.3.15 の 向き補正 そのまま) で正しい向きに。`fax_read` が無い時は今までと同じ。
 - 시험 `r8g_checks` (가명 3).

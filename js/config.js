@@ -7,9 +7,9 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.29',
+  version: '0.3.30',
   date: '2026-11-13',
-  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint HANNYU_TOOL のデータを表示）'
+  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
 /* D-6 → 決定 #109 (R6.8) で決まった規則。ここだけ変える (エンジン engine/actions/apply.py ACTION_RULES と同じ規則) */
@@ -33,12 +33,15 @@ C01.RULES = {
   faxLinkIv: true
 };
 
-/* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */
+/* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / PHOTO_V2 · v0.3.29 まで HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */
 C01.SOURCE = {
   mode: 'graph',
   pollMs: 30000,          /* 他の人の確認を 30 秒ごとに読む (決定 #100) */
   graphEnabled: true,     /* R7A (決定 #132 · #137): ログインボタン有効 — false に戻すとログインボタン無効 · graph 呼び出し 0 */
-  spRoot: 'HANNYU_TOOL'   /* ドキュメント ライブラリ直下のフォルダ (PHOTO_V2) — _data · 写真 · 搬入票 · _actions */
+  /* v0.3.30 (R8U Part A · 決定 #251): 読む・書く場所 = PHOTO_V2 の 1 か所 (_data · 写真 · 搬入票 · _unassigned · _hold · _fax_unmatched · _actions · AI 相談)。
+     ドキュメント ライブラリからの相対パス。元に戻す = 'HANNYU_TOOL' (エンジン設定 sp_tool_root も同時に戻す) */
+  spRoot: '古紙/-. 古紙書類/▲ LEENAI 通関作業中/PHOTO_V2',
+  spLabel: 'PHOTO_V2'     /* 画面に出す名前 (長いパスの代わり) */
 };
 
 /* v0.2.0 (R6): Compass入力 · 催促 は下書き・比較表だけ。送信ボタンは常に無効 (R7 以降 · 決定のあと) */
