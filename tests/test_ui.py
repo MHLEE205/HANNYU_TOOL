@@ -1455,6 +1455,12 @@ def main():
         for r in iv["rows"]:
             if r["ct"] == "TSTU0010630":          # v0.3.10 R7I Part D: 受信中・候補あり (엔진 jikkyou 줄 cand 형식 그대로)
                 r["cand"] = {"level": "ct", "n": 1, "where": ["保留:NO_BKG"], "recv": ["2026-11-06"]}
+                # v0.3.31 (R8V Part B · #254): 엔진 out_cand_files 형식 (후보 파일 · qid · need) — 시험 사본의 _hold 파일 1개
+                hq = json.loads((root / "_data" / "queue.json").read_text(encoding="utf-8"))
+                hf = [f for it in hq["items"] if it["kind"] == "業者・IV未定" for f in it["files"]][:1]
+                if hf:
+                    r["cand"].update({"files": [{"path": hf[0]["path"], "name": hf[0]["name"], "page": None, "bbox": None, "sha16": hf[0]["sha16"]}],
+                                      "need": "doc", "qid": "c0ffee00c0ffee00"})
             if r["ct"] == "TSTU0010218":
                 HUMAN_SEAL = r["human"]["seal"]["value"]
                 r["seal"] = HUMAN_SEAL
@@ -1484,11 +1490,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.30", page.title() == "LEENAI C-01 搬入票 v0.3.30", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.31", page.title() == "LEENAI C-01 搬入票 v0.3.31", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.30" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.31" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -1505,6 +1511,33 @@ def main():
                cw.count() == 1 and cw.inner_text().startswith("受信中・候補あり") and "保留:NO_BKG" in (cw.get_attribute("title") or "")
                and "催促の対象外" in (cw.get_attribute("title") or "") and cw0.count() == 1 and "候補あり" not in cw0.inner_text(),
                (cw.count() and cw.inner_text(), cw0.count() and cw0.inner_text()))
+            # v0.3.31 (R8V Part B · #254): 후보 파일이 있는 「候補あり」 = 버튼 → 그 후보 카드 (IVに連結 · 搬入票ではない) · 누르기 전 確認・入力 장 수 그대로
+            n_cards0 = page.evaluate("() => document.querySelectorAll('.c01-item').length")
+            ok("R8V B 候補あり = 버튼 (data-cand · ▸)", cw.evaluate("e => e.tagName") == "BUTTON" and cw.get_attribute("data-cand") == "c0ffee00c0ffee00"
+               and cw.inner_text().endswith("▸"), cw.inner_text())
+            me0 = page.evaluate("() => (document.querySelector('#me-select') || {}).value || ''")
+            page.select_option("#me-select", "STAFF_A")        # 「搬入票ではない」 = 担当者が要る
+            cw.click()
+            page.wait_for_timeout(400)
+            body = page.locator("body").inner_text()
+            ok("R8V B 候補あり 클릭 = 確認・入力 카드 (候補ファイル 설명 · 搬入票ではない · IV 후보)",
+               "「受信中・候補あり」の候補ファイル" in body and page.locator("#q-notours").count() == 1, body[:300])
+            page.click("#q-notours")
+            page.wait_for_timeout(200)
+            ok("R8V C 이유 창 (候補あり 카드)", page.locator("#c01-nhdlg").count() == 1)
+            page.click("#c01-nhok")                        # 이유 없이 누름 = 기록만
+            page.wait_for_timeout(400)
+            cn = [x for x in actions(root) if x["action"] == "not_hannyuhyo" and x["queue_id"] == "c0ffee00c0ffee00"]
+            ok("R8V B·C 候補あり → not_hannyuhyo (queue_id = cand.qid · source cand · 이유 없음 = 키 없음 · sha16 = 후보 파일)", len(cn) == 1
+               and cn[0]["value"].get("source") == "cand" and "reason_code" not in cn[0]["value"] and "reason_text" not in cn[0]["value"]
+               and cn[0]["value"]["sha16"] and cn[0]["iv"], cn)
+            for f_ in (root / "_actions").rglob("*.json"):   # 다음 시험 (_actions 수) 은 예전 상태 그대로 — 이 시험의 기록만 지움 (임시 사본)
+                if '"c0ffee00c0ffee00"' in f_.read_text(encoding="utf-8"):
+                    f_.unlink()
+            page.click("#tab-main")
+            page.select_option("#me-select", me0)             # 다음 시험은 예전 상태 그대로
+            page.wait_for_timeout(300)
+            ok("R8V B 確認・入力 장 수 = 候補あり 열기 전과 같음 (실황표로 돌아온 뒤)", n_cards0 == page.evaluate("() => document.querySelectorAll('.c01-item').length"))
             ok("기본 테마 DARK", page.evaluate("document.documentElement.getAttribute('data-theme')") == "dark")
             ths = page.locator("#jikkyou-table thead th").all_inner_texts()
             ok("実況表 열 15 · 순서", ths == ["No", "CYカット", "Invoice番号", "品目", "CT番号", "シール番号", "正味重量", "風袋重量", "ベール数", "作業日", "条件", "圧縮業者",
@@ -1807,10 +1840,20 @@ def main():
             dl2 = []
             page.once("dialog", lambda dg: (dl2.append(dg.message), dg.accept()))
             page.click("#q-notours")
+            page.wait_for_timeout(200)
+            # v0.3.31 (R8V Part C · #255): 확인창 = 이유 칸 (버튼 5 · 자유 입력 · 「ひとことでOK（簡単で大丈夫です）」 · 이유 없이도 누름)
+            dlg = page.locator("#c01-nhdlg")
+            ok("R8V C 「搬入票ではない」 = 이유 창 (ひとことでOK · 이유 버튼 5 · 자유 입력 · ✦)", dlg.count() == 1 and "ひとことでOK（簡単で大丈夫です）" in dlg.inner_text()
+               and dlg.locator("[data-nhr]").count() == 5 and dlg.locator("#c01-nhtext").count() == 1 and "✦ Powered by LEENAI Automation System" in dlg.inner_text()
+               and "当社の書式（空欄）" in dlg.inner_text() and not dl2, dlg.inner_text() if dlg.count() else None)
+            page.click("[data-nhr='own_blank_form']")
+            page.fill("#c01-nhtext", "空欄の当社書式です")
+            page.click("#c01-nhok")
             page.wait_for_timeout(400)
-            nh = [x for x in actions(root) if x["action"] == "not_hannyuhyo"]
-            ok("「搬入票ではない」 (業者・IV 未定) = 확인창 → not_hannyuhyo 1 (sha16 · queue_id)", len(dl2) == 1 and "搬入票ではない" in dl2[0] and len(nh) == 1
-               and nh[0]["value"]["sha16"] and nh[0]["queue_id"], nh)
+            nh = [x for x in actions(root) if x["action"] == "not_hannyuhyo" and x["queue_id"] != "c0ffee00c0ffee00"]
+            ok("「搬入票ではない」 (業者・IV 未定) = 이유 창 → not_hannyuhyo 1 (sha16 · queue_id · reason_code · reason_text)", len(nh) == 1
+               and nh[0]["value"]["sha16"] and nh[0]["queue_id"] and nh[0]["value"].get("reason_code") == "own_blank_form"
+               and nh[0]["value"].get("reason_text") == "空欄の当社書式です" and page.locator("#c01-nhdlg").count() == 0, nh)
             page.click(".c01-kinds [data-kind='all']")
             ok("「搬入票ではない」 카드 = 목록에서 빠짐", page.locator(".c01-item").count() == n_before - 1, [n_before, page.locator(".c01-item").count()])
             page.click(".c01-kinds [data-kind='done']")

@@ -387,3 +387,18 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-ask-sug { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
 .c01-ask-quick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .c01-ask-in { display: flex; gap: 6px; } .c01-ask-in input { flex: 1; min-width: 0; }
+
+/* v0.3.31 R8V Part B · C (#254 · #255): 候補あり ボタン · 「搬入票ではない」 理由 */
+button.st-wait.c01-candbtn { background: none; border: 1px dashed var(--warn, #c07a00); border-radius: 4px; padding: 0 4px; cursor: pointer; font: inherit; }
+.c01-nhdlg { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+.c01-nhbox { background: #fff; border-radius: 8px; padding: 14px 16px; width: min(460px, 92vw); box-shadow: 0 6px 24px rgba(0, 0, 0, .25); font-size: 13px; }
+.c01-nhbox .t { font-weight: 700; margin-bottom: 4px; }
+.c01-nhbox .s { color: #666; font-size: 12px; margin-bottom: 8px; }
+.c01-nhbox .r { margin-bottom: 4px; }
+.c01-nhbox .r .ok { color: #2a7a2a; font-size: 12px; margin-left: 6px; }
+.c01-nhbox .b { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.c01-nhr { border: 1px solid #bbb; background: #f7f7f7; border-radius: 12px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
+.c01-nhr.on { background: #fde8e8; border-color: #c33; }
+.c01-nhbox textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.c01-nhbox .f { margin-top: 8px; text-align: right; }
+.c01-nhbox .c01-foot { margin-top: 6px; color: #999; font-size: 10px; text-align: right; }

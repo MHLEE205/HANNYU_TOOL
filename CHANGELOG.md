@@ -2,6 +2,11 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.31 (2026-11-14) — R8V: 「受信中・候補あり」 を押して開く (決定 #254) · 「搬入票ではない」 の理由 (決定 #255)
+- 実況表 「受信中・候補あり」: エンジンが候補ファイル (`cand.files` · SharePoint にあるものだけ) を出した行は ボタン (▸) → その候補のカード (業者・IV未定 と同じ操作 = 「IVに連結」 · 「搬入票ではない」)。押す前は 確認・入力 の枚数に入らない (`candItems` · 押した時だけ)。
+- 「搬入票ではない」: 確認窓 → 理由の窓 (よく使う理由 5 · 自由入力 (どの言語でも · 300 字まで) · 「ひとことでOK（簡単で大丈夫です）」 · 理由なしでも押せる) → `_actions` value `reason_code` · `reason_text` (候補あり から = `source: "cand"`)。未分類FAX (`not_ours`) は今まで通り。
+- 시험 `test_ui` 257 (+6: 候補あり 버튼 · 카드 · 이유 창 · 이유 있음/없음 기록 · 장 수 그대로) · `test_graph` 47.
+
 ## 0.3.30 (2026-11-14) — R8U: 読む・書く場所 = PHOTO_V2 の 1 か所 (決定 #251)
 - `C01.SOURCE.spRoot` = `古紙/-. 古紙書類/▲ LEENAI 通関作業中/PHOTO_V2` (ドキュメント ライブラリから) · 画面の名前 `spLabel` = PHOTO_V2。_data · 写真 · 搬入票 · _unassigned · _hold · _fax_unmatched · _actions · AI 相談 すべて PHOTO_V2 から読み、_actions · 質問は PHOTO_V2 に書く (HANNYU_TOOL は読まない・書かない)。エンジン v0.5.74 `sp_tool_root = PHOTO_V2` と同時に切り替え。
 - 元に戻す = `spRoot: 'HANNYU_TOOL'` (エンジン設定も同時に戻す)。

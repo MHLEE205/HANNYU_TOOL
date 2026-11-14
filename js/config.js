@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.30',
+  version: '0.3.31',
   date: '2026-11-13',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
