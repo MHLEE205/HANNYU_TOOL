@@ -151,7 +151,12 @@ window.C01 = window.C01 || {};
   function slotPlan(iv, guid) { var sl = (iv.slots || []).filter(function (x) { return guid && x.slot_guid === guid; })[0]; return sl && sl.work_date ? sl.work_date : null; }
   /* v0.3.22 (R7V F-2 · 決定 #188): エンジン info 「作業日要確認」 = 枠は作業日なしで決まった行 — 作業日はカードにせず 灰色 「?」 だけ */
   function wdDoubt(r) { return ((r && r.info) || []).filter(function (x) { return String(x).indexOf('作業日要確認') === 0; })[0] || ''; }
-  function wdCell(v, plan, doubt) {
+  /* v0.3.32 (R8W Part A · 決定 #256): エンジン work_date_src = 'slot_plan' (枠が決まった行の作業日 = 枠の予定作業日) — 値の横に小さく 「予定」 ·
+     読んだ作業日 (work_date_read) が違う時はカードに小さく 「読取: MM/DD」 だけ (警告の色なし · 枚数に入らない)。人の値の作業日がある行は今まで通り */
+  function wdSrc(r, human) { return !human && r && r.work_date_src === 'slot_plan' ? 'slot_plan' : ''; }
+  function wdReadDiff(r, human) { return wdSrc(r, human) && r.work_date_read && r.work_date_read !== r.work_date ? r.work_date_read : ''; }
+  function wdCell(v, plan, doubt, src) {
+    if (v && src === 'slot_plan') return '<td>' + esc(md(v)) + ' <small class="c01-wdsrc" title="' + esc('COMPASS 枠の予定作業日（枠を合わせるための日付 · 入力・判定には使いません）') + '">予定</small></td>';
     if (v && doubt) return '<td><span class="c01-wddoubt" title="' + esc('作業日が読み違いの可能性があります（枠は作業日なしで決まっています · 入力・判定には使いません） · ' + doubt) + '">' + esc(md(v)) + '?</span></td>';
     if (v) return '<td>' + esc(md(v)) + '</td>';
     if (!plan) return '<td></td>';
@@ -922,7 +927,7 @@ window.C01 = window.C01 || {};
         html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over ? ' over' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
-          '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r)) +
+          '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r), wdSrc(r, x.human.work_date)) +
           cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
           (photoAlert(photos, rowVal(iv, r, 'packer').v) ? ' class="c-ph c01-ph-alert" title="' + esc(photoAlertText(photos, rowVal(iv, r, 'packer').v)) + '"' : ' class="c-ph"') + '>' +
           (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '" title="新しいタブで写真を表示 (Shift+クリック = この画面で表示)">📷 ' + photos + '枚</button>' : '0枚') +
@@ -1768,6 +1773,10 @@ window.C01 = window.C01 || {};
     /* v0.3.22 (R7V F-2): 作業日の理由 (WORK_DATE) がある行 · 作業日要確認 の行 = 作業日 ✎ 修正 (他の値と同じ · 人の値が優先 #109 · 学習の記録) */
     var wdNeed = !editMode && ((r.reasons || []).indexOf('WORK_DATE') >= 0 || !!wdDoubt(r));
     if (wdNeed) fields += '<div class="c01-pf c01-pf-edit">' + editCell(iv, r, 'work_date', '', ov) + '</div>';
+    /* v0.3.32 (R8W Part A · #256): 作業日 = 枠の予定日 · 読んだ日付が違う時だけ 小さく 「読取: MM/DD」 (警告ではない) */
+    var wdRd = !editMode && !wdNeed ? wdReadDiff(r, (r.human || {}).work_date) : '';
+    if (wdRd) fields += '<div class="c01-pf c01-wdline"><span class="c01-pl">' + FIELD_LABEL.work_date + '</span><span>' + esc(md(r.work_date)) +
+      ' <small class="c01-wdsrc">予定</small> <small class="c01-wdread" title="' + esc('書類・写真から読んだ作業日（表示のみ · 入力・判定には使いません）') + '">読取: ' + esc(md(wdRd)) + '</small></span></div>';
     var needPick = Object.keys(diffQ).filter(function (fd) { return diffQ[fd].kind === '値の違い' && !queueState(diffQ[fd], ov).done; });
     var psQ = qs.filter(function (q) { return q.kind === PHOTO_SET && !queueState(q, ov).done && r.ct; })[0] || null;
     var ready = needPick.length > 0 ? (needPick.every(function (fd) { return S.picks[fd]; }) || (needPick.length === 1 && S.panelInput.trim())) : !!psQ;

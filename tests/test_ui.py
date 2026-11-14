@@ -1268,6 +1268,54 @@ def r8f_checks(page, root, shots):
     page.wait_for_timeout(400)
 
 
+def r8w_checks(page, root, shots):
+    """v0.3.32 (R8W Part A · #256): work_date_src = slot_plan → 実況表 작업일 옆 작은 「予定」 · 읽은 값이 다르면 옆 창에 「読取: MM/DD」 만 (경고 색 없음 · 장 수 그대로) ·
+    읽은 값이 같으면 「読取」 없음 · 사람 값 작업일 줄은 「予定」 없음."""
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.wait_for_timeout(200)
+    tab0 = page.locator("#tab-input").inner_text()
+    j = json.loads(jt0)
+    iv = next(x for x in j["ivs"] if x["iv_no"] == "TST2611-01")
+    rs = [r for r in iv["rows"] if r.get("ct") and r.get("work_date") and not (r.get("human") or {}).get("work_date") and r.get("status") == "自動OK"]
+    hv = next((r for r in iv["rows"] if r.get("ct") and (r.get("human") or {}).get("work_date")), None)
+    a, b = rs[0], rs[1]
+    a["work_date_src"] = "slot_plan"; a["work_date_read"] = "2026-10-01"
+    b["work_date_src"] = "slot_plan"; b["work_date_read"] = b["work_date"]
+    if hv:
+        hv["work_date_src"] = "slot_plan"; hv["work_date_read"] = "2026-10-02"
+    jp.write_text(dump(j), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    ra = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{a['ct']}')").first
+    rb = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{b['ct']}')").first
+    sa = ra.locator(".c01-wdsrc")
+    ok("R8W 予定 = 실황표 작업일 옆 작은 「予定」 (title 설명) · 읽은 값 같은 줄도 「予定」",
+       sa.count() == 1 and sa.inner_text() == "予定" and "予定作業日" in (sa.get_attribute("title") or "") and rb.locator(".c01-wdsrc").count() == 1,
+       [sa.count(), rb.locator(".c01-wdsrc").count()])
+    if hv:
+        rh = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{hv['ct']}')").first
+        ok("R8W 사람 값 작업일 줄 = 「予定」 없음", rh.locator(".c01-wdsrc").count() == 0, rh.locator(".c01-wdsrc").count())
+    page.evaluate("k => { C01.state.sel = k; C01.app.render(); }", ra.get_attribute("data-key"))
+    page.wait_for_selector(".c01-side")
+    side = page.locator(".c01-side")
+    rd = side.locator(".c01-wdread")
+    ok("R8W 옆 창 = 「読取: 10/01」 작은 글자 (경고 색 없음)", rd.count() == 1 and rd.inner_text() == "読取: 10/01" and "c01-bad" not in (rd.get_attribute("class") or ""),
+       [rd.count(), rd.count() and rd.inner_text()])
+    page.screenshot(path=str(shots / "r8w_wd_plan.png"))
+    page.evaluate("k => { C01.state.sel = k; C01.app.render(); }", rb.get_attribute("data-key"))
+    page.wait_for_timeout(200)
+    ok("R8W 읽은 값 = 예정일 → 「読取」 없음", page.locator(".c01-side .c01-wdread").count() == 0, page.locator(".c01-side .c01-wdread").count())
+    page.evaluate("C01.state.sel = null; C01.app.render()")
+    ok("R8W 確認・入力 장 수 그대로", page.locator("#tab-input").inner_text() == tab0, [tab0, page.locator("#tab-input").inner_text()])
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r8g_checks(page, root, shots):
     """v0.3.29 (R8G Part A ④ · #234): 業者・IV未定 = 엔진 fax_read.pages (쪽 각도 · 읽은 값) 표 + 파일 rotation 으로 바로 세움 (向き補正 180°) · fax_read 없으면 표 없음."""
     qp = root / "_data" / "queue.json"
@@ -1490,11 +1538,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.31", page.title() == "LEENAI C-01 搬入票 v0.3.31", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.32", page.title() == "LEENAI C-01 搬入票 v0.3.32", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.31" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.32" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2002,6 +2050,7 @@ def main():
             r8d_checks(page, root, shots)
             r8f_checks(page, root, shots)
             r8g_checks(page, root, shots)
+            r8w_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
