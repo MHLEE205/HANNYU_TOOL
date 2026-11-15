@@ -208,6 +208,7 @@ def help_checks(page, shots):
     need = ["並行期間", "これまでのシステム", "見る", "確認・入力", "試験表示", "催促", "Compass入力", "自分の担当", "自動OK", "再確認", "受信中",
             "✎ 修正", "搬入票ではない", "元に戻す", "Ctrl+Shift+R", "気づいた点は担当の管理者へ（画面の写真と IV 番号）"]
     ok("v0.3.17 使い方 창 열림 · 내용 (試験表示 · 상태 · 確認・入力 · Ctrl+Shift+R · 관리자)", all(w in txt for w in need), [w for w in need if w not in txt])
+    ok("v0.3.34 使い方 「業者登録」 한 줄 (試験表示 와 같은 칩 · 元に戻す)", page.locator("#help-body [data-regsender-help].c01-trial").count() == 1 and "業者登録" in txt and "元に戻す" in txt)
     ok("v0.3.17 使い方 「\u78ba\u5b9a」 글자 0 · 메일·사람 이름 0", "\u78ba\u5b9a" not in txt and "@" not in txt and "\u674e" not in txt and "さんへ" not in txt)
     fit = page.evaluate("""() => { const m = document.querySelector('.c01-modal-help'), b = document.getElementById('help-body'); const r = m.getBoundingClientRect();
         return [r.top >= 0 && r.bottom <= innerHeight, b.scrollHeight <= b.clientHeight + 2, Math.round(r.height), b.scrollHeight, b.clientHeight]; }""")
@@ -699,6 +700,42 @@ def r7v_remind_checks(page, root, shots):
     page.click("tbody[data-iv='TST2611-02'] [data-remind]")
     page.wait_for_selector(".c01-rmd")
     ok("B 엔진 send_mode.test false = 送信 버튼 0 (실제 송신 코드 없음)", page.locator("[data-rsend]").count() == 0 and page.locator("#remind-send").is_disabled())
+    page.click("[data-close]")
+    rp.write_text(rt0, encoding="utf-8")
+    page.evaluate("C01.state.info.mode = 'local'; C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
+def r9d_remind_checks(page, root, shots):
+    """v0.3.35 (R9D Part C · #263): 원청 주소 0 (to · 未受信 모두 없음 · no_recipient) = 「宛先なし — 担当者が確認」 · 送信（試験） 버튼 잠김 · 다른 초안은 그대로."""
+    rp = root / "_data" / "remind.json"
+    rt0 = rp.read_text(encoding="utf-8")
+    r2 = json.loads(rt0)
+    r2["send_mode"] = {"test": True, "to": "test.box@example.invalid", "tag": "[test]"}
+    ds = r2["ivs"]["TST2611-02"]
+    ok("R9D 시험 자료 = TST2611-02 초안 있음", len(ds) >= 1, len(ds))
+    d0 = ds[0]
+    d0["to"], d0["cc"], d0["to_unreceived"], d0["cc_unreceived"] = [], [], [], []
+    d0["no_recipient"] = True; d0["send_ready"] = False; d0["status"] = "宛先なし — 担当者が確認"
+    d0["round"] = 9                                                          # 앞 시험 (r7v) 이 1회차를 보낸 기록 = 送信済 → 다른 회차로
+    rp.write_text(json.dumps(r2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(500)
+    page.evaluate("() => { C01.state.info.mode = 'graph'; }")
+    page.click("tbody[data-iv='TST2611-02'] [data-remind]")
+    page.wait_for_selector(".c01-rmd")
+    sec = page.locator(".c01-rmd[data-rmd='0']")
+    txt = sec.inner_text()
+    b0 = page.locator("[data-rsend='0']")
+    ok("R9D 宛先なし = 宛先 칸 「宛先なし — 担当者が確認」 · 送信（試験） 잠김 · 이유 글", "宛先なし" in txt and b0.count() == 1 and b0.is_disabled()
+       and "宛先なし" in page.locator("[data-rwhy='0']").inner_text(), [b0.count(), b0.count() and b0.is_disabled(), page.locator("[data-rwhy='0']").all_inner_texts()])
+    page.locator("[data-rskip='0']").check(); page.locator("[data-rskip='0']").uncheck()
+    ok("R9D 宛先なし = 체크를 바꿔도 잠김 그대로", b0.is_disabled())
+    if len(ds) > 1:
+        ok("R9D 다른 초안 (宛先 있음) = 버튼 켜짐 그대로", page.locator("[data-rsend='1']").is_enabled())
+    page.screenshot(path=str(shots / "r9d_remind_noto.png"))
     page.click("[data-close]")
     rp.write_text(rt0, encoding="utf-8")
     page.evaluate("C01.state.info.mode = 'local'; C01.app.tick()")
@@ -1316,6 +1353,142 @@ def r8w_checks(page, root, shots):
     page.wait_for_timeout(300)
 
 
+def r9d_wd_checks(page, root, shots, engine):
+    """v0.3.35 (R9D Part B · #262 · #153 회귀 고침): work_date_src = slot_plan 줄도 搬入票 아직 없는 줄 (受信中 · 書類なし) 이고 예정일이 오늘 포함 이전이면 굵은 빨강 ·
+    내일 = 회색 「予定」 · 搬入票 있는 줄 (自動OK · 再確認) = 회색 「予定」 (빨강 아님) · 서류 작업일 = 검정 · 빈 값 = 지금 분기 그대로 +
+    받는 쪽 대조: 엔진 data_json.WORK_DATE_SRC_VALUES == TOOL C01.WD_SRC_KNOWN."""
+    import datetime as _dt
+    import ast as _ast
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.wait_for_timeout(200)
+    today = page.evaluate("(C01.state.info && C01.state.info.today) || null")
+    ok("R9D 화면 오늘 날짜 있음 (meta today)", bool(today), today)
+    d = _dt.date.fromisoformat(today)
+    yday, tmr = (d - _dt.timedelta(days=1)).isoformat(), (d + _dt.timedelta(days=1)).isoformat()
+    j = json.loads(jt0)
+    iv = next(x for x in j["ivs"] if x["iv_no"] == "TST2611-01")
+    rs = [r for r in iv["rows"] if r.get("ct") and not (r.get("human") or {}).get("work_date")]
+    ok("R9D 시험 자료 = TST2611-01 CT 줄 4 이상", len(rs) >= 4, len(rs))
+    a, b, c, e = rs[0], rs[1], rs[2], rs[3]
+    for r, wd, st in ((a, yday, "受信中"), (b, today, "受信中"), (c, tmr, "受信中"), (e, yday, "自動OK")):
+        r["work_date"] = wd; r["work_date_src"] = "slot_plan"; r.pop("work_date_read", None); r["status"] = st
+        if st == "受信中":
+            r["has_docs"] = False
+    jp.write_text(dump(j), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    row = lambda r: page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row[data-key*='{r['ct']}']").first   # noqa: E731
+    def cell(r):
+        x = row(r)
+        return {"n": x.count(), "plan": x.locator(".c01-wdplan").count(), "past": x.locator(".c01-wdplan.past").count(), "yotei": x.locator(".c01-wdsrc").count(),
+                "st": x.get_attribute("data-status") if x.count() else None}
+    ca, cb, cc, ce = cell(a), cell(b), cell(c), cell(e)
+    ok("R9D slot_plan + 어제 + 受信中 (書類なし) = 굵은 빨강 (past) · 「予定」", ca["st"] == "受信中" and ca["past"] == 1 and ca["yotei"] == 1, ca)
+    ok("R9D slot_plan + 오늘 + 受信中 = 굵은 빨강 (오늘 포함)", cb["st"] == "受信中" and cb["past"] == 1 and cb["yotei"] == 1, cb)
+    ok("R9D slot_plan + 내일 + 受信中 = 회색 「予定」 (빨강 아님)", cc["st"] == "受信中" and cc["plan"] == 1 and cc["past"] == 0 and cc["yotei"] == 1, cc)
+    ok("R9D slot_plan + 어제 + 自動OK (搬入票 있음) = 회색 「予定」 (빨강 아님)", ce["st"] == "自動OK" and ce["plan"] == 1 and ce["past"] == 0 and ce["yotei"] == 1, ce)
+    sty = row(a).locator(".c01-wdplan.past").evaluate("el => [getComputedStyle(el).fontWeight, getComputedStyle(el).color]") if ca["past"] else None
+    ok("R9D 빨강 = 굵게 (700 이상)", bool(sty) and int(sty[0]) >= 700, sty)
+    page.screenshot(path=str(shots / "r9d_wd_red.png"))
+    j2 = json.loads(jt0)
+    iv2 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    r2 = next(r for r in iv2["rows"] if r.get("ct") == a["ct"])
+    r2["work_date"] = yday; r2.pop("work_date_src", None); r2["status"] = "受信中"; r2["has_docs"] = False
+    jp.write_text(dump(j2), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    cd = cell(a)
+    ok("R9D 서류 작업일 (work_date_src 없음) = 검정 그대로 (회색 · 빨강 · 「予定」 없음)", cd["plan"] == 0 and cd["past"] == 0 and cd["yotei"] == 0, cd)
+    r2["work_date"] = None
+    jp.write_text(dump(j2), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    cn = cell(a)
+    ok("R9D 빈 값 = 지금 분기 그대로 (칸 예정일 있으면 회색/빨강 · 「予定」 작은 글자 없음)", cn["yotei"] == 0 and cn["n"] == 1, cn)
+    known = page.evaluate("C01.WD_SRC_KNOWN")
+    src = (Path(engine) / "engine" / "output" / "data_json.py").read_text(encoding="utf-8")
+    eng = None
+    for node in _ast.walk(_ast.parse(src)):
+        if isinstance(node, _ast.Assign) and any(getattr(t_, "id", None) == "WORK_DATE_SRC_VALUES" for t_ in node.targets):
+            eng = list(_ast.literal_eval(node.value))
+    ok("R9D 받는 쪽 대조: 엔진 WORK_DATE_SRC_VALUES == TOOL WD_SRC_KNOWN (엔진 값이 늘면 이 시험이 실패)", eng is not None and sorted(eng) == sorted(known or []), [eng, known])
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
+def r8z_checks(page, root, shots):
+    """v0.3.33 (R8Z Part A · B · #258): 業者・IV未定 = 件名 · 送信元 · 添付 · 「他 n 枚」 · ZIP の中身 · ファイル準備中 + 「業者登録」 (packers.json · 営業所 · 확인창 · register_sender · 元に戻す)."""
+    qp = root / "_data" / "queue.json"
+    pp = root / "_data" / "packers.json"
+    qt0 = qp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    q2 = json.loads(qt0)
+    hq = next(x for x in q2["items"] if x["kind"] == "業者・IV未定")
+    hq["resolved"] = None
+    hq.update({"mail_info": {"subject": "テスト件名 写真", "from": "sender.x@example.invalid", "attach": ["a.jpg", "b.jpg", "c.zip"]},
+               "files_total": 9, "more_files": 3, "files_pending": False, "zip_entries_n": 2,
+               "zip_entries": [{"name": "p1.jpg", "kind": "jpg", "size": 10}, {"name": "memo.txt", "kind": None, "size": 5}]})
+    hp = dict(hq, queue_id="c" * 16, files=[], files_pending=True, more_files=0, zip_entries_n=0, zip_entries=[],
+              mail_info={"subject": "準備中", "from": "sender.y@example.invalid", "attach": ["x.xls"]})
+    q2["items"].append(hp)
+    qp.write_text(dump(q2), encoding="utf-8")
+    pp.write_text(dump({"schema_version": 1, "packers": [{"code": "PACKER_A", "name": "テスト商店", "plants": ["本社", "市川"]},
+                                                         {"code": "PACKER_B", "name": "テスト二", "plants": []}]}), encoding="utf-8")
+    page.click("#tab-main")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(700)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_selector("#q-holdmail")
+    t = page.locator("#q-holdmail").inner_text()
+    ok("R8Z 카드 = 件名 · 送信元 · 添付", all(x in t for x in ("テスト件名 写真", "sender.x@example.invalid", "a.jpg")), t)
+    ok("R8Z 「ほか 3 枚」 · ZIP の中身 2 件 (읽지 않음)", "ほか 3 枚" in page.locator("#q-morefiles").inner_text()
+       and "ZIP の中身 2 件" in page.locator("#q-zipents").inner_text(), "")
+    ok("R8Z 業者登録 = packers.json 있으면 입력 · 업체 고르기 전 버튼 잠김", page.locator("#reg-packer").count() == 1 and page.locator("#reg-btn").is_disabled(), "")
+    page.fill("#reg-packer", "PACKER_A")
+    page.press("#reg-packer", "Enter")
+    page.wait_for_timeout(300)
+    ok("R8Z 업체 고름 = 営業所 고르기 (마스터 그대로) · 버튼 켜짐", page.locator("#reg-plant option").count() == 3 and not page.locator("#reg-btn").is_disabled(), "")
+    page.select_option("#reg-plant", "市川")
+    ids0 = {x.get("action_id") for x in actions(root)}
+    dl = []
+
+    def acc(d):
+        dl.append(d.message)
+        d.accept()
+    page.on("dialog", acc)
+    page.click("#reg-btn")
+    page.wait_for_timeout(600)
+    new = [x for x in actions(root) if x.get("action_id") and x["action_id"] not in ids0]
+    ok("R8Z 저장 = register_sender (주소 · 업체 · 営業所 · queue_id · 확인창 1)", len(new) == 1 and new[0]["action"] == "register_sender"
+       and new[0]["value"] == {"address": "sender.x@example.invalid", "packer": "PACKER_A", "plant": "市川"} and new[0]["queue_id"] == hq["queue_id"]
+       and len(dl) == 1, [new, dl])
+    page.evaluate("q => { C01.state.qkind = 'done'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_timeout(300)
+    ok("R8Z 등록 뒤 = 「業者を登録しました」 · 元に戻す", "業者を登録しました" in page.locator("#c01-main").inner_text() and page.locator("#q-undo").count() == 1, "")
+    page.screenshot(path=str(shots / "r8z_register_sender.png"))
+    page.click("#q-undo")
+    page.wait_for_timeout(400)
+    un = [x for x in actions(root) if x.get("action_id") and x["action_id"] not in ids0 and x.get("action") == "undo"]
+    ok("R8Z 元に戻す = undo (value.action_id = register_sender)", len(un) == 1 and un[0]["value"]["action_id"] == new[0]["action_id"], un)
+    page.remove_listener("dialog", acc)
+    page.evaluate("q => { C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hp["queue_id"])
+    page.wait_for_timeout(300)
+    ok("R8Z 파일 0 카드 = 「ファイル準備中」 · 그래도 業者登録", page.locator("#q-filespending").count() == 1 and page.locator("#reg-packer").count() == 1, "")
+    page.evaluate("C01.RULES.registerSender = false; C01.app.render()")
+    page.wait_for_timeout(200)
+    ok("R8Z RULES.registerSender 끔 = 業者登録 없음", page.locator("#q-regsender").count() == 0, "")
+    page.evaluate("C01.RULES.registerSender = true")
+    qp.write_text(qt0, encoding="utf-8")
+    pp.unlink()
+    page.evaluate("() => { C01.state.view = 'main'; C01.state.qsel = null; C01.app.tick(); }")
+    page.wait_for_timeout(500)
+
+
 def r8g_checks(page, root, shots):
     """v0.3.29 (R8G Part A ④ · #234): 業者・IV未定 = 엔진 fax_read.pages (쪽 각도 · 읽은 값) 표 + 파일 rotation 으로 바로 세움 (向き補正 180°) · fax_read 없으면 표 없음."""
     qp = root / "_data" / "queue.json"
@@ -1538,11 +1711,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.32", page.title() == "LEENAI C-01 搬入票 v0.3.32", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.35", page.title() == "LEENAI C-01 搬入票 v0.3.35", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.32" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.35" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2051,6 +2224,9 @@ def main():
             r8f_checks(page, root, shots)
             r8g_checks(page, root, shots)
             r8w_checks(page, root, shots)
+            r8z_checks(page, root, shots)
+            r9d_wd_checks(page, root, shots, a.engine)
+            r9d_remind_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

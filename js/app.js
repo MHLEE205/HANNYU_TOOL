@@ -155,13 +155,20 @@ window.C01 = window.C01 || {};
      読んだ作業日 (work_date_read) が違う時はカードに小さく 「読取: MM/DD」 だけ (警告の色なし · 枚数に入らない)。人の値の作業日がある行は今まで通り */
   function wdSrc(r, human) { return !human && r && r.work_date_src === 'slot_plan' ? 'slot_plan' : ''; }
   function wdReadDiff(r, human) { return wdSrc(r, human) && r.work_date_read && r.work_date_read !== r.work_date ? r.work_date_read : ''; }
-  function wdCell(v, plan, doubt, src) {
-    if (v && src === 'slot_plan') return '<td>' + esc(md(v)) + ' <small class="c01-wdsrc" title="' + esc('COMPASS 枠の予定作業日（枠を合わせるための日付 · 入力・判定には使いません）') + '">予定</small></td>';
+  /* v0.3.35 (R9D Part B · 決定 #262 · #153 回帰の修正): slot_plan の予定日も 搬入票がまだ無い行 (受信中 · 書類なし = wait) で 今日以前なら 太字の赤 (旧 実況表と同じ) ·
+     搬入票がある行 (自動OK · 再確認 など) は 灰色 「予定」 のまま。WD_SRC_KNOWN = エンジン data_json の work_date_src の値 (エンジン側と同じ一覧を試験で比べる) */
+  var WD_SRC_KNOWN = ['slot_plan'];
+  C01.WD_SRC_KNOWN = WD_SRC_KNOWN;
+  function wdPast(d) { var today = (S.info && S.info.today) || jstNow().slice(0, 10); return String(d).slice(0, 10) <= today; }
+  function wdCell(v, plan, doubt, src, wait) {
+    if (v && src === 'slot_plan') {
+      var red = !!wait && wdPast(v);
+      return '<td><span class="c01-wdplan' + (red ? ' past' : '') + '" title="' + esc('COMPASS 枠の予定作業日（枠を合わせるための日付 · 入力・判定には使いません）' + (red ? ' · 予定日を過ぎています（搬入票まだ）' : '')) + '">' + esc(md(v)) + '</span> <small class="c01-wdsrc" title="' + esc('COMPASS 枠の予定作業日（枠を合わせるための日付 · 入力・判定には使いません）') + '">予定</small></td>';
+    }
     if (v && doubt) return '<td><span class="c01-wddoubt" title="' + esc('作業日が読み違いの可能性があります（枠は作業日なしで決まっています · 入力・判定には使いません） · ' + doubt) + '">' + esc(md(v)) + '?</span></td>';
     if (v) return '<td>' + esc(md(v)) + '</td>';
     if (!plan) return '<td></td>';
-    var today = (S.info && S.info.today) || jstNow().slice(0, 10);
-    var past = String(plan).slice(0, 10) <= today;
+    var past = wdPast(plan);
     return '<td><span class="c01-wdplan' + (past ? ' past' : '') + '" title="' + esc('COMPASS の予定日（表示のみ · 入力・判定には使いません）' + (past ? ' · 予定日を過ぎています' : '')) + '">' + esc(md(plan)) + '</span></td>';
   }
   function $(id) { return document.getElementById(id); }
@@ -927,7 +934,7 @@ window.C01 = window.C01 || {};
         html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over ? ' over' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
-          '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r), wdSrc(r, x.human.work_date)) +
+          '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r), wdSrc(r, x.human.work_date), x.st === '受信中' && r.has_docs === false) +
           cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
           (photoAlert(photos, rowVal(iv, r, 'packer').v) ? ' class="c-ph c01-ph-alert" title="' + esc(photoAlertText(photos, rowVal(iv, r, 'packer').v)) + '"' : ' class="c-ph"') + '>' +
           (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '" title="新しいタブで写真を表示 (Shift+クリック = この画面で表示)">📷 ' + photos + '枚</button>' : '0枚') +
@@ -1544,7 +1551,7 @@ window.C01 = window.C01 || {};
     if (!ds.length) html += '<p class="c01-note2">催促の対象はありません</p>';
     ds.forEach(function (d, i) {
       html += '<section class="c01-rmd" data-rmd="' + i + '"><div class="c01-rmeta">' +
-        '<div><span class="k">宛先</span><span class="mono">' + esc((d.to || []).join(', ') || '（送信先未登録）') + '</span></div>' +
+        '<div><span class="k">宛先</span><span class="mono">' + esc((d.to || []).join(', ') || (remindNoTo(d) ? '（宛先なし — 担当者が確認）' : '（送信先未登録）')) + '</span></div>' +
         '<div><span class="k">CC</span><span class="mono">' + esc((d.cc || []).join(', ')) + '</span></div>' +
         /* v0.3.26 (R8B Part E-1 · 決定 #216): 受け取ったことのないアドレス = 別の行 · 担当者が確認してチェックしないと宛先に入らない */
         (remindUnrec(d).length ? '<div class="c01-runrec"><span class="k">未受信</span><span class="mono">' + esc(remindUnrec(d).join(', ')) +
@@ -1578,7 +1585,7 @@ window.C01 = window.C01 || {};
       var skip = md.querySelector('[data-rskip="' + i + '"]'), un = md.querySelector('[data-runrec="' + i + '"]');
       var needUn = remindUnrec(d).length > 0 && !(d.to || []).length && !(un && un.checked);
       var ready = !d.ready_at || jstNow() >= d.ready_at;
-      b.disabled = (skip && skip.checked) || !remindCanSend() || !ready || needUn;
+      b.disabled = (skip && skip.checked) || !remindCanSend() || !ready || needUn || remindNoTo(d);
       var w = md.querySelector('[data-rwhy="' + i + '"]');
       if (w && remindCanSend() && ready) w.textContent = needUn ? '未受信アドレスを確認してチェックすると送信できます' : '';
     }
@@ -1596,6 +1603,8 @@ window.C01 = window.C01 || {};
   }
   function remindCanSend() { return remindTest() && graphMode() && !!(S.me && S.me.email); }
   function remindUnrec(d) { return [].concat((d && d.to_unreceived) || [], (d && d.cc_unreceived) || []); }
+  /* v0.3.35 (R9D Part C · 決定 #263): 催促の宛先 = 元請 packer の会社アドレスだけ。元請のアドレスが 0 = エンジン no_recipient → 「宛先なし — 担当者が確認」 · 送信ボタンは押せない (no_recipient の無い 「送信先未登録」 は今まで通り) */
+  function remindNoTo(d) { return !!(d && d.no_recipient); }
   function remindSent(iv, d) {
     var xs = ((iv && iv.reminders) || []).map(function (x) { return x.value || {}; });
     (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'reminder_sent' && a.iv === d.iv_no) xs.push(a.value || {}); });
@@ -1610,15 +1619,17 @@ window.C01 = window.C01 || {};
     var un = remindUnrec(d).length > 0;
     var needUn = un && !(d.to || []).length;           /* 宛先が未受信アドレスだけ = 確認のチェックが必要 */
     if (!why && needUn) why = '未受信アドレスを確認してチェックすると送信できます';
+    var noTo = remindNoTo(d);
+    if (!sent && noTo) why = '宛先なし — 担当者が確認';          /* 宛先なし = 他の理由より先に出す */
     return '<div class="c01-rsendrow"><label class="t2"><input type="checkbox" data-rskip="' + i + '"' + (sent ? ' disabled' : '') + '> この業者には送らない</label>' +
       (un ? '<label class="t2 c01-runrec-ok"><input type="checkbox" data-runrec="' + i + '"' + (sent ? ' disabled' : '') + '> 未受信アドレスを確認した（宛先に入れる）</label>' : '') +
       '<span class="c01-flex"></span><span class="t2" data-rwhy="' + i + '">' + esc(why) + '</span>' +
-      '<button class="c01-btn-pri" data-rsend="' + i + '"' + (sent ? ' data-done disabled' : (!ready || !remindCanSend() || needUn ? ' disabled' : '')) + '>送信（試験）</button></div>';
+      '<button class="c01-btn-pri" data-rsend="' + i + '"' + (sent ? ' data-done disabled' : (!ready || !remindCanSend() || needUn || noTo ? ' disabled' : '')) + '>送信（試験）</button></div>';
   }
   function sendRemindTest(ivNo, d, btn, unOk) {
     var m = remindMode();
     var iv = ivById(ivNo);
-    if (!remindCanSend() || !d || remindSent(iv, d)) return;
+    if (!remindCanSend() || !d || remindSent(iv, d) || remindNoTo(d)) return;
     var nUn = remindUnrec(d).length;
     if (nUn && !(d.to || []).length && !unOk) return;          /* 未受信アドレスだけの宛先 = 確認のチェックなしでは送らない (#216) */
     var subj = '[test] ' + (d.reply_to ? 'RE: ' : '') + d.subject;
@@ -1723,6 +1734,7 @@ window.C01 = window.C01 || {};
       '<li>タブの数字 = 残りの枚数（コンテナ 1 台 = 1 枚）。原本を見て正しい値を選び 「確認して次へ」。</li>' +
       '<li>どの値も違う時は <b>「✎ 修正」</b> で入力 — 人が入れた値が優先されます。</li>' +
       '<li>搬入票でない書類は <b>「搬入票ではない」</b>（ファイルは消えません）。</li>' +
+      '<li><span class="c01-trial" data-regsender-help>業者登録</span> 「業者・IV未定」 の送信元が未登録の時は <b>「業者登録」</b> で業者（・営業所）を選ぶと、約 1 分で その送信元のメールを分類し直します（間違えた時は 「元に戻す」）。</li>' +
       '<li>間違えた時は <b>「元に戻す」</b>。わからない時は 「スキップ（あとで）」。</li></ul></section>' +
       '<section><h4>4. 更新・困った時</h4><ul>' +
       '<li>データは 30 秒ごとに自動で更新されます。TOOL が新しくなった時は <b>Ctrl+Shift+R</b> で読み直してください。</li>' +
@@ -2345,7 +2357,7 @@ window.C01 = window.C01 || {};
       html += ACT_MARK + '<div class="c01-form-b">';
       if (st.done) html += '<p class="' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? 'c01-lost' : 'c01-okmsg') + '">' + (st.mineLost || (st.by && S.me && st.by !== S.me.email) ? '他の人が先に確認しました' :
         (st.act === 'not_hannyuhyo' || st.act === 'not_ours' ? '「搬入票ではない」にしました' : st.act === 'merge_same' ? '同じコンテナとして合わせました（次の判定で反映）' :
-          st.act === 'not_same' ? '別のコンテナにしました' : st.act === 'other_ct' ? '「他社のコンテナ」にしました（次の判定で反映）' : st.act === 'link_iv' ? 'IV に連結しました（次の判定で反映 · 10 分ほど）' : '完了しました')) + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
+          st.act === 'not_same' ? '別のコンテナにしました' : st.act === 'other_ct' ? '「他社のコンテナ」にしました（次の判定で反映）' : st.act === 'link_iv' ? 'IV に連結しました（次の判定で反映 · 10 分ほど）' : st.act === 'register_sender' ? '業者を登録しました（1 分ほどで分類し直します）' : '完了しました')) + (st.by ? '（' + esc(st.by) + '）' : '') + '</p>';
       html += '<p class="c01-qnote k-' + KC.key + '">' + esc(noteOf(q, vItems.length)) + '</p>';
       if (q.container_id) { var ocx = rowByCid(q.container_id); if (ocx && ocx.r) html += otherCandNote(ocx.r); }    /* v0.3.27 (R8C Part F ③) */
       var msg = S.qmsg[q.queue_id];
@@ -2420,8 +2432,10 @@ window.C01 = window.C01 || {};
       } else if (q.kind === HOLD) {
         html += '<div class="c01-hold"><div><span class="k">保留の理由</span> ' + esc(String(q.hold_code || q.note || '').split(',').map(function (c) { return HOLD_TEXT[c] || c; }).join(' · ')) + '</div>' +
           '<div><span class="k">候補の IV</span> <span class="mono">' + esc((q.candidates || []).join(' / ') || '—') + '</span></div>' + holdReadTable(q) +
+          holdMailInfo(q) +
           (linkIvOn() && !st.done ? linkIvForm(q) :
-            linkIvOn() ? '' : '<p class="c01-note2">IV への連結はエンジン側の次の版で入ります。今は 原本を確認して、搬入票でなければ「搬入票ではない」、あとで見るなら「スキップ」。</p>') + '</div>';
+            linkIvOn() ? '' : '<p class="c01-note2">IV への連結はエンジン側の次の版で入ります。今は 原本を確認して、搬入票でなければ「搬入票ではない」、あとで見るなら「スキップ」。</p>') +
+          (regSenderOn() && !st.done ? regSenderForm(q) : '') + '</div>';
       }
       if (askOn() && q.kind !== '写真のCT') html += askBlock(q);          /* v0.3.25 (R7Z Part A · #210): 選択肢の一番下 · 普段は閉じている */
       html += '</div>';
@@ -2430,7 +2444,7 @@ window.C01 = window.C01 || {};
       var ready = readyOf(q);
       /* v0.3.27 (R8C Part F · #226): 「搬入票ではない」 = 書類ファイルのある全てのカード (値の確認 · 写真不足 なども) */
       var canNot = !st.done && (q.kind === '未分類FAX' || (curF && curF.sha16) || (q.files || []).some(function (x) { return x.sha16; }));
-      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv' || st.act === 'other_ct') && st.aid;
+      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv' || st.act === 'other_ct' || st.act === 'register_sender') && st.aid;
       if (q.kind === FOREIGN) canNot = false;              /* v0.3.20: 他社搬入票候補 = 「他社の書類」 · 「当社の書類」 の 2 つだけ */
       var krow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
       var canOther = otherCtOn() && !st.done && krow && q.kind !== SAME;    /* v0.3.27 (R8C Part F): 他社のコンテナ = 行のある全てのカード */
@@ -2526,6 +2540,7 @@ window.C01 = window.C01 || {};
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
     if (askOn()) askBind(q);
     if (q.kind === HOLD || faxLinkOn(q)) bindLinkIv(q);           /* v0.3.23 (R7W Part D) · v0.3.28 (R8D Part A): 未分類 FAX も */
+    if (q.kind === HOLD && regSenderOn()) bindRegSender(q);       /* v0.3.33 (R8Z Part B · #258): 業者登録 */
     var erow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
     if (erow && (VALUE_KINDS[q.kind] || q.kind === VCHK)) bindEdits(root, iv, erow);
   }
@@ -2770,6 +2785,65 @@ window.C01 = window.C01 || {};
     var m = {};
     (iv.rows || []).forEach(function (r) { if (r.slot_guid) m[r.slot_guid] = r; });
     return m;
+  }
+  /* v0.3.33 (R8Z Part A · #258): 業者・IV 未定 = メールの件名 · 送信元 · 添付 · ファイル準備中 · 他 n 枚 · ZIP の中身 (エンジン out_hold_card_all) */
+  function holdMailInfo(q) {
+    var mi = q.mail_info || {};
+    var h = '';
+    if (mi.subject || mi.from) h += '<div class="c01-holdmail" id="q-holdmail"><div><span class="k">件名</span> ' + esc(mi.subject || '—') + '</div>' +
+      '<div><span class="k">送信元</span> <span class="mono">' + esc(mi.from || '—') + '</span></div>' +
+      ((mi.attach || []).length ? '<div><span class="k">添付</span> ' + esc(mi.attach.slice(0, 8).join(' · ') + (mi.attach.length > 8 ? ' …' : '')) + '</div>' : '') + '</div>';
+    if (q.files_pending) h += '<p class="c01-warn2" id="q-filespending">ファイル準備中 — エンジンが次の出力でファイルを置きます（件名 · 添付名で判断できる時は そのまま連結 · 登録できます）</p>';
+    if (q.more_files) h += '<p class="c01-note2" id="q-morefiles">ほか ' + (+q.more_files) + ' 枚（全部で ' + (+q.files_total || 0) + '）— 連結 · 登録すると 全部を読みます</p>';
+    if (q.zip_entries_n) h += '<details class="c01-zipents" id="q-zipents"><summary>ZIP の中身 ' + (+q.zip_entries_n) + ' 件（まだ読んでいません · 見るだけ）</summary><ul>' +
+      (q.zip_entries || []).map(function (e) { return '<li>' + esc(e.name || '') + ' <span class="t2">' + esc(e.kind || '') + '</span></li>'; }).join('') + '</ul>' +
+      (q.zip_note ? '<p class="c01-note2">' + esc(q.zip_note) + '</p>' : '') + '</details>';
+    return h;
+  }
+  /* v0.3.33 (R8Z Part B · #258 補足): 「業者登録」 — この送信元アドレスを業者 (· 営業所) として登録 → エンジンが 1 分ほどで このアドレスの保留メールを分類し直す
+     (次から自動) · アドレス 1 つだけ (ドメインごとはしない) · 元に戻す。エンジン actions_register_sender が on の時だけ (RULES.registerSender) */
+  function regSenderOn() { return !!(C01.RULES || {}).registerSender; }
+  function regPackers() { return ((S.packers && S.packers.packers) || []); }
+  function regSenderForm(q) {
+    var from = (q.mail_info || {}).from;
+    if (!from) return '';
+    var v = S.qvals[q.queue_id] || {};
+    var pk = regPackers().filter(function (p) { return p.code === v.regPacker; })[0];
+    var h = '<div class="c01-regsender" id="q-regsender"><div class="k">業者登録</div>' +
+      '<p class="t2">送信元 <span class="mono">' + esc(from) + '</span> をこの業者として登録します（このアドレスだけ · 次から自動で分類）</p>';
+    if (!regPackers().length) return h + '<p class="c01-note2">業者の一覧がまだありません（エンジンの次の出力で出ます）</p></div>';
+    h += '<label class="c01-direct">業者<input id="reg-packer" type="text" list="reg-packer-list" placeholder="業者コード · 名前で検索" value="' + esc(v.regPacker || '') + '" autocomplete="off"></label>' +
+      '<datalist id="reg-packer-list">' + regPackers().map(function (p) { return '<option value="' + esc(p.code) + '">' + esc(p.name || '') + '</option>'; }).join('') + '</datalist>';
+    if (v.regPacker && !pk) h += '<p class="c01-err">この業者はマスターにありません（一覧から選んでください）</p>';
+    if (pk) {
+      h += '<label class="c01-direct">営業所<select id="reg-plant"><option value="">（指定しない）</option>' +
+        (pk.plants || []).map(function (x) { return '<option value="' + esc(x) + '"' + (v.regPlant === x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></label>';
+    }
+    return h + '<button class="c01-btn-sub" id="reg-btn"' + (pk ? '' : ' disabled') + '>業者登録</button>' +
+      '<p class="c01-note2">1 分ほどで このアドレスの保留メールを分類し直します（ZIP もこの時に開きます）。「IVに連結」 と一緒に使えます。元に戻せます。</p></div>';
+  }
+  function bindRegSender(q) {
+    var inp = $('reg-packer');
+    if (!inp) return;
+    var v = function () { return S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {}); };
+    var setPk = function (t) { var x = v(); t = String(t || '').trim(); if (x.regPacker === t) return; x.regPacker = t; x.regPlant = null; setTimeout(render, 0); };
+    inp.onchange = function () { setPk(inp.value); };
+    inp.onkeydown = function (e) { if (e.key === 'Enter') setPk(inp.value); };
+    var sel = $('reg-plant');
+    if (sel) sel.onchange = function () { v().regPlant = sel.value || null; };
+    var b = $('reg-btn');
+    if (b) b.onclick = function () { regSenderAction(q); };
+  }
+  function regSenderAction(q) {
+    if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
+    var v = S.qvals[q.queue_id] || {};
+    var pk = regPackers().filter(function (p) { return p.code === v.regPacker; })[0];
+    var from = (q.mail_info || {}).from;
+    if (!pk || !from) { S.qmsg[q.queue_id] = '業者を一覧から選んでください'; render(); return; }
+    if (!window.confirm(from + ' を ' + pk.code + (v.regPlant ? ' · ' + v.regPlant : '') + ' として登録します。よろしいですか？')) return;
+    var a = mkAction('register_sender', { iv: null, ct: null, field: null, source: null, queue_id: q.queue_id,
+      value: { address: from, packer: pk.code, plant: v.regPlant || null } });
+    writeAction(a).then(function () { toast('業者を登録しました（1 分ほどで分類し直します）', 'success'); S.qsel = nextQueueId(q); render(); });
   }
   function linkIvForm(q) {
     var v = S.qvals[q.queue_id] || {};
@@ -3059,13 +3133,16 @@ window.C01 = window.C01 || {};
       S.src.getJson('remind.json').catch(function () { return null; }), S.src.getJson('meta.json').catch(function () { return null; })]).then(function (r) {
       S.jik = r[0]; S.queue = r[1]; S.remind = r[2]; S.meta = r[3]; S.lastLoad = new Date();
       var seen = {};
-      return Promise.all(((S.jik && S.jik.ivs) || []).map(function (iv) {
+      /* v0.3.33 (R8Z Part B): 業者登録 の一覧 = エンジン packers.json — 送信元のある 業者・IV 未定 カードがある時だけ読む (無いエンジンに 404 を出さない) */
+      var needPk = regSenderOn() && ((S.queue && S.queue.items) || []).some(function (q) { return q.kind === HOLD && q.mail_info && q.mail_info.from; });
+      var pkP = needPk ? S.src.getJson('packers.json').then(function (x) { S.packers = x; }).catch(function () { S.packers = null; }) : null;
+      return Promise.all([pkP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
         if (seen[iv.iv_no]) return null;
         seen[iv.iv_no] = 1;
         var sig = iv.photos_sig;
         if (sig && S.photos[iv.iv_no] && !S.photos[iv.iv_no]._failed && S.photoSig[iv.iv_no] === sig) return null;   /* 指紋が同じ = 読まない */
         return loadPhotos(iv.iv_no, sig || undefined);
-      }));
+      })));
     });
   }
   C01.photoStat = function () { return S.photoStat; };
