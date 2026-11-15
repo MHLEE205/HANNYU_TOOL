@@ -742,6 +742,48 @@ def r9d_remind_checks(page, root, shots):
     page.wait_for_timeout(300)
 
 
+def r9e_ccfixed_checks(page, root, shots, engine):
+    """v0.3.36 (R9E Part B · #264): 엔진 cc_fixed = CC 고정 → 🔒 표시 · 삭제 버튼 0 · 고정 아닌 CC = 글자 그대로 · cc_fixed 없는 초안 = 지금 그대로.
+    받는 쪽 대조: 엔진 (--engine) engine/notify/remind.py 가 내는 키 이름 = 'cc_fixed' (TOOL 이 읽는 키)."""
+    src = Path(engine) / "engine" / "notify" / "remind.py"
+    if src.is_file():
+        es = src.read_text(encoding="utf-8")
+        ok("R9E 받는 쪽 대조: 엔진 초안 키 cc_fixed (t[\"cc_fixed\"]) = TOOL 이 읽는 키", 't["cc_fixed"]' in es and "d.cc_fixed" in (TOOL / "js" / "app.js").read_text(encoding="utf-8"))
+    rp = root / "_data" / "remind.json"
+    rt0 = rp.read_text(encoding="utf-8")
+    r2 = json.loads(rt0)
+    ds = r2["ivs"]["TST2611-02"]
+    fx = ["desk@example.invalid", "photo.desk@example.invalid"]
+    d0 = ds[0]
+    d0["cc"] = fx + ["vendor.cc@example.invalid"]
+    d0["cc_fixed"] = list(fx)
+    d1 = json.loads(json.dumps(d0))                                          # 시험 자료 = 초안 1개 → cc_fixed 없는 초안 (옛 엔진 모양) 1개 더
+    d1.pop("cc_fixed", None)
+    d1["packer"], d1["cc"], d1["round"] = "PACKER_Z", ["other.cc@example.invalid"], 7
+    ds[1:] = [d1]
+    rp.write_text(json.dumps(r2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(500)
+    page.click("tbody[data-iv='TST2611-02'] [data-remind]")
+    page.wait_for_selector(".c01-rmd")
+    sec = page.locator(".c01-rmd[data-rmd='0']")
+    locks = sec.locator("[data-ccfixed]")
+    ok("R9E CC 고정 2개 = 🔒 표시 · 주소 순서 그대로", locks.count() == 2 and [t.replace("🔒", "").strip() for t in locks.all_inner_texts()] == fx, locks.all_inner_texts())
+    ok("R9E 고정 아닌 CC = 🔒 없음 · 글자 그대로", "vendor.cc@example.invalid" in sec.inner_text() and "🔒 vendor" not in sec.inner_text())
+    ok("R9E 「固定 CC — 削除できません」 한 줄 · CC 삭제 버튼 0", "固定 CC — 削除できません" in sec.inner_text()
+       and page.locator(".c01-rmd button", has_text="削除").count() == 0)
+    s1 = page.locator(".c01-rmd[data-rmd='1']")
+    ok("R9E cc_fixed 없는 초안 = 지금 그대로 (🔒 0 · 안내 0)", s1.count() == 1 and s1.locator("[data-ccfixed]").count() == 0 and "固定 CC" not in s1.inner_text()
+       and "other.cc@example.invalid" in s1.inner_text())
+    page.screenshot(path=str(shots / "r9e_remind_ccfixed.png"))
+    page.click("[data-close]")
+    rp.write_text(rt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r7u_checks(page, root, shots):
     """v0.3.20 (R7U): F-1 管理者 = 全港 (#201) · A-3 CT重複 / シール重複 · 再判読 표시 · A-4 手入力 CT 경고."""
     jp = root / "_data" / "jikkyou.json"
@@ -1613,9 +1655,11 @@ def r7z_checks(page, root, shots):
     page.wait_for_timeout(300)
     page.locator(f"[data-q='{qid}']").first.click()
     page.wait_for_timeout(400)
-    box = page.locator("#ask-box")
-    ok("R7Z 「その他（AIに相談）」 欄 있음 · 처음엔 닫힘 · 試験表示", box.count() == 1 and not box.evaluate("e => e.open") and "試験表示" in box.locator("summary").inner_text())
-    box.locator("summary").click()
+    foot = page.locator("#ask-foot")
+    ok("R7Z 「その他（AIに相談）」 欄 있음 · 처음엔 닫힘 (드로어 0) · 試験表示 (v0.3.36: 링크)", foot.count() == 1 and page.locator("#ask-box").count() == 0
+       and "試験表示" in foot.inner_text() and "その他（AIに相談）" in foot.inner_text())
+    page.click("#q-ask")
+    page.wait_for_timeout(300)
     page.locator("[data-askq='0']").click()
     page.wait_for_timeout(500)
     files = sorted((root / "_actions" / "ask").rglob("*.json"))
@@ -1645,7 +1689,9 @@ def r7z_checks(page, root, shots):
     ok("R7Z 값 버튼 = 값 칸만 채움 (확인은 담당자 · _actions 새 파일 0)", page.locator(f".c01-field[data-vq='{qid}'] input").first.input_value() == target
        and not [x for x in actions(root) if x.get("queue_id") == vq], target)
     page.screenshot(path=str(shots / "r7z_ask.png"), full_page=False)
-    page.locator("#ask-box summary").click() if not page.locator("#ask-box").evaluate("e => e.open") else None
+    if page.locator("#ask-box").count() == 0:
+        page.click("#q-ask")
+        page.wait_for_timeout(300)
     page.fill("#ask-in", "이 값이 맞나요?")
     page.press("#ask-in", "Enter")
     page.wait_for_timeout(500)
@@ -1653,6 +1699,102 @@ def r7z_checks(page, root, shots):
     k = json.loads(files[-1].read_text(encoding="utf-8")) if files else {}
     ok("R7Z 한국어 질문 · Enter = 보냄 · lang ko · 같은 카드 key", len(files) == 2 and k.get("lang") == "ko" and (k.get("card") or {}).get("key") == card.get("key"), k.get("lang"))
     ok("R7Z 같은 카드 대화 2건 표시", page.locator(".c01-ask-q").count() == 2)
+
+
+def r9f_ask_checks(page, root, shots):
+    """v0.3.36 (R9F · #267): 「AIに相談」 버튼 = 카드 패널 맨 위 버튼 줄 1개 · 오른쪽 옆 드로어 (막 없음 · 원본/카드 안 가림) · ✕ · Esc ·
+    카드 바꾸면 그 카드 기록 · 아래 링크 = 같은 드로어 · 질문 입력 칸 1개 · 「調べた内容」 줄바꿈 + HTML 이스케이프 · askOn 거짓 = 버튼 없음.
+    r7z_checks 바로 뒤 (같은 카드 · 질문 2건) 에서 부른다."""
+    qid = "z" * 15 + "7"
+    page.set_viewport_size({"width": 1880, "height": 1000})
+    page.wait_for_timeout(200)
+    if page.locator("#ask-box").count() == 0:
+        page.click("#q-ask")
+        page.wait_for_timeout(300)
+    btn = page.locator("#q-ask")
+    top_row = page.evaluate("""() => { const b = document.querySelectorAll('#q-ask'); if (b.length !== 1) return 'n=' + b.length;
+        const row = b[0].closest('.c01-form-a .row'); return !!row && !!row.querySelector('#q-skip') && b[0].classList.contains('c01-btn-ghost2') && b[0].textContent === 'AIに相談'; }""")
+    ok("R9F 「AIに相談」 버튼 = 카드 패널 맨 위 버튼 줄 (スキップ 옆) 1개 · 같은 class", top_row is True, top_row)
+    bb = btn.bounding_box()
+    ok("R9F 버튼 = 창 안 (1880×1000 · 스크롤 없이)", bb["y"] + bb["height"] <= 1000, bb)
+    n_in = page.evaluate("() => [document.querySelectorAll('#ask-in').length, document.querySelectorAll('#c01-main textarea').length, document.querySelectorAll('[aria-label=\"AI への質問\"]').length]")
+    ok("R9F 질문 입력 칸 = 1개 (드로어 안 · textarea 0 · 아래쪽 입력 0)", n_in == [1, 0, 1] and page.locator("#ask-foot input").count() == 0
+       and page.locator("#ask-box #ask-in").count() == 1, n_in)
+    geo = page.evaluate("""() => { const r = s => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().toJSON() : null; };
+        return { dr: r('#ask-box'), orig: r('.c01-orig'), form: r('.c01-form'), ov: [...document.querySelectorAll('.c01-overlay')].filter(e => e.offsetParent).length }; }""")
+
+    def hit(a, b):
+        return bool(a and b and not (a["right"] <= b["left"] or b["right"] <= a["left"] or a["bottom"] <= b["top"] or b["bottom"] <= a["top"]))
+    ok("R9F 드로어 = 오른쪽 옆 · 원본 · 카드 패널을 가리지 않음 · 막 0", bool(geo["dr"]) and not hit(geo["dr"], geo["orig"]) and not hit(geo["dr"], geo["form"])
+       and geo["dr"]["left"] >= geo["form"]["right"] - 1 and geo["ov"] == 0, geo)
+    zl = page.locator(".c01-orig-h .z")
+    z0 = zl.inner_text() if zl.count() else None
+    if page.locator("#z-in").count():
+        page.click("#z-in")
+        page.wait_for_timeout(200)
+    ok("R9F 드로어 연 채 원본 조작 (확대) 가능 · 드로어 그대로", page.locator("#ask-box").count() == 1 and (z0 is None or zl.inner_text() != z0),
+       [z0, zl.inner_text() if zl.count() else None])
+    page.click("#ask-close")
+    page.wait_for_timeout(200)
+    ok("R9F ✕ = 닫힘", page.locator("#ask-box").count() == 0 and page.locator("#q-ask").get_attribute("aria-expanded") == "false")
+    page.click("#q-ask")
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    ok("R9F Esc = 닫힘", page.locator("#ask-box").count() == 0)
+    page.click("#ask-link")
+    page.wait_for_timeout(200)
+    ok("R9F 아래 「その他（AIに相談）」 = 같은 드로어를 엶 (입력 칸 1개)", page.locator("#ask-box").count() == 1 and page.locator("#ask-in").count() == 1
+       and page.locator("#q-ask").get_attribute("aria-expanded") == "true")
+    ok("R9F 이 카드 기록 2건 (드로어)", page.locator("#ask-box .c01-ask-q").count() == 2)
+    other = page.evaluate("""qid => { const it = (C01.state.queue.items || []); const me = it.filter(x => x.queue_id === qid)[0];
+        const mine = document.querySelector('.c01-item[data-q="' + qid + '"]'); const mk = mine ? mine.getAttribute('data-card') : '';
+        for (const e of document.querySelectorAll('.c01-item[data-q]')) { const x = it.filter(y => y.queue_id === e.getAttribute('data-q'))[0];
+          if (x && x.kind !== '写真のCT' && e.getAttribute('data-card') !== mk) return e.getAttribute('data-q'); }
+        return null; }""", qid)
+    if other:
+        page.locator(f".c01-item[data-q='{other}']").first.click()
+        page.wait_for_timeout(300)
+        ok("R9F 카드 바꾸면 드로어 그대로 · 그 카드 기록 (0건)", page.locator("#ask-box").count() == 1 and page.locator("#ask-box .c01-ask-q").count() == 0, other)
+        page.locator(f".c01-item[data-q='{qid}']").first.click()
+        page.wait_for_timeout(300)
+        ok("R9F 돌아오면 원래 카드 기록 2건 다시 보임", page.locator("#ask-box .c01-ask-q").count() == 2)
+    else:
+        ok("R9F 다른 카드 있음 (시험 자료)", False, "other card none")
+    files = sorted((root / "_actions" / "ask").rglob("*.json"), key=lambda x: x.stat().st_mtime)
+    k = json.loads(files[-1].read_text(encoding="utf-8"))
+    ans = "写真の値が正しいと思われます。\n<b>太字</b> & 記号\n調べた内容: ブッキング検索 TST · IV 一覧 TST2611-02"
+    rep = {"ask_id": k["ask_id"], "status": "ok", "answer": ans, "kind": "value", "approval_request": "", "suggestions": [],
+           "tool_calls": 2, "looked": ["ブッキング検索 TST", "IV 一覧 TST2611-02"]}
+    (root / "_actions" / "ask_reply" / f"{k['ask_id']}.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("() => C01.app.render()")       # 값 칸이 저장 전 (r7z 값 버튼) = tick 은 미룸 · 답 대기 타이머와 같은 render
+    page.wait_for_timeout(300)
+    t = page.locator("#ask-box .c01-ask-txt").last
+    info = t.evaluate("e => ({ txt: e.innerText, html: e.innerHTML, b: e.querySelectorAll('b').length, ws: getComputedStyle(e).whiteSpace, h: e.getBoundingClientRect().height, lh: parseFloat(getComputedStyle(e).lineHeight) || 18 })")
+    ok("R9F 「調べた内容」 줄 = 줄바꿈 유지 (pre-wrap · 3줄 이상) · tool_calls · looked 있어도 깨지지 않음",
+       "\n調べた内容: ブッキング検索 TST · IV 一覧 TST2611-02" in info["txt"] and info["ws"] == "pre-wrap" and info["h"] >= 2.5 * info["lh"], info)
+    ok("R9F 답 글 HTML 이스케이프 (<b> 요소 0 · &lt;b&gt;)", info["b"] == 0 and "&lt;b&gt;" in info["html"] and "&amp;" in info["html"], info["html"][:120])
+    page.screenshot(path=str(shots / "r9f_ask_drawer.png"), full_page=False)
+    page.set_viewport_size({"width": 1366, "height": 768})
+    page.wait_for_timeout(300)
+    page.evaluate("window.scrollTo(0, 0)")
+    bb = page.locator("#q-ask").bounding_box()
+    ib = page.locator("#ask-in").bounding_box()
+    geo = page.evaluate("""() => { const r = s => document.querySelector(s).getBoundingClientRect().toJSON();
+        return { dr: r('#ask-box'), orig: r('.c01-orig'), form: r('.c01-form'), sw: document.documentElement.scrollWidth }; }""")
+    ok("R9F 1366×768 · 버튼 · 질문 칸 창 안 · 드로어가 원본 · 카드 안 가림 · 가로 스크롤 0", bb["y"] + bb["height"] <= 768 and ib["y"] + ib["height"] <= 768 and not hit(geo["dr"], geo["orig"])
+       and not hit(geo["dr"], geo["form"]) and geo["sw"] <= 1366, [bb, geo])
+    page.screenshot(path=str(shots / "r9f_ask_drawer_1366.png"), full_page=False)
+    page.evaluate("() => { C01.ASK._en = C01.ASK.enabled; C01.ASK.enabled = false; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    ok("R9F askOn 거짓 = 버튼 · 링크 · 드로어 없음", page.locator("#q-ask").count() == 0 and page.locator("#ask-link").count() == 0 and page.locator("#ask-box").count() == 0)
+    page.evaluate("() => { C01.ASK.enabled = C01.ASK._en; delete C01.ASK._en; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.wait_for_timeout(200)
 
 
 def main():
@@ -1711,11 +1853,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.35", page.title() == "LEENAI C-01 搬入票 v0.3.35", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.36", page.title() == "LEENAI C-01 搬入票 v0.3.36", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.35" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.36" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2218,6 +2360,7 @@ def main():
             r7x_checks(page, ctx, root, shots)
             compass_r7x_checks(page)
             r7z_checks(page, root, shots)
+            r9f_ask_checks(page, root, shots)
             r8b_checks(page, root, shots)
             r8c_checks(page, root, shots)
             r8d_checks(page, root, shots)
@@ -2227,6 +2370,7 @@ def main():
             r8z_checks(page, root, shots)
             r9d_wd_checks(page, root, shots, a.engine)
             r9d_remind_checks(page, root, shots)
+            r9e_ccfixed_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

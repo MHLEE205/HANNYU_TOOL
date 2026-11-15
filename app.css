@@ -247,6 +247,9 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-hold .k, .c01-qiv .t2 { color: var(--c-text-2, inherit); margin-right: 6px; }
 .c01-qiv { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
 .c01-rcand { border-left: 3px solid var(--c-photo, #c80); padding-left: 8px; }
+/* v0.3.36 (R9E · #264): 催促 CC 固定 = 鍵 · 削除不可 */
+.c01-ccfixed { font-weight: 600; white-space: nowrap; }
+.c01-ccfixed-note { margin-left: 6px; }
 .c01-bad { color: var(--c-diff, #c00); font-weight: 700; }
 .c01-chip-done { margin-left: auto; }
 .c01-holdlink { white-space: nowrap; }
@@ -413,3 +416,23 @@ button.st-wait.c01-candbtn { background: none; border: 1px dashed var(--warn, #c
 .c01-zipents ul { margin: 4px 0 0 16px; padding: 0; max-height: 160px; overflow: auto; }
 .c01-regsender { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); display: grid; gap: 6px; }
 .c01-regsender .k { font-weight: 700; }
+
+/* v0.3.36 (R9F · #267): 「AIに相談」 = 右パネル一番上の ボタン → 右横のドロアー (막 없음 · 原本 · カードは押したまま使える · 幅固定)
+   一番下 「その他（AIに相談）」 = 同じドロアーを開くリンク · 入力欄は ドロアーの 1 つだけ */
+.c01-form-a .row { flex-wrap: wrap; }
+.c01-askbtn.on { border-color: var(--text); color: var(--text); font-weight: 600; }
+.c01-asklink { background: none; border: none; padding: 2px 0; color: var(--text2); font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: underline; font-family: inherit; }
+.c01-input.c01-askon { flex-wrap: nowrap; }
+.c01-input.c01-askon .c01-orig { flex: 1 1 0; min-width: 240px; }
+.c01-askdr { flex: 0 0 360px; width: 360px; align-self: flex-start; position: sticky; top: calc(var(--c01-hdr-h, 52px) + 8px); height: calc(100vh - var(--c01-hdr-h, 52px) - 80px); min-height: 360px;   /* 一番上 (スクロール 0) でも 入力欄が 画面の中 */
+  display: flex; flex-direction: column; background: var(--read); color: var(--text); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-size: 13px; }
+.c01-askdr-h { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.c01-askdr-h > div { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.c01-askdr-h .c01-trialtag { align-self: flex-start; }
+.c01-askdr .c01-ask-log { flex: 1 1 auto; max-height: none; margin: 0; padding: 10px 12px; align-content: start; }
+.c01-askdr-f { padding: 8px 12px 12px; border-top: 1px solid var(--border); }
+.c01-askdr .c01-ask-in input { font-family: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--read); color: var(--text); }
+.c01-askdr .c01-ask-in .c01-btn-ghost2 { flex: 0 0 auto; }
+.c01-ask-txt { white-space: pre-wrap; word-break: break-word; }
+@media (max-width: 1500px) { .c01-askdr { flex-basis: 320px; width: 320px; } .c01-input.c01-askon .c01-list { flex-basis: 240px; min-width: 220px; } }
+@media (max-width: 1100px) { .c01-input.c01-askon { flex-wrap: wrap; } .c01-askdr { position: fixed; right: 0; top: var(--c01-hdr-h, 52px); z-index: 30; max-height: calc(100vh - var(--c01-hdr-h, 52px)); height: calc(100vh - var(--c01-hdr-h, 52px)); border-radius: 0; box-shadow: -8px 0 24px rgba(0, 0, 0, .2); } }

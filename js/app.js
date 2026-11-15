@@ -138,7 +138,8 @@ window.C01 = window.C01 || {};
     actions: [], mine: [], lastPoll: null, lastLoad: null,
     qkind: 'all', qiv: null, qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false, qfile: {},
     timer: null, remind: null, modal: null,
-    asks: [], askOpen: {}, askDraft: {}, askTimer: null     /* v0.3.25 (R7Z Part A): AI 相談 */
+    asks: [], askOpen: {}, askDraft: {}, askTimer: null,    /* v0.3.25 (R7Z Part A): AI 相談 */
+    askDr: false                                            /* v0.3.36 (R9F · #267): AIに相談 ドロアー (カードを替えても開いたまま · 中身 = 今のカード) */
   };
   C01.state = S;
 
@@ -1552,7 +1553,8 @@ window.C01 = window.C01 || {};
     ds.forEach(function (d, i) {
       html += '<section class="c01-rmd" data-rmd="' + i + '"><div class="c01-rmeta">' +
         '<div><span class="k">宛先</span><span class="mono">' + esc((d.to || []).join(', ') || (remindNoTo(d) ? '（宛先なし — 担当者が確認）' : '（送信先未登録）')) + '</span></div>' +
-        '<div><span class="k">CC</span><span class="mono">' + esc((d.cc || []).join(', ')) + '</span></div>' +
+        '<div><span class="k">CC</span><span class="mono">' + remindCcHtml(d) + '</span>' +
+        ((d.cc_fixed || []).length ? '<span class="t2 c01-ccfixed-note">（🔒 固定 CC — 削除できません）</span>' : '') + '</div>' +
         /* v0.3.26 (R8B Part E-1 · 決定 #216): 受け取ったことのないアドレス = 別の行 · 担当者が確認してチェックしないと宛先に入らない */
         (remindUnrec(d).length ? '<div class="c01-runrec"><span class="k">未受信</span><span class="mono">' + esc(remindUnrec(d).join(', ')) +
           '</span><span class="t2">（このアドレスからメールを受け取ったことがありません — 確認して送信）</span></div>' : '') +
@@ -1605,6 +1607,15 @@ window.C01 = window.C01 || {};
   function remindUnrec(d) { return [].concat((d && d.to_unreceived) || [], (d && d.cc_unreceived) || []); }
   /* v0.3.35 (R9D Part C · 決定 #263): 催促の宛先 = 元請 packer の会社アドレスだけ。元請のアドレスが 0 = エンジン no_recipient → 「宛先なし — 担当者が確認」 · 送信ボタンは押せない (no_recipient の無い 「送信先未登録」 は今まで通り) */
   function remindNoTo(d) { return !!(d && d.no_recipient); }
+  /* v0.3.36 (R9E Part B · 決定 #264): CC 固定 = エンジン cc_fixed (cc の先頭と同じアドレス) → 鍵の印 · 削除ボタンは無い (CC は表示だけ)。
+     cc_fixed が無い下書き (古いエンジン) = 今までどおり文字だけ */
+  function remindCcHtml(d) {
+    var fx = {};
+    ((d && d.cc_fixed) || []).forEach(function (a) { fx[String(a).toLowerCase()] = 1; });
+    return ((d && d.cc) || []).map(function (a) {
+      return fx[String(a).toLowerCase()] ? '<span class="c01-ccfixed" data-ccfixed title="固定 CC（削除できません）">🔒 ' + esc(a) + '</span>' : esc(a);
+    }).join(', ');
+  }
   function remindSent(iv, d) {
     var xs = ((iv && iv.reminders) || []).map(function (x) { return x.value || {}; });
     (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'reminder_sent' && a.iv === d.iv_no) xs.push(a.value || {}); });
@@ -2040,6 +2051,7 @@ window.C01 = window.C01 || {};
     $('lb-stage').onwheel = function (e) { e.preventDefault(); scale = Math.max(1, Math.min(4, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (img) img.style.transform = 'scale(' + scale + ')'; };
   }
   document.addEventListener('keydown', function (e) {
+    if (!S.lb && e.key === 'Escape' && S.askDr && S.view === 'input' && !S.qedit) { askToggle(false); return; }   /* v0.3.36 (R9F · #267): Esc = ドロアーを閉じる */
     if (!S.lb) return;
     if (e.key === 'ArrowLeft') { S.lb.idx -= 1; renderLightbox(); }
     if (e.key === 'ArrowRight') { S.lb.idx += 1; renderLightbox(); }
@@ -2217,7 +2229,8 @@ window.C01 = window.C01 || {};
     var q = all.filter(function (x) { return x.queue_id === S.qsel; })[0] || null;
     var card = q ? cardOf(cards, q.queue_id) : null;
     var iv = q && q.iv_no ? ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === q.iv_no; })[0] : null;
-    var html = '<div class="c01-input">';
+    var askDr = !!(q && askOn() && S.askDr && q.kind !== '写真のCT');      /* v0.3.36 (R9F · #267): AIに相談 ドロアー (右横 · 막 없음) */
+    var html = '<div class="c01-input' + (askDr ? ' c01-askon' : '') + '">';
     var kindKeys = Object.keys(KIND).filter(function (k) {
       if (k === FOREIGN) return all.some(function (y) { return y.kind === FOREIGN; });     /* v0.3.20: 他社搬入票候補 = ある時だけ */
       return (k !== PHOTO_SET && k !== HOLD && k !== SAME && k !== VCHK) || ((S.queue && S.queue.kinds) || []).indexOf(k) >= 0 || (k === SAME && all.some(function (y) { return y.kind === SAME; }));
@@ -2437,7 +2450,7 @@ window.C01 = window.C01 || {};
             linkIvOn() ? '' : '<p class="c01-note2">IV への連結はエンジン側の次の版で入ります。今は 原本を確認して、搬入票でなければ「搬入票ではない」、あとで見るなら「スキップ」。</p>') +
           (regSenderOn() && !st.done ? regSenderForm(q) : '') + '</div>';
       }
-      if (askOn() && q.kind !== '写真のCT') html += askBlock(q);          /* v0.3.25 (R7Z Part A · #210): 選択肢の一番下 · 普段は閉じている */
+      if (askOn() && q.kind !== '写真のCT') html += askLink(q);           /* v0.3.25 (R7Z Part A · #210) · v0.3.36 (R9F · #267): 一番下 = 同じドロアーを開くリンク (入力欄は ドロアーの 1 つだけ) */
       html += '</div>';
       html += '<div class="c01-form-f"><span class="c01-foot">確認した内容は実況表にすぐ反映 · 記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</span></div>';
       /* v0.3.7 (R7D Part U-3): 判断ボタン = 右パネルの一番上 · v0.3.11 (R7J Part B): 「搬入票ではない」 = 書類のある全種類 · 完了 = 「元に戻す」 */
@@ -2457,12 +2470,13 @@ window.C01 = window.C01 || {};
         (canNot ? '<button id="q-notours" class="c01-btn-ghost2 danger" title="この書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
         (canOther ? '<button id="q-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' : '') +
         (canUndo ? '<button id="q-undo" class="c01-btn-ghost2">元に戻す</button>' : '') +
-        (canKeep ? '<button id="q-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') + '</div></div>';
+        (canKeep ? '<button id="q-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') +
+        (askOn() && q.kind !== '写真のCT' ? '<button id="q-ask" class="c01-btn-ghost2 c01-askbtn' + (askDr ? ' on' : '') + '" aria-expanded="' + (askDr ? 'true' : 'false') + '" aria-controls="ask-box" title="このカードと開いている原本について AI に質問します（右横に開きます）">AIに相談</button>' : '') + '</div></div>';   /* v0.3.36 (R9F · #267) */
       html = html.replace(ACT_MARK, acts);
     } else {
       html += '<p class="c01-empty">作業はありません</p>';
     }
-    html += '</section></div><p class="c01-powered">✦ Powered by LEENAI Automation System</p>';
+    html += '</section>' + (askDr ? askDrawer(q) : '') + '</div><p class="c01-powered">✦ Powered by LEENAI Automation System</p>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった所だけ (原本 · 入力中の値 · 一覧のスクロールはそのまま) */
     hydrate($('c01-main'));
     var root = $('c01-main');
@@ -2539,6 +2553,8 @@ window.C01 = window.C01 || {};
     if (sph && q.same) sph.onclick = function (ev) { var ivx = ivById(q.iv_no); if (ivx) openPhotos(ev, rowKey(ivx, q.same.photo), 0); };
     $('q-submit').onclick = function () { if (queueState(q, overlay()).done && !(VALUE_KINDS[q.kind] && openValueItems(q).length)) { S.qsel = nextQueueId(q); render(); } else submitQueue(q); };
     if (askOn()) askBind(q);
+    if ($('q-ask')) $('q-ask').onclick = function () { askToggle(!S.askDr); };
+    if ($('ask-link')) $('ask-link').onclick = function () { askToggle(true); };
     if (q.kind === HOLD || faxLinkOn(q)) bindLinkIv(q);           /* v0.3.23 (R7W Part D) · v0.3.28 (R8D Part A): 未分類 FAX も */
     if (q.kind === HOLD && regSenderOn()) bindRegSender(q);       /* v0.3.33 (R8Z Part B · #258): 業者登録 */
     var erow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
@@ -3000,18 +3016,31 @@ window.C01 = window.C01 || {};
     return (S.asks || []).filter(function (x) { return x.ask && x.ask.card && x.ask.card.key === k; })
       .sort(function (a, b) { return String(a.ask.at) < String(b.ask.at) ? -1 : 1; });
   }
-  function askBlock(q) {
+  /* v0.3.36 (R9F · #267): 一番下 = ドロアーを開くリンクだけ (件数 · 試験表示) */
+  function askLink(q) {
+    var th = askThread(q);
+    return '<div class="c01-ask" id="ask-foot"><button type="button" id="ask-link" class="c01-asklink">その他（AIに相談）</button>' +
+      (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') + (th.length ? ' <span class="t2">' + th.length + '件</span>' : '') + '</div>';
+  }
+  function askToggle(on) {
+    S.askDr = !!on;
+    render();
+    if (on) { var inp = $('ask-in'); if (inp) inp.focus(); }
+  }
+  /* v0.3.36 (R9F · #267): 右横のドロアー (カード · 原本は そのまま操作できる · 막 없음) · 会話 = askKey (カード単位) · 送る道 = askSend (今まで通り) */
+  function askDrawer(q) {
     var th = askThread(q), k = askKey(q);
-    var open = !!S.askOpen[k];
-    var h = '<details class="c01-ask" id="ask-box"' + (open ? ' open' : '') + '><summary>その他（AIに相談）' +
-      (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') + (th.length ? ' <span class="t2">' + th.length + '件</span>' : '') + '</summary>';
-    h += '<div class="c01-ask-log">' + th.map(function (x) {
+    var h = '<aside class="c01-askdr" id="ask-box" role="complementary" aria-label="AIに相談">' +
+      '<div class="c01-askdr-h"><div><b>AIに相談</b>' + (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') +
+      '<span class="t2 mono">' + esc((q.iv_no || '') + (q.ct ? ' · ' + q.ct : '')) + '</span></div>' +
+      '<button type="button" class="c01-x" id="ask-close" title="閉じる (Esc)" aria-label="閉じる">✕</button></div>';
+    h += '<div class="c01-ask-log">' + (th.length ? '' : '<p class="t2 c01-ask-empty">このカードの質問はまだありません。今見ているカードと開いている原本 (ファイル · 頁) が一緒に送られます。</p>') + th.map(function (x) {
       var a = x.ask, r = x.reply;
       var who = esc(a.by_name || a.by || '') + ' · ' + esc(String(a.at || '').slice(11, 16));
       var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
       if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
       var sug = (r.suggestions || []).filter(function (s) { return ASK_ACT[s.action]; });
-      return body + '<div class="c01-ask-a">' + esc(r.answer || '') +
+      return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
         (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') +
         (sug.length ? '<div class="c01-ask-sug">' + sug.map(function (s, i) {
           var ok = askCan(q, s);
@@ -3019,9 +3048,9 @@ window.C01 = window.C01 || {};
             esc(s.label || s.action) + (s.value ? ' <span class="mono">' + esc(s.value) + '</span>' : '') + (s.iv ? ' <span class="mono">' + esc(s.iv) + '</span>' : '') + '</button>';
         }).join('') + '<span class="t2">押すと この画面の今のボタンと同じ (記録 · 元に戻す)</span></div>' : '') + '</div>';
     }).join('') + '</div>';
-    h += '<div class="c01-ask-quick">' + ASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-askq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
+    h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + ASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-askq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
     h += '<div class="c01-ask-in"><input id="ask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.askDraft[k] || '') + '" aria-label="AI への質問">' +
-      '<button id="ask-send" class="c01-btn-ghost2">送信</button></div></details>';
+      '<button id="ask-send" class="c01-btn-ghost2">送信</button></div></div></aside>';
     return h;
   }
   /* 答えのボタンが この画面で使えるか (今の画面にそのボタン · 欄があるか) */
@@ -3066,6 +3095,7 @@ window.C01 = window.C01 || {};
     S.asks.push({ ask: a, reply: null, local: true });
     S.askDraft[askKey(q)] = '';
     S.askOpen[askKey(q)] = true;
+    S.askDr = true;
     render();
     S.src.writeAsk(a).then(function () { askSchedule(); }).catch(function (e) {
       S.asks = S.asks.filter(function (x) { return x.ask.ask_id !== a.ask_id; });
@@ -3076,7 +3106,9 @@ window.C01 = window.C01 || {};
     var box = $('ask-box');
     if (!box) return;
     var k = askKey(q);
-    box.addEventListener('toggle', function () { S.askOpen[k] = box.open; });
+    if ($('ask-close')) $('ask-close').onclick = function () { askToggle(false); };
+    var lg = box.querySelector('.c01-ask-log'), n = askThread(q).length;
+    if (lg && S.askLogN !== k + '#' + n) { S.askLogN = k + '#' + n; lg.scrollTop = lg.scrollHeight; }   /* 新しい質問 · 答え · カード替え = 一番下へ */
     var inp = $('ask-in');
     if (inp) {
       inp.oninput = function () { S.askDraft[k] = inp.value; };
@@ -3175,6 +3207,7 @@ window.C01 = window.C01 || {};
   function typingNow() {
     var a = document.activeElement;
     if (!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || /^(checkbox|radio|button)$/i.test(a.type || '')) return false;
+    if (a.id === 'ask-in' && !a.value) return false;     /* v0.3.36 (R9F · #267): 空の質問欄に カーソルがあるだけ = 答えを待っている (描き直してよい) */
     return !!(a.closest && a.closest('#c01-main, #c01-panel'));
   }
   function unsavedNow() {
