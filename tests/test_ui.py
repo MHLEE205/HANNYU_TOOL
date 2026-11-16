@@ -784,6 +784,169 @@ def r9e_ccfixed_checks(page, root, shots, engine):
     page.wait_for_timeout(300)
 
 
+def r9k_remind_live_checks(page, root, shots, engine):
+    """v0.3.37 (R9K Part B-0 · A-1 · A-2 · B-3 · #270): 催促 실제 송신 — 엔진 send_mode {test: false, live: true} + config remindLive 일 때만 「送信」 ·
+    받는 곳 = 초안 To · CC (원청 · 고정 CC) 그대로 · 직전 재검사 (allow 밖 주소 · allow 없음 · 고정 CC 빠짐 = 버튼 잠금 + 이유) · 같은 날 두 번째 = 「本日送信済み」 + 확인 창 ·
+    reminder_sent 기록 (test false · to_n · cc_n) · source 두 번째 잠금 (초안과 다른 받는 곳 / 시험 모드 = 보내지 않음) · 받는 쪽 대조 (엔진 키 allow · live)."""
+    src = Path(engine) / "engine" / "notify" / "remind.py"
+    if src.is_file():
+        es = src.read_text(encoding="utf-8")
+        ok("R9K 받는 쪽 대조: 엔진 초안 키 allow · send_mode live = TOOL 이 읽는 키", 'd["allow"]' in es and '"live": True' in es
+           and "d.allow" in (TOOL / "js" / "config.js").read_text(encoding="utf-8") and "m.live === true" in (TOOL / "js" / "app.js").read_text(encoding="utf-8"))
+    rp = root / "_data" / "remind.json"
+    rt0 = rp.read_text(encoding="utf-8")
+    r2 = json.loads(rt0)
+    r2["send_mode"] = {"test": False, "live": True, "guard_version": 1}
+    fx = ["desk@example.invalid", "photo.desk@example.invalid"]
+    base = r2["ivs"]["TST2611-02"][0]
+    def mk(pk, to, cc, allow, rnd):
+        d = json.loads(json.dumps(base))
+        d.update({"packer": pk, "to": to, "cc": fx + cc, "cc_fixed": list(fx), "round": rnd, "to_unreceived": [], "cc_unreceived": [],
+                  "body_html": "<p>" + d["body_text"].replace(chr(10), "<br>") + "</p>"})
+        d.pop("no_recipient", None)
+        d.pop("ready_at", None)
+        if allow is not None:
+            d["allow"] = allow
+        else:
+            d.pop("allow", None)
+        return d
+    good = mk("PACKER_L1", ["main@pk.example.invalid"], ["sub@pk.example.invalid"], {"domains": ["pk.example.invalid"], "addrs": []}, 11)
+    noal = mk("PACKER_L2", ["main@pk.example.invalid"], [], None, 12)
+    other = mk("PACKER_L3", ["main@pk.example.invalid", "x@other.example.invalid"], [], {"domains": ["pk.example.invalid"], "addrs": []}, 13)
+    nofix = mk("PACKER_L4", ["main@pk.example.invalid"], [], {"domains": ["pk.example.invalid"], "addrs": []}, 14)
+    nofix["cc"] = []
+    r2["ivs"]["TST2611-02"] = [good, noal, other, nofix]
+    rp.write_text(json.dumps(r2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(500)
+    page.evaluate("""() => { window.__sent = []; C01.state.info.mode = 'graph';
+        C01.state.src.sendMailLive = function (m) { window.__sent.push({ call: m.subject }); return C01.sources.Graph.prototype.sendMailLive.call({ _fetch: function (u, o) {
+            window.__sent.push({ url: u, body: JSON.parse(o.body) }); return Promise.resolve({ status: 202, ok: true }); } }, m); }; }""")
+    page.click("tbody[data-iv='TST2611-02'] [data-remind]")
+    page.wait_for_selector("[data-rsend]")
+    md = page.locator("#c01-modal")
+    ok("R9K 실제 발송 표시 · 안내 한 줄 (送信前に宛先・未着の内容を確認してください。本人のメールから送信されます。)",
+       md.locator("[data-live]").count() >= 1 and "送信前に宛先・未着の内容を確認してください。本人のメールから送信されます。" in page.locator("#remind-livemode").inner_text()
+       and page.locator("#remind-testmode").count() == 0, page.locator("#remind-livemode").all_inner_texts())
+    b = [page.locator(f"[data-rsend='{i}']") for i in range(4)]
+    w = [page.locator(f"[data-rwhy='{i}']").inner_text() for i in range(4)]
+    ok("R9K 직전 재검사: 원청 + 고정 CC = 켜짐 「送信」 · allow 없음 / 원청 밖 주소 / 고정 CC 빠짐 = 잠김 + 이유",
+       b[0].is_enabled() and b[0].inner_text() == "送信" and b[1].is_disabled() and "確認リスト" in w[1] and b[2].is_disabled() and "元請以外" in w[2]
+       and b[3].is_disabled() and "固定 CC" in w[3], [x.is_enabled() for x in b] + w)
+    msgs = []
+    page.once("dialog", lambda dg: (msgs.append(dg.message), dg.accept()))
+    b[0].click()
+    for _ in range(40):
+        if any(x.get("action") == "reminder_sent" and (x.get("value") or {}).get("packer") == "PACKER_L1" for x in actions(root)):
+            break
+        time.sleep(0.1)
+    sent = page.evaluate("window.__sent")
+    post = [x for x in sent if isinstance(x, dict) and x.get("url")]
+    msg = post[0]["body"]["message"] if post else {}
+    to = [r["emailAddress"]["address"] for r in msg.get("toRecipients", [])]
+    cc = [r["emailAddress"]["address"] for r in msg.get("ccRecipients", [])]
+    ok("R9K 送信 = 확인 창 1 · /me/sendMail 1번 · To = 초안 To · CC = 고정 CC + 원청 CC · BCC 0 · 제목 [test] 없음",
+       len(msgs) == 1 and "PACKER_L1" in msgs[0] and len(post) == 1 and post[0]["url"].endswith("/me/sendMail") and to == ["main@pk.example.invalid"]
+       and cc == fx + ["sub@pk.example.invalid"] and not msg.get("bccRecipients") and not msg.get("subject", "").startswith("[test]"), [msgs, to, cc, msg.get("subject")])
+    rec = [x for x in actions(root) if x.get("action") == "reminder_sent" and (x.get("value") or {}).get("packer") == "PACKER_L1"]
+    ok("R9K reminder_sent 기록 (test false · 회차 11 · to_n 1 · cc_n 3 · again false)", len(rec) == 1 and rec[0]["value"]["test"] is False
+       and rec[0]["value"]["round"] == 11 and rec[0]["value"]["to_n"] == 1 and rec[0]["value"]["cc_n"] == 3 and rec[0]["value"]["again"] is False, rec)
+    page.wait_for_selector(".c01-rmd[data-rmd='0'] [data-rtoday]", timeout=5000)
+    s0 = page.locator(".c01-rmd[data-rmd='0']")
+    ok("R9K 같은 날 = 「本日送信済み（担当 HH:MM）」 · 버튼 「もう一度送信」", "本日送信済み" in s0.inner_text() and page.locator("[data-rsend='0']").inner_text() == "もう一度送信",
+       s0.inner_text()[:200])
+    msgs2 = []
+    page.once("dialog", lambda dg: (msgs2.append(dg.message), dg.dismiss()))
+    page.locator("[data-rsend='0']").click()
+    page.wait_for_timeout(400)
+    post2 = [x for x in page.evaluate("window.__sent") if isinstance(x, dict) and x.get("url")]
+    ok("R9K 두 번째 = 확인 창 「本日すでに送信済み」 · 취소 = 보내지 않음", len(msgs2) == 1 and "本日すでに送信済み" in msgs2[0] and len(post2) == 1, [msgs2, len(post2)])
+    page.screenshot(path=str(shots / "r9k_remind_live.png"))
+    page.click("[data-close]")
+    blk = page.evaluate("""(d) => { const G = C01.sources.Graph.prototype.sendMailLive; const f = { _fetch: function () { return Promise.resolve({ status: 202, ok: true }); } };
+        const a = G.call(f, { subject: 's', html: '', to: ['main@pk.example.invalid', 'evil@other.example.invalid'], cc: d.cc, draft: d });
+        const b = G.call(f, { subject: 's', html: '', to: d.to, cc: d.cc.slice(1), draft: d });
+        const c = G.call(f, { subject: 's', html: '', to: d.to, cc: d.cc, draft: Object.assign({}, d, { to: d.to.concat(['evil@other.example.invalid']) }) });
+        const save = C01.state.remind.send_mode; C01.state.remind.send_mode = { test: true, to: 't@example.invalid', tag: '[test]' };
+        const e = G.call(f, { subject: 's', html: '', to: d.to, cc: d.cc, draft: d }); C01.state.remind.send_mode = save;
+        return Promise.all([a, b, c, e].map(p => p.then(() => 'sent', () => 'blocked'))); }""", good)
+    ok("R9K source 두 번째 잠금: 초안 밖 To · CC 빠짐 · 원청 밖 초안 · 시험 모드 = 모두 보내지 않음", blk == ["blocked"] * 4, blk)
+    r3 = json.loads(rp.read_text(encoding="utf-8"))
+    r3["send_mode"] = {"test": False, "live": True, "guard_version": 1}
+    rp.write_text(json.dumps(r3, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.evaluate("C01.SEND.remindLive = false; C01.app.tick()")
+    page.wait_for_timeout(500)
+    page.click("tbody[data-iv='TST2611-02'] [data-remind]")
+    page.wait_for_selector(".c01-rmd")
+    ok("R9K 화면 쪽 열쇠 (C01.SEND.remindLive false) = 送信 버튼 0", page.locator("[data-rsend]").count() == 0)
+    page.click("[data-close]")
+    page.evaluate("C01.SEND.remindLive = true; C01.state.info.mode = 'local'")
+    rp.write_text(rt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
+def r9k_fax_reason_checks(page, root, shots):
+    """v0.3.37 (R9K 0-5 f · #272): 未分類FAX 「搬入票ではない」 = 이유 창 (window.confirm 0) → not_ours · value = 이유 + sha16 (이유 없음 = 이유 칸 없음) · 元に戻す 가능."""
+    qp = root / "_data" / "queue.json"
+    qt0 = qp.read_text(encoding="utf-8")
+    q2 = json.loads(qt0)
+    docs_dir = [p_.relative_to(root).as_posix() for p_ in sorted((root / "TST2611-01" / "搬入票").glob("*.svg"))]
+    fq = {"queue_id": "9e9e9e9e9e9e9e91", "kind": "未分類FAX", "iv_no": None, "ct": None, "field": None, "container_id": None, "values": {},
+          "candidates": [], "files": [{"path": docs_dir[0], "name": "fax-r9k.pdf", "page": None, "bbox": None, "sha16": "9e9e9e9e9e9e9e9e"}],
+          "note": "保留", "resolved": None, "superseded": [], "cy_cut": None, "cy_open": None, "issuer": None, "field_sources": {}, "field_source_text": {},
+          "received_at": "2026-11-12T11:00:00+09:00"}
+    q2["items"].append(fq)
+    if "未分類FAX" not in q2["kinds"]:
+        q2["kinds"] = list(q2["kinds"]) + ["未分類FAX"]
+    qp.write_text(json.dumps(q2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.click("#tab-input")
+    page.click(".c01-kinds [data-kind='未分類FAX']")
+    n = page.locator(".c01-item").count()
+    ok("R9K 未分類FAX 카드 있음 (시험 자료)", n >= 1, n)
+    if not n:
+        return
+    if page.locator(".c01-item[data-q='9e9e9e9e9e9e9e91']").count():
+        page.locator(".c01-item[data-q='9e9e9e9e9e9e9e91']").click()
+    else:
+        page.locator(".c01-item").first.click()
+    dl = []
+    page.once("dialog", lambda dg: (dl.append(dg.message), dg.accept()))
+    page.click("#q-notours")
+    page.wait_for_timeout(300)
+    dlg = page.locator("#c01-nhdlg")
+    ok("R9K 未分類FAX 「搬入票ではない」 = 이유 창 (ひとことでOK · 이유 버튼 5) · 옛 확인 창 0", dlg.count() == 1 and "ひとことでOK" in dlg.inner_text()
+       and dlg.locator("[data-nhr]").count() == 5 and not dl, [dlg.count(), dl])
+    page.click("[data-nhr='other_doc']")
+    page.fill("#c01-nhtext", "請求書です")
+    page.click("#c01-nhok")
+    page.wait_for_timeout(500)
+    rec = [x for x in actions(root) if x.get("action") == "not_ours"]
+    v = (rec[-1].get("value") or {}) if rec else {}
+    ok("R9K not_ours 기록 = 이유 코드 · 이유 글 · queue_id (action 이름 그대로)", rec and v.get("reason_code") == "other_doc" and v.get("reason_text") == "請求書です"
+       and rec[-1].get("queue_id"), rec[-1:] if rec else None)
+    page.click(".c01-kinds [data-kind='done']")
+    its = page.locator(".c01-item.done")
+    hit = None
+    for i in range(its.count()):
+        if "搬入票ではない" in its.nth(i).inner_text():
+            hit = i
+    if hit is not None:
+        its.nth(hit).click()
+    ok("R9K 未分類FAX 「搬入票ではない」 = 完了 에서 「元に戻す」 있음", hit is not None and page.locator("#q-undo").count() == 1, hit)
+    page.screenshot(path=str(shots / "r9k_fax_reason.png"))
+    page.click(".c01-kinds [data-kind='all']")
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r7u_checks(page, root, shots):
     """v0.3.20 (R7U): F-1 管理者 = 全港 (#201) · A-3 CT重複 / シール重複 · 再判読 표시 · A-4 手入力 CT 경고."""
     jp = root / "_data" / "jikkyou.json"
@@ -1853,11 +2016,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.36", page.title() == "LEENAI C-01 搬入票 v0.3.36", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.37", page.title() == "LEENAI C-01 搬入票 v0.3.37", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.36" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.37" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2371,6 +2534,8 @@ def main():
             r9d_wd_checks(page, root, shots, a.engine)
             r9d_remind_checks(page, root, shots)
             r9e_ccfixed_checks(page, root, shots, a.engine)
+            r9k_remind_live_checks(page, root, shots, a.engine)
+            r9k_fax_reason_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

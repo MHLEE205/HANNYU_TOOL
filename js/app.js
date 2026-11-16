@@ -1540,7 +1540,8 @@ window.C01 = window.C01 || {};
     S.modal = { kind: 'remind', iv: ivNo };
     var STAGE = { d2: 'CY カット 2 営業日前', d1: 'CY カット 前営業日', workdate_passed: '作業日を過ぎて未着', overdue: '期限超過' };
     var html = '<div class="c01-mh"><b>催促メール — プレビュー</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
-      (remindTest() ? '<span class="c01-trial" data-trial>試験送信（[test] · 試験用アドレスだけ · 業者には送りません）</span>' :
+      (remindLive() ? '<span class="c01-trial c01-live" data-live>本番送信（押した職員のメールから業者へ送ります）</span>' :
+        remindTest() ? '<span class="c01-trial" data-trial>試験送信（[test] · 試験用アドレスだけ · 業者には送りません）</span>' :
         '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>') +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">';
     var cand = ((S.remind && S.remind.cand) || {})[ivNo] || {};
@@ -1565,20 +1566,21 @@ window.C01 = window.C01 || {};
         '<div><span class="k">回数</span><span>' + esc(d.round) + ' 回目 · ' + esc(STAGE[d.stage] || d.stage) + ' · ' + esc(d.packer) + '</span></div></div>' +
         /* v0.3.12 (R7K Part D ② · D-55 (나)): BKG だけ合う候補がある行も催促の対象 — 送る前に確認 */
         (d.cand_note ? '<p class="c01-note2 c01-rcand c01-rcand-bkg">' + esc(d.cand_note) + '（BKG ' + (+d.cand_bkg || 0) + '台）</p>' : '') +
-        '<pre class="c01-rbody">' + esc(signed(d.body_text || '')) + '</pre>' + remindSendRow(iv, d, i) + '</section>';
+        remindTodayHtml(iv, d) + '<pre class="c01-rbody">' + esc(signed(d.body_text || '')) + '</pre>' + remindSendRow(iv, d, i) + '</section>';
     });
     var past = (iv && iv.reminders) || [];
     html += '<div class="c01-rpast"><b>これまでの催促</b>' + (past.length ? '<ul>' + past.map(function (p) {
       return '<li>' + esc(String(p.at || '').slice(0, 16).replace('T', ' ')) + ' · ' + esc(p.by || '') + (p.value && p.value.round ? ' · ' + esc(p.value.round) + '回目' : '') + '</li>';
     }).join('') + '</ul>' : '<span class="t2"> なし</span>') + '</div></div>' +
       '<div class="c01-mf"><span class="t2">送信は押した職員本人のメールから（決定 #97）· 回数・送信者を記録</span><span class="c01-flex"></span>' +
-      (remindTest() ? '<span class="c01-trial" id="remind-testmode">試験モード: 件名に [test] · 宛先は試験用アドレスだけ（業者 · CC には送りません）</span>' :
+      (remindLive() ? '<span class="c01-live-note" id="remind-livemode">' + esc(REMIND_LIVE_NOTE) + '</span>' :
+        remindTest() ? '<span class="c01-trial" id="remind-testmode">試験モード: 件名に [test] · 宛先は試験用アドレスだけ（業者 · CC には送りません）</span>' :
         '<button id="remind-send" class="c01-btn-pri" disabled aria-disabled="true" title="試験モードではありません — 送信できません">送信できません</button>') + '</div>';
     showModal(html);
     $('c01-modal').querySelectorAll('[data-rsend]').forEach(function (b) {
       b.onclick = function () {
         var un = $('c01-modal').querySelector('[data-runrec="' + b.getAttribute('data-rsend') + '"]');
-        sendRemindTest(ivNo, ds[+b.getAttribute('data-rsend')], b, !!(un && un.checked));
+        (remindLive() ? sendRemindLive : sendRemindTest)(ivNo, ds[+b.getAttribute('data-rsend')], b, !!(un && un.checked));
       };
     });
     function upd(i) {
@@ -1587,9 +1589,10 @@ window.C01 = window.C01 || {};
       var skip = md.querySelector('[data-rskip="' + i + '"]'), un = md.querySelector('[data-runrec="' + i + '"]');
       var needUn = remindUnrec(d).length > 0 && !(d.to || []).length && !(un && un.checked);
       var ready = !d.ready_at || jstNow() >= d.ready_at;
-      b.disabled = (skip && skip.checked) || !remindCanSend() || !ready || needUn || remindNoTo(d);
+      var bad = remindLive() ? remindCheck(d, !!(un && un.checked)) : [];
+      b.disabled = (skip && skip.checked) || !remindCanSend() || !ready || needUn || remindNoTo(d) || bad.length > 0;
       var w = md.querySelector('[data-rwhy="' + i + '"]');
-      if (w && remindCanSend() && ready) w.textContent = needUn ? '未受信アドレスを確認してチェックすると送信できます' : '';
+      if (w && remindCanSend() && ready) w.textContent = needUn ? '未受信アドレスを確認してチェックすると送信できます' : bad.length ? '送信できません: ' + bad[0] : '';
     }
     $('c01-modal').querySelectorAll('[data-rskip]').forEach(function (c) { c.onchange = function () { upd(c.getAttribute('data-rskip')); }; });
     $('c01-modal').querySelectorAll('[data-runrec]').forEach(function (c) { c.onchange = function () { upd(c.getAttribute('data-runrec')); }; });
@@ -1603,7 +1606,38 @@ window.C01 = window.C01 || {};
     var m = remindMode();
     return !!(C01.SEND && C01.SEND.remind && C01.SEND.remindTest !== false && m && m.test === true && typeof m.to === 'string' && /^[^@\s]+@[^@\s]+$/.test(m.to));
   }
-  function remindCanSend() { return remindTest() && graphMode() && !!(S.me && S.me.email); }
+  /* v0.3.37 (R9K Part B-0 · 決定 #270 · 形式 = エンジン send_mode {test: false, live: true}): 本番送信 — 押した職員の Graph トークン (/me/sendMail) で
+     下書きの To · CC (元請 · 固定 CC) へ。エンジンが本番を出し (notify_test_mode false + 元請だけ + 固定 CC)、この画面の C01.SEND.remindLive も true の時だけ。
+     エンジン · THOR からは送らない (送るのは職員がこのボタンを押した時だけ) */
+  function remindLive() {
+    var m = remindMode();
+    return !!(C01.SEND && C01.SEND.remind && C01.SEND.remindLive === true && m && m.test === false && m.live === true);
+  }
+  function remindCanSend() { return (remindTest() || remindLive()) && graphMode() && !!(S.me && S.me.email); }
+  var REMIND_LIVE_NOTE = '送信前に宛先・未着の内容を確認してください。本人のメールから送信されます。';
+  /* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 送信の直前にもう一度 — エンジン remind_guard と同じ決まり (C01.remindCheck · source.js も同じ関数で二重に確かめる)。
+     戻り = 送れない理由の配列 (空 = 送れる) */
+  function remindCheck(d, unOk) { return C01.remindCheck(d, unOk); }
+  function remindRecips(d, unOk) {
+    var to = [].concat(d.to || []), cc = [].concat(d.cc || []);
+    if (unOk) { to = to.concat(d.to_unreceived || []); cc = cc.concat(d.cc_unreceived || []); }
+    var low = function (xs) { var o = []; xs.forEach(function (a) { a = String(a || '').trim().toLowerCase(); if (a && o.indexOf(a) < 0) o.push(a); }); return o; };
+    to = low(to);
+    cc = low(cc).filter(function (a) { return to.indexOf(a) < 0; });
+    return { to: to, cc: cc };
+  }
+  /* v0.3.37 (R9K Part A-2): 同じ IV · 業者 に今日もう送った (本番) = 「本日送信済み（誰 HH:MM）」 · もう一度は確認の窓 */
+  function remindToday(iv, d) {
+    var today = jstNow().slice(0, 10), xs = [];
+    ((iv && iv.reminders) || []).forEach(function (x) { xs.push({ v: x.value || {}, by: x.by, at: x.at }); });
+    (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'reminder_sent' && a.iv === d.iv_no) xs.push({ v: a.value || {}, by: a.by, at: a.at }); });
+    return xs.filter(function (x) { return x.v.packer === d.packer && !x.v.test && String(x.at || '').slice(0, 10) === today; })
+      .sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); })[0] || null;
+  }
+  function remindTodayHtml(iv, d) {
+    var t = remindToday(iv, d);
+    return t ? '<p class="c01-note2 c01-rtoday" data-rtoday>本日送信済み（' + esc(staffName(t.by)) + ' ' + esc(String(t.at || '').slice(11, 16)) + '）</p>' : '';
+  }
   function remindUnrec(d) { return [].concat((d && d.to_unreceived) || [], (d && d.cc_unreceived) || []); }
   /* v0.3.35 (R9D Part C · 決定 #263): 催促の宛先 = 元請 packer の会社アドレスだけ。元請のアドレスが 0 = エンジン no_recipient → 「宛先なし — 担当者が確認」 · 送信ボタンは押せない (no_recipient の無い 「送信先未登録」 は今まで通り) */
   function remindNoTo(d) { return !!(d && d.no_recipient); }
@@ -1622,7 +1656,8 @@ window.C01 = window.C01 || {};
     return xs.filter(function (v) { return v.packer === d.packer && +v.round === +d.round; })[0] || null;
   }
   function remindSendRow(iv, d, i) {
-    if (!remindTest()) return '';
+    if (!remindTest() && !remindLive()) return '';
+    if (remindLive()) return remindLiveRow(iv, d, i);
     var sent = remindSent(iv, d);
     var ready = !d.ready_at || jstNow() >= d.ready_at;
     var why = sent ? '送信済（' + (sent.test ? '試験 · ' : '') + d.round + '回目）' : !ready ? String(d.ready_at).slice(11, 16) + ' から送信できます' :
@@ -1636,6 +1671,50 @@ window.C01 = window.C01 || {};
       (un ? '<label class="t2 c01-runrec-ok"><input type="checkbox" data-runrec="' + i + '"' + (sent ? ' disabled' : '') + '> 未受信アドレスを確認した（宛先に入れる）</label>' : '') +
       '<span class="c01-flex"></span><span class="t2" data-rwhy="' + i + '">' + esc(why) + '</span>' +
       '<button class="c01-btn-pri" data-rsend="' + i + '"' + (sent ? ' data-done disabled' : (!ready || !remindCanSend() || needUn || noTo ? ' disabled' : '')) + '>送信（試験）</button></div>';
+  }
+  /* v0.3.37 (R9K Part B-0 · A-1 · A-2): 本番の送信行 — 送れない理由 (直前の確認) を出してボタンを止める · 今日もう送った = 「もう一度送信」 (確認の窓) */
+  function remindLiveRow(iv, d, i) {
+    var ready = !d.ready_at || jstNow() >= d.ready_at;
+    var un = remindUnrec(d).length > 0;
+    var needUn = un && !(d.to || []).length;
+    var bad = remindCheck(d, false);
+    var noTo = remindNoTo(d);
+    var today = remindToday(iv, d);
+    var why = noTo ? '宛先なし — 担当者が確認' : !ready ? String(d.ready_at).slice(11, 16) + ' から送信できます' :
+      !remindCanSend() ? 'ログインした職員だけ送信できます' : needUn ? '未受信アドレスを確認してチェックすると送信できます' : bad.length ? '送信できません: ' + bad[0] : '';
+    return '<div class="c01-rsendrow"><label class="t2"><input type="checkbox" data-rskip="' + i + '"> この業者には送らない</label>' +
+      (un ? '<label class="t2 c01-runrec-ok"><input type="checkbox" data-runrec="' + i + '"> 未受信アドレスを確認した（宛先に入れる）</label>' : '') +
+      '<span class="c01-flex"></span><span class="t2" data-rwhy="' + i + '">' + esc(why) + '</span>' +
+      '<button class="c01-btn-pri" data-rsend="' + i + '" data-live="1"' + (!ready || !remindCanSend() || needUn || noTo || bad.length ? ' disabled' : '') + '>' +
+      (today ? 'もう一度送信' : '送信') + '</button></div>';
+  }
+  function sendRemindLive(ivNo, d, btn, unOk) {
+    var iv = ivById(ivNo);
+    if (!remindLive() || !remindCanSend() || !d || remindNoTo(d)) return;
+    var nUn = remindUnrec(d).length;
+    if (nUn && !(d.to || []).length && !unOk) return;
+    var bad = remindCheck(d, unOk);
+    if (bad.length) { toast('送信できません: ' + bad[0], 'error'); return; }
+    var rc = remindRecips(d, unOk);
+    var today = remindToday(iv, d);
+    if (today && !window.confirm('本日すでに送信済みです（' + staffName(today.by) + ' ' + String(today.at || '').slice(11, 16) + '）。'+'\n' + 'もう一度送信しますか？')) return;
+    if (!today && !window.confirm(d.packer + ' に催促メールを送信します（宛先 ' + rc.to.length + '件 · CC ' + rc.cc.length + '件 · あなたのメールから）。よろしいですか？')) return;
+    var subj = (d.reply_to ? 'RE: ' : '') + d.subject;
+    var html = signed(d.body_html || ('<pre>' + esc(d.body_text || '') + '</pre>'));
+    btn.disabled = true;
+    btn.textContent = '送信中…';
+    S.src.sendMailLive({ subject: subj, html: html, to: rc.to, cc: rc.cc, draft: d, unOk: !!unOk }).then(function () {
+      return writeAction(mkAction('reminder_sent', { iv: ivNo, ct: null, field: null, source: null,
+        value: { packer: d.packer, round: +d.round, stage: d.stage, subject: subj, to: rc.to, cc: rc.cc, to_n: rc.to.length, cc_n: rc.cc.length, test: false,
+          again: !!today, unreceived: nUn, unreceived_ok: !!(nUn && unOk), reply: !!d.reply_to } }));
+    }).then(function () {
+      toast('送信しました（' + d.packer + ' · ' + d.round + '回目 · 宛先 ' + rc.to.length + '件 · CC ' + rc.cc.length + '件）', 'ok');
+      openRemind(ivNo);
+    }).catch(function (e) {
+      btn.disabled = false;
+      btn.textContent = today ? 'もう一度送信' : '送信';
+      toast('送信できませんでした: ' + e.message, 'error');
+    });
   }
   function sendRemindTest(ivNo, d, btn, unOk) {
     var m = remindMode();
@@ -1732,7 +1811,8 @@ window.C01 = window.C01 || {};
     var html = '<div class="c01-mh"><b>使い方</b><span class="t2">並行期間 2026-11-16〜11-22</span>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
       '<p class="c01-help-lead">並行期間中は <b>これまでのシステムで仕事を続けてください</b>。この TOOL で使うのは <b>「見る」（実況表）</b> と <b>「確認・入力」</b> だけです。<br>' +
-      '<span class="c01-trial">試験表示</span> 「催促」 は試験表示です — 業者には送りません（「送信（試験）」は試験用アドレスにだけ届きます · 業者への催促はこれまでどおりの方法で）。 ' +
+      (remindLive() ? '<span class="c01-live">本番</span> 「催促」 の 「送信」 は <b>押した職員のメールから業者へ</b> 送ります（エンジンからは送りません）。' + esc(REMIND_LIVE_NOTE) + ' ' :
+        '<span class="c01-trial">試験表示</span> 「催促」 は試験表示です — 業者には送りません（「送信（試験）」は試験用アドレスにだけ届きます · 業者への催促はこれまでどおりの方法で）。 ') +
       '「Compass入力」 は <span class="c01-trial">試験運用中</span> — ボタンを押すと COMPASS に入力します（試験用 · 職員の業務はこれまでどおりの方法で）。</p>' +
       '<div class="c01-help-grid">' +
       '<section><h4>1. 自分の担当を見る</h4><p>実況表の 「担当港」 で <b>「自分の担当」</b> を押すと、自分の港の IV だけが出ます。「全港」 = 全部。港の名前を押すとその港だけ（複数選べます）。</p></section>' +
@@ -2725,9 +2805,17 @@ window.C01 = window.C01 || {};
   function notHannyuhyo(q, f) {
     if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
     if (q.kind === '未分類FAX') {
-      if (!window.confirm('この書類を「搬入票ではない」にしますか？\n（ファイルは消しません · 同じファイルは確認リストに出なくなります · 完了 から 元に戻せます）')) return;
-      var a0 = mkAction('not_ours', { iv: null, ct: null, field: null, value: null, source: null, queue_id: q.queue_id });
-      writeAction(a0).then(function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); toast('「搬入票ではない」にしました（完了 から 元に戻せます）', 'success'); });
+      /* v0.3.37 (R9K 0-5 f · 決定 #272): 未分類FAX も 理由の窓 (同じ理由ボタン · ひとことでOK · 空でも押せる)。action 名は not_ours のまま (エンジンの反映の道は同じ)
+         value = 理由 + sha16 (理由も sha16 も無い = null = 今までと同じ形) → エンジンが学習の例として残す (判定には使わない) */
+      reasonDialog(function (why) {
+        var fh = (q.files || []).filter(function (x) { return x.sha16; }).map(function (x) { return x.sha16; });
+        var v0 = {};
+        if (why.code) v0.reason_code = why.code;
+        if (why.text) v0.reason_text = why.text;
+        if (fh.length) v0.sha16 = fh.filter(function (h, i) { return fh.indexOf(h) === i; });
+        var a0 = mkAction('not_ours', { iv: null, ct: null, field: null, value: Object.keys(v0).length ? v0 : null, source: null, queue_id: q.queue_id });
+        writeAction(a0).then(function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); toast('「搬入票ではない」にしました（完了 から 元に戻せます）', 'success'); });
+      });
       return;
     }
     var hs = f && f.sha16 ? [f.sha16] : (q.files || []).filter(function (x) { return x.sha16; }).map(function (x) { return x.sha16; });

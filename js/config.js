@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.36',
+  version: '0.3.37',
   date: '2026-11-15',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -54,7 +54,37 @@ C01.SEND = {
   /* v0.3.22 (R7V Part B · 決定 #191): 催促 = 下書き → 担当者が「送信」。remindTest = 試験モード (件名 [test] · 宛先 = エンジン remind.json send_mode.to 1 件だけ)。
      11/24 の実際の送信への切り替えは 管理者の確認の後 (この版には 実際の宛先へ送るコードが無い — remindTest: false にすると 送信ボタンが消えるだけ) */
   remind: true,
-  remindTest: true
+  remindTest: true,
+  /* v0.3.37 (R9K Part B-0 · 決定 #270): 本番送信 — エンジン remind.json send_mode {test: false, live: true} の時だけ 「送信」 が出る
+     (押した職員のメール · 宛先 = 元請だけ · 固定 CC · 送信直前にもう一度確認 C01.remindCheck)。false = 本番の送信ボタンを出さない */
+  remindLive: true
+};
+
+/* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 催促 送信直前の確認 — エンジン notify/remind.guard と同じ決まり (エンジンが下書きに付けた allow を使う)。
+   ① 宛先 (To) 1 件以上 ② To · CC (固定 CC を除く) · 確認した未受信 = すべて allow.domains (元請の会社ドメイン) か allow.addrs (元請の無料メール)
+   ③ 固定 CC (cc_fixed) が CC に全部ある · To に無い ④ allow が無い下書き = 送らない。戻り = 送れない理由の配列 (空 = 送れる) */
+C01.remindCheck = function (d, unOk) {
+  var out = [];
+  if (!d) return ['下書きがありません'];
+  var low = function (a) { return String(a || '').trim().toLowerCase(); };
+  var al = d.allow;
+  if (!al || !Array.isArray(al.domains) || !Array.isArray(al.addrs)) return ['宛先の確認リストがありません（エンジンの更新を待ってください）'];
+  var to = (d.to || []).map(low), cc = (d.cc || []).map(low), fixed = (d.cc_fixed || []).map(low);
+  if (unOk) { to = to.concat((d.to_unreceived || []).map(low)); cc = cc.concat((d.cc_unreceived || []).map(low)); }
+  to = to.filter(Boolean);
+  cc = cc.filter(Boolean);
+  if (!to.length) out.push('宛先 (To) がありません');
+  if (!fixed.length) out.push('固定 CC がありません');
+  fixed.forEach(function (a) {
+    if (cc.indexOf(a) < 0) out.push('固定 CC がありません（' + a + '）');
+    if (to.indexOf(a) >= 0) out.push('固定 CC が宛先 (To) にあります（' + a + '）');
+  });
+  var doms = al.domains.map(low), adr = al.addrs.map(low);
+  to.concat(cc.filter(function (a) { return fixed.indexOf(a) < 0; })).forEach(function (a) {
+    var ok = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a) && (adr.indexOf(a) >= 0 || doms.indexOf(a.split('@')[1]) >= 0);
+    if (!ok && out.indexOf('元請以外のアドレス（' + a + '）') < 0) out.push('元請以外のアドレス（' + a + '）');
+  });
+  return out;
 };
 
 /* v0.2.1 (R6.6): Compass入力 比較の規則 — 決定 D-11 待ち。ここだけ変える (エンジン設定 compass_follow_same_cond_slot と同じ名前・同じ規則)

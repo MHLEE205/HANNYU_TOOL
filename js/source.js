@@ -50,6 +50,7 @@ C01.sources = (function () {
       .then(function (r) { if (!r.ok) throw new Error('送信失敗 (' + r.status + ')'); return r.json(); });
   };
   LocalServer.prototype.sendMailTest = function () { return Promise.reject(new Error('ローカルプレビューでは送信しません')); };   /* v0.3.22 (R7V Part B) */
+  LocalServer.prototype.sendMailLive = function () { return Promise.reject(new Error('ローカルプレビューでは送信しません')); };   /* v0.3.37 (R9K Part B-0) */
 
   /* ── local ②: フォルダ選択 (File System Access API · Chrome/Edge) ── */
   function Folder(handle) { this.root = handle; this.urls = {}; }
@@ -312,6 +313,30 @@ C01.sources = (function () {
       return Promise.reject(new Error('試験モードの宛先ではありません — 送信しません'));
     }
     var body = { message: { subject: m.subject, body: { contentType: 'HTML', content: m.html || '' }, toRecipients: [{ emailAddress: { address: mode.to } }] },
+      saveToSentItems: true };
+    return this._fetch(GRAPH + 'me/sendMail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) {
+      if (r.status === 403) throw new Error('メール送信の権限がありません (403)');
+      if (r.status !== 202 && !r.ok) throw new Error('送信失敗 (' + r.status + ')');
+      return { ok: true };
+    });
+  };
+  /* v0.3.37 (R9K Part B-0 · 決定 #270): 催促の本番送信 — Graph /me/sendMail (押した職員のメール)。二重の鍵: ① エンジン send_mode {test: false, live: true}
+     + C01.SEND.remindLive ② 送る直前に C01.remindCheck (下書き allow · 固定 CC) で To · CC をもう一度確かめ、渡された宛先が下書きと同じ集合であること。BCC なし */
+  Graph.prototype.sendMailLive = function (m) {
+    var mode = (C01.state && C01.state.remind && C01.state.remind.send_mode) || {};
+    if (!(C01.SEND && C01.SEND.remind && C01.SEND.remindLive === true) || mode.test !== false || mode.live !== true || !m || !m.draft) {
+      return Promise.reject(new Error('本番送信ではありません — 送信しません'));
+    }
+    var bad = C01.remindCheck(m.draft, m.unOk);
+    if (bad.length) return Promise.reject(new Error(bad[0]));
+    var low = function (a) { return String(a || '').trim().toLowerCase(); };
+    var want = [].concat(m.draft.to || [], m.draft.cc || [], m.unOk ? [].concat(m.draft.to_unreceived || [], m.draft.cc_unreceived || []) : []).map(low);
+    var got = [].concat(m.to || [], m.cc || []).map(low);
+    if (!(m.to || []).length || got.some(function (a) { return want.indexOf(a) < 0; }) || want.some(function (a) { return got.indexOf(a) < 0; })) {
+      return Promise.reject(new Error('宛先が下書きと違います — 送信しません'));
+    }
+    var rcp = function (xs) { return (xs || []).map(function (a) { return { emailAddress: { address: a } }; }); };
+    var body = { message: { subject: m.subject, body: { contentType: 'HTML', content: m.html || '' }, toRecipients: rcp(m.to), ccRecipients: rcp(m.cc) },
       saveToSentItems: true };
     return this._fetch(GRAPH + 'me/sendMail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) {
       if (r.status === 403) throw new Error('メール送信の権限がありません (403)');
