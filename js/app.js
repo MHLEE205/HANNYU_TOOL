@@ -3137,7 +3137,7 @@ window.C01 = window.C01 || {};
   }
   /* v0.3.41 (R9O Part 00 · #277): 判断の根拠 — 何が合っていて (○) 何が合っていないか (×) · 分からない (?) + そのアドレスのメール一覧 (本文の頭 · 署名 · 添付の表示) */
   function sndRelayOn() { return !!(C01.RULES || {}).senderRelay; }
-  var SND_MARK = { '○': '#1F7A3A', '×': '#B3261E', '?': '#777' };
+  var SND_MARK = { '○': 'var(--ok)', '×': 'var(--danger)', '?': 'var(--text3)' };
   function sndEvidenceHtml(c) {
     var ev = c.evidence || [];
     if (!ev.length) return '';
