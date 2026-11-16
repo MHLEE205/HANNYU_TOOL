@@ -2104,6 +2104,118 @@ def r9l_gask_checks(page, root, shots, engine):
     page.wait_for_timeout(200)
 
 
+
+def r9o_checks(page, root, shots, engine):
+    """v0.3.41 (R9O Part 00 · #277): 「発信者未登録」 판단 근거 — 근거 줄 (○ × ?) · 메일 목록 (본문 앞부분 · 서명 · 첨부 미리보기) · 묻는 말 3가지
+    (① 業者本人 · ② 代わりに送る所 = register_sender relay · ③ 登録しない) · 自動推薦（仮登録） 표시 · 받는 쪽 대조 (엔진 스키마 키)."""
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    eng = Path(engine)
+    ss = json.loads((eng / "engine" / "output" / "schema" / "senders.schema.json").read_text(encoding="utf-8"))
+    ck = set(ss["properties"]["cards"]["items"]["properties"])
+    mk = set(ss["properties"]["cards"]["items"]["properties"]["mail_list"]["items"]["properties"])
+    ek = set(ss["properties"]["cards"]["items"]["properties"]["evidence"]["items"]["properties"])
+    js = (TOOL / "js" / "app.js").read_text(encoding="utf-8")
+    need_m = {"received_at", "subject", "attach", "attach_n", "ivs", "bkgs", "files", "photos", "hannyu", "body_head", "sig_lines"}
+    ok("R9O 받는 쪽 대조: senders.json evidence · mail_list · auto · excluded 키 = TOOL 이 읽는 키 (엔진 스키마)",
+       {"evidence", "mail_list", "auto", "ask"} <= ck and need_m <= mk and {"mark", "kind", "text"} <= ek and "excluded" in ss["properties"]
+       and all(("." + k) in js for k in need_m | {"evidence", "mail_list", "auto"}), (ck, mk, ek))
+    acs = json.loads((eng / "engine" / "output" / "schema" / "action.schema.json").read_text(encoding="utf-8"))
+    rv = [x for x in acs["allOf"] if x["if"]["properties"]["action"].get("const") == "register_sender"][0]["then"]["properties"]["value"]["properties"]
+    ok("R9O 받는 쪽 대조: action register_sender value.relay = 엔진 스키마에 있음", "relay" in rv, sorted(rv))
+    sp = root / "_data" / "senders.json"
+    pp = root / "_data" / "packers.json"
+    pp.write_text(dump({"schema_version": 1, "packers": [{"code": "PACKER_A", "name": "テスト商店", "plants": ["本社", "市川"]},
+                                                         {"code": "PACKER_B", "name": "テスト二", "plants": []}]}), encoding="utf-8")
+    g = lambda pk, st, src, o=0, **kw: dict({"packer": pk, "strength": st, "sources": src, "other_packers_n": o}, **kw)   # noqa: E731
+    ml = [{"received_at": "2026-11-16T10:30:00+09:00", "subject": "TST BKG 写真送付", "attach": ["01_空コンテナ.svg", "搬入票_01.svg", "a.xlsx"], "attach_n": 3,
+           "ivs": ["TST2611-01"], "bkgs": ["BKGTEST01"], "photos": 1, "hannyu": True,
+           "files": [{"path": "TST2611-01/TSTU0010075/01_空コンテナ.svg", "name": "01_空コンテナ.svg", "kind": "photo"},
+                     {"path": "TST2611-01/搬入票/搬入票_01.svg", "name": "搬入票_01.svg", "kind": "photo"}],
+           "body_head": ["お世話になっております。", "写真を送ります。"], "sig_lines": ["株式会社テスト港運", "営業部 担当"]},
+          {"received_at": "2026-11-15T09:00:00+09:00", "subject": "日程のご確認", "attach": [], "attach_n": 0, "ivs": [], "bkgs": [], "photos": 0, "hannyu": False,
+           "files": [], "body_head": ["日程のご確認です。"], "sig_lines": []}]
+    ev = [{"mark": "○", "kind": "bkg", "text": "メールの BKG / IV の業者 = PACKER_A (TST2611-01)"},
+          {"mark": "×", "kind": "sig", "text": "署名: 株式会社テスト港運 ≠ PACKER_A"},
+          {"mark": "×", "kind": "dom", "text": "ドメイン hl.example.invalid = 登録業者のドメインではない"}]
+    cards = [{"queue_id": "6a" * 8, "kind": "発信者未登録", "address": "haul.taro@hl.example.invalid", "name": "港運 太郎", "domain": "hl.example.invalid", "mails": 2,
+              "hold_mails": 2, "zip_pending": 0, "ivs": ["TST2611-01"], "last_at": "2026-11-16T10:30:00+09:00",
+              "guess": g("PACKER_A", "weak", ["bkg"], note="sig_mismatch"), "evidence": ev, "mail_list": ml, "ask": ["self", "relay", "decline"],
+              "auto": {"by": "自動推薦#272", "packer": "PACKER_A", "action_id": "auto272:0000000000000001"}},
+             {"queue_id": "6b" * 8, "kind": "発信者未登録", "address": "self.hanako@sf.example.invalid", "name": "自 花子", "domain": "sf.example.invalid", "mails": 1,
+              "hold_mails": 1, "zip_pending": 0, "ivs": ["TST2611-02"], "last_at": "2026-11-16T09:00:00+09:00", "guess": g("PACKER_B", "weak", ["bkg"]),
+              "evidence": ev[:1], "mail_list": ml[1:], "ask": ["self", "relay", "decline"]}]
+    sd = {"schema_version": 1, "kind": "sender_cards", "today": "2026-11-16", "cards": cards,
+          "counts": {"target_mails": 3, "card_mails": 3, "done_mails": 0, "cards": 2, "gap": 0, "strong": 0, "weak": 2, "excluded": 1, "excluded_mails": 4},
+          "declined": [], "excluded": [{"address": "noreply@ln.example.invalid", "domain": "ln.example.invalid", "name": None, "mails": 4, "reason": "no_reply",
+                                         "last_at": "2026-11-16T08:00:00+09:00"}]}
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    ok("R9O 시험 senders.json (근거 · 메일 목록 · auto · excluded) = 엔진 스키마 통과", SC.check_obj(sd, "senders") == [], SC.check_obj(sd, "senders"))
+    sp.write_text(dump(sd), encoding="utf-8")
+    page.click("#tab-input")
+    page.evaluate("() => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = null; C01.state.sndSel = null; C01.state.sndMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(900)
+    if page.locator("#me-select").count():
+        page.select_option("#me-select", "STAFF_A")
+        page.wait_for_timeout(200)
+    page.click(".c01-chip-snd")
+    page.wait_for_timeout(300)
+    page.locator(".c01-snditem").first.click()
+    page.wait_for_timeout(400)
+    it0 = page.locator(".c01-snditem").first.inner_text()
+    pn = page.locator("#snd-panel").inner_text()
+    ok("R9O 自動推薦 카드 = 목록 「自動推薦（仮登録）」 · 패널 설명 (自動OK にしません)", "自動推薦（仮登録）" in it0 and page.locator("#snd-autonote").count() == 1
+       and "自動OK にしません" in page.locator("#snd-autonote").inner_text(), [it0, pn[:200]])
+    evt = page.locator("#snd-ev").inner_text()
+    ok("R9O 근거 줄 = ○ BKG 업체 · × 서명 회사 (≠ 업체) · × 도메인 · 「強」 にしない 설명", all(x in evt for x in ("○", "×", "メールの BKG / IV の業者 = PACKER_A", "署名: 株式会社テスト港運 ≠ PACKER_A",
+       "登録業者のドメインではない")) and "署名の会社名が推定の業者と違う" in pn, evt)
+    ok("R9O 메일 목록 2통 (최근 먼저 · 시각 · 제목 · 添付 3 · 写真 1 · 搬入票 · IV)", page.locator(".c01-sndmail").count() == 2
+       and all(x in page.locator(".c01-sndmail").nth(0).inner_text() for x in ("10:30", "TST BKG 写真送付", "添付 3", "写真 1", "搬入票", "TST2611-01")),
+       page.locator("#snd-mails").inner_text()[:300])
+    mb = page.locator("#snd-mailbody").inner_text()
+    ok("R9O 고른 메일 = 제목 · BKG/IV · 첨부 이름 · 본문 앞부분 · 서명 줄 · 첨부 미리보기 (그림)", all(x in mb for x in ("TST BKG 写真送付", "BKGTEST01", "a.xlsx", "写真を送ります。",
+       "株式会社テスト港運")) and page.locator(".c01-sndprev img").count() == 1 and page.locator("[data-sndf]").count() == 2, mb[:300])
+    page.click("[data-sndf='1']")
+    page.wait_for_timeout(300)
+    ok("R9O 첨부 2번째 고름 = 그 파일 미리보기 (搬入票)", "搬入票_01" in (page.locator(".c01-sndprev img").get_attribute("alt") or page.locator(".c01-sndprev").inner_html()), "")
+    page.click("[data-sndm='1']")
+    page.wait_for_timeout(300)
+    mb2 = page.locator("#snd-mailbody").inner_text()
+    ok("R9O 메일 2번째 고름 = 그 본문 · 첨부 없음 · 署名に会社名がありません", "日程のご確認です。" in mb2 and "表示できる添付はありません" in mb2 and "署名に会社名がありません" in mb2, mb2[:200])
+    ok("R9O 묻는 말 3가지 (① 業者本人 · ② 代わりに送る所 · ③ 登録しない)", "このアドレスは？" in page.locator("#snd-ask").inner_text()
+       and page.locator("#snd-regbtn").inner_text().strip() == "① 業者本人" and page.locator("#snd-relaybtn").count() == 1 and "③ 登録しない" in page.locator("#snd-decline").inner_text(), "")
+    page.screenshot(path=str(shots / "r9o_sender_detail.png"), full_page=True)
+    ids0 = {x.get("action_id") for x in actions(root)}
+    page.evaluate("() => { window.__cf = []; window.__cf0 = window.confirm; window.confirm = (m) => { window.__cf.push(m); return true; }; }")
+    page.click("#snd-relaybtn")
+    page.wait_for_timeout(600)
+    new = [x for x in actions(root) if x.get("action_id") and x["action_id"] not in ids0]
+    ok("R9O 「② 代わりに送る所」 = register_sender value.relay true (확인창 「代わりに送る所」) · 엔진 스키마 통과", len(new) == 1 and new[0]["action"] == "register_sender"
+       and new[0]["value"] == {"address": "haul.taro@hl.example.invalid", "packer": "PACKER_A", "plant": None, "relay": True}
+       and "代わりに送る所" in page.evaluate("() => window.__cf")[0] and SC.check_obj(new[0], "action") == [], new)
+    page.click("#snd-regbtn")
+    page.wait_for_timeout(600)
+    new2 = [x for x in actions(root) if x.get("action_id") and x["action_id"] not in ids0 and x["action_id"] != new[0]["action_id"]]
+    ok("R9O 「① 業者本人」 = register_sender (relay 없음)", len(new2) == 1 and new2[0]["value"] == {"address": "self.hanako@sf.example.invalid", "packer": "PACKER_B", "plant": None},
+       new2)
+    page.evaluate("() => { window.confirm = window.__cf0; C01.state.sndDoneOpen = true; C01.app.render(); }")   # R9M 시험이 펼친 채로 둠 → 상태로 펼침
+    page.wait_for_timeout(200)
+    ok("R9O 「登録した · 登録しない」 목록 = 「代わりに送る所 PACKER_A」 표시", "代わりに送る所 PACKER_A" in page.locator(".c01-snddone").inner_text(), page.locator(".c01-snddone").inner_text())
+    for x in (new[0], new2[0]):
+        page.click(f"[data-sndundo='{x['action_id']}']")
+        page.wait_for_timeout(300)
+    page.evaluate("() => { C01.RULES._r = C01.RULES.senderRelay; C01.RULES.senderRelay = false; C01.state.sndSel = null; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    page.locator(".c01-snditem").first.click()
+    page.wait_for_timeout(200)
+    ok("R9O RULES.senderRelay 끔 = 「② 代わりに送る所」 버튼 없음 (① · ③ 그대로)", page.locator("#snd-relaybtn").count() == 0 and page.locator("#snd-regbtn").count() == 1, "")
+    page.evaluate("() => { C01.RULES.senderRelay = C01.RULES._r; delete C01.RULES._r; C01.state.qkind = 'all'; C01.app.render(); }")
+    sp.write_text(dump({"schema_version": 1, "kind": "sender_cards", "today": "2026-11-16", "cards": [], "counts": {}, "declined": []}), encoding="utf-8")
+    page.evaluate("() => { C01.state.sndMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(500)
+    # 自動推薦 막힌 줄 배지 (実況表 rowInfo) — 문구 확인 (함수 직접)
+    ok("R9O 自動推薦発信者(人確認) 줄 = 「自動推薦」 배지 문구 (確認・入力 「発信者未登録」 안내)", "自動推薦発信者（人確認）" in js and "data-info=\"auto_sender\"" in js, "")
+
 def r9m_checks(page, root, shots, engine):
     """v0.3.40 (R9M Part A · #271 · #272 c): 確認・入力 「発信者未登録」 (枚数は別 · 強 → 弱 → 推定なし (閉じる) · 業者登録 · 登録しない (理由) · 元に戻す) ·
     Part B-1: 催促 「最近7日のメール」 一行 · Part B-2: 実況表 「催促 n回目（MM/DD）」 (試験は数えない · 行の高さ そのまま) · 받는 쪽 대조 (엔진 키 = TOOL 키)."""
@@ -2338,11 +2450,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.40", page.title() == "LEENAI C-01 搬入票 v0.3.40", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.41", page.title() == "LEENAI C-01 搬入票 v0.3.41", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.40" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.41" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2860,6 +2972,7 @@ def main():
             r9k_fax_reason_checks(page, root, shots)
             r9l_gask_checks(page, root, shots, a.engine)
             r9m_checks(page, root, shots, a.engine)
+            r9o_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

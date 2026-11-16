@@ -470,3 +470,21 @@ body.c01-gdr-on #c01-main { margin-right: 416px; }
 .c01-sndtbl td { padding: 3px 0; }
 .c01-rrecent .k { color: #666; }
 .c01-rround { font-size: 11px; color: #555; white-space: nowrap; }
+/* v0.3.41 (R9O Part 00 · #277): 発信者未登録 — 根拠 (○ × ?) · メール一覧 · 本文 · 署名 · 添付 · 自動推薦 */
+.c01-sndauto { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #FFF3D6; color: #8A5300; font-size: 11px; font-weight: 700; }
+.c01-sndautonote { background: #FFF8E6; border-left: 3px solid #E0A800; padding: 6px 8px; font-size: 12px; margin: 4px 0 8px; }
+.c01-sndev { margin: 4px 0 10px; font-size: 13px; }
+.c01-sndev .k, .c01-sndmails .k { font-weight: 700; margin-bottom: 2px; }
+.c01-sndevrow .m { display: inline-block; width: 1.2em; font-weight: 700; }
+.c01-sndmails { margin: 6px 0 10px; }
+.c01-sndmail { display: flex; gap: 8px; width: 100%; text-align: left; border: 1px solid #ddd; background: #fff; padding: 4px 6px; margin: 2px 0; font-size: 12px; cursor: pointer; }
+.c01-sndmail.on { border-color: #1F5FAD; background: #EEF4FC; }
+.c01-sndmail .t { white-space: nowrap; color: #555; }
+.c01-sndmail .s { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c01-sndmail .a { white-space: nowrap; color: #555; }
+.c01-sndmailb { border: 1px solid #e3e3e3; padding: 6px 8px; margin-top: 4px; font-size: 12px; }
+.c01-sndmailb .r { margin: 2px 0 4px; }
+.c01-sndpre { white-space: pre-wrap; margin: 2px 0; font-size: 12px; background: #fafafa; padding: 4px 6px; max-height: 160px; overflow: auto; }
+.c01-sndprev { margin-top: 6px; max-width: 540px; }
+.c01-sndimg { max-width: 520px; max-height: 420px; }
+.c01-sndask { margin: 6px 0; font-size: 13px; }

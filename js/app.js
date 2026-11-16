@@ -1251,7 +1251,8 @@ window.C01 = window.C01 || {};
   /* ── v0.2.0 催促 プレビュー窓 (設計 §7 · 決定 #97) — 下書きだけ。送信は無効「下書きのみ」 ── */
   /* ── #109 行の情報表示 · スロット変更 (全職員 · 入れ替え確認 · _actions に 誰・いつ・前→後 · 元に戻す) ── */
   var INFO_TEXT = { CT_CHECKDIGIT_OVERRIDE: 'チェックディジット不一致を確認して保存（確認済 · 自動OK にしない）',
-    AI_GROUP_DIFF: 'AI 区分が異なる — 写真はフォルダ · ファイル名 · 業者ルールでまとめました（AI の写真の区分とは違います · 情報だけ）' };
+    AI_GROUP_DIFF: 'AI 区分が異なる — 写真はフォルダ · ファイル名 · 業者ルールでまとめました（AI の写真の区分とは違います · 情報だけ）',
+    AUTO_SENDER: '自動推薦発信者（人確認）— 自動推薦（仮登録）の送信元 または 「登録しない」 にした送信元の書類 · 写真がある行です。確認・入力 の 「発信者未登録」 で 業者本人 か確かめてください（それまで 自動OK にしません）' };
   function canSlotChange() {
     var R = C01.RULES || {};
     if (R.slotChange === 'all') return true;
@@ -1487,6 +1488,9 @@ window.C01 = window.C01 || {};
     if (rr.length) out += ' <span class="c01-ibadge" data-info="reread" title="' + esc(rr.map(rereadText).join(' / ')) + '">再判読</span>';
     var si = slotInfo(iv, r, ov);
     if (si) out += ' <span class="c01-ibadge" data-info="slot_change" title="' + esc(slotInfoText(iv, si)) + '">⇄ 枠変更</span>';
+    /* v0.3.41 (R9O · R9N 리나이에게 1): 自動推薦（仮登録）の送信元 · 「登録しない」 にした送信元の書類 · 写真の行 = 自動OK にしない理由 */
+    var ap = (r.info || []).filter(function (s) { return /^(自動推薦発信者|登録しない発信者の写真)/.test(s); });
+    if (ap.length) out += ' <span class="c01-ibadge" data-info="auto_sender" title="' + esc(INFO_TEXT.AUTO_SENDER) + '">自動推薦</span>';
     return out;
   }
   function openSlot(key) {
@@ -3047,7 +3051,7 @@ window.C01 = window.C01 || {};
       var a = L.done[k];
       if (seen[a.action_id]) return;
       out.push({ act: a.action, address: a.value.address, domain: String(a.value.address).split('@')[1] || '', action_id: a.action_id, by: a.by, at: a.at,
-        reason: a.value.reason_text || null, packer: a.value.packer || null, mine: true });
+        reason: a.value.reason_text || null, packer: a.value.packer || null, relay: !!a.value.relay, mine: true });
     });
     return out.sort(function (a, b) { return String(b.at || '').localeCompare(String(a.at || '')); });
   }
@@ -3058,6 +3062,7 @@ window.C01 = window.C01 || {};
     var g = c.guess || {}, st = SND_ST[g.strength] || SND_ST.none;
     return '<button class="c01-item c01-snditem' + (S.sndSel === c.queue_id ? ' on' : '') + '" data-snd="' + esc(c.queue_id) + '">' +
       '<span class="r1"><span class="k" style="color:' + st[1] + '">' + esc(st[0]) + (g.packer ? ' ' + esc(g.packer) : '') + '</span><span class="c01-flex"></span>' +
+      (c.auto ? '<span class="c01-sndauto" title="エンジンが強い推定で仮に登録しました（人の確認待ち）">自動推薦（仮登録）</span>' : '') +
       '<span class="cy">メール ' + (c.mails || 0) + '通</span></span>' +
       '<span class="mono t">' + esc(c.domain || '') + '</span>' +
       '<span class="s">' + esc((c.name ? c.name + ' · ' : '') + ((c.ivs || []).length ? (c.ivs || []).slice(0, 2).join(' / ') + ((c.ivs || []).length > 2 ? ' 他' : '') + ' · ' : '') +
@@ -3077,7 +3082,7 @@ window.C01 = window.C01 || {};
     if (dl.length) {
       h += '<button class="c01-btn-ghost2 c01-sndnone" id="snd-done" aria-expanded="' + (S.sndDoneOpen ? 'true' : 'false') + '">' + (S.sndDoneOpen ? '▾ ' : '▸ ') +
         '登録した · 登録しない ' + dl.length + '件</button>' + (S.sndDoneOpen ? '<div class="c01-snddone">' + dl.map(function (d) {
-          return '<div class="c01-snddrow"><span class="k">' + (d.act === 'register_sender' ? '登録 ' + esc(d.packer || '') : '登録しない') + '</span> <span class="mono">' + esc(d.domain || '') + '</span>' +
+          return '<div class="c01-snddrow"><span class="k">' + (d.act === 'register_sender' ? (d.relay ? '代わりに送る所 ' : '登録 ') + esc(d.packer || '') : '登録しない') + '</span> <span class="mono">' + esc(d.domain || '') + '</span>' +
             (d.reason ? ' <span class="t2">' + esc(d.reason) + '</span>' : '') + ' <span class="t2">' + esc(staffName(d.by) + ' ' + md(String(d.at || '').slice(0, 10))) + '</span>' +
             (S.me ? ' <button class="c01-btn-ghost2" data-sndundo="' + esc(d.action_id) + '">元に戻す</button>' : '') + '</div>';
         }).join('') + '</div>' : '');
@@ -3103,9 +3108,14 @@ window.C01 = window.C01 || {};
       '<tr><th>IV</th><td class="mono">' + esc((c.ivs || []).join(' / ') || '—') + '</td></tr>' +
       '<tr><th>推定の業者</th><td><span style="color:' + st[1] + ';font-weight:700">' + esc(st[0]) + '</span>' + (g.packer ? ' <span class="mono">' + esc(g.packer) + '</span>' : '') +
         (src.length ? ' — 根拠: ' + esc(src.join(' · ')) : '') + (g.other_packers_n ? ' · 他の業者の根拠 ' + g.other_packers_n + '件' : '') +
-        (g.note === 'domain_declined' ? '<br><span class="t2">同じドメインを 2 件 「登録しない」 にしたので推定しません</span>' : '') + '</td></tr>' +
+        (g.note === 'domain_declined' ? '<br><span class="t2">同じドメインを 2 件 「登録しない」 にしたので推定しません</span>' : '') +
+        (g.note === 'sig_mismatch' ? '<br><span class="t2">署名の会社名が推定の業者と違うので 「強」 にしません</span>' : '') + '</td></tr>' +
       '</tbody></table>';
+    if (c.auto) h += '<p class="c01-sndautonote" id="snd-autonote"><b>自動推薦（仮登録）</b> — エンジンが強い推定で <span class="mono">' + esc(c.auto.packer || '') +
+      '</span> として仮に登録しました。この送信元の書類 · 写真の行は 自動OK にしません（確認・入力 「自動推薦発信者（人確認）」）。下を見て 業者本人 なら 「① 業者本人」、違えば 「③ 登録しない」。</p>';
+    h += sndEvidenceHtml(c) + sndMailsHtml(c);
     if (!S.me) return h + '<p class="c01-note2">担当者を選んでください（右上）</p></div>';
+    h += '<div class="c01-sndask" id="snd-ask"><b>このアドレスは？</b> ① 業者本人 ② 業者の代わりに 搬入票 · 写真を送る所（港運 · 倉庫 · 下請） ③ 船会社 · 運送 · その他（登録しない）</div>';
     h += '<div class="c01-regsender" id="snd-reg"><div class="k">業者登録</div>';
     if (!regSenderOn() || !regPackers().length) {
       h += '<p class="c01-note2">' + (regSenderOn() ? '業者の一覧がまだありません（エンジンの次の出力で出ます）' : '業者登録はまだ使えません') + '</p>';
@@ -3117,12 +3127,53 @@ window.C01 = window.C01 || {};
         h += '<label class="c01-direct">営業所<select id="snd-plant"><option value="">（指定しない）</option>' +
           (pk.plants || []).map(function (x) { return '<option value="' + esc(x) + '"' + (v.regPlant === x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></label>';
       }
-      h += '<button class="c01-btn-sub" id="snd-regbtn"' + (pk ? '' : ' disabled') + '>業者登録</button>' +
-        '<p class="c01-note2">このアドレスだけ登録します（1 分ほどでこのアドレスの保留メールを分類し直し · ZIP も開きます · 元に戻せます）。推定は参考です — 必ず確認してください。</p>';
+      h += '<button class="c01-btn-sub" id="snd-regbtn"' + (pk ? '' : ' disabled') + '>① 業者本人</button>' +
+        (sndRelayOn() ? ' <button class="c01-btn-sub" id="snd-relaybtn"' + (pk ? '' : ' disabled') + ' title="この業者の代わりに搬入票 · 写真を送る所（港運 · 倉庫 · 下請）— 分類は業者本人と同じ · 催促の宛先にはしません">② 代わりに送る所</button>' : '') +
+        '<p class="c01-note2">このアドレスだけ登録します（1 分ほどでこのアドレスの保留メールを分類し直し · ZIP も開きます · 元に戻せます）。推定は参考です — 上のメール · 署名 · 添付を見て確認してください。</p>';
     }
     h += '</div><div class="c01-form-a"><div class="row"><button id="snd-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
-      '<button id="snd-decline" class="c01-btn-ghost2 danger" title="業者ではない送信元です（次からこのアドレスを推定しません · 元に戻せます）">登録しない</button></div></div></div>';
+      '<button id="snd-decline" class="c01-btn-ghost2 danger" title="業者ではない送信元です（次からこのアドレスを推定しません · 元に戻せます）">③ 登録しない</button></div></div></div>';
     return h;
+  }
+  /* v0.3.41 (R9O Part 00 · #277): 判断の根拠 — 何が合っていて (○) 何が合っていないか (×) · 分からない (?) + そのアドレスのメール一覧 (本文の頭 · 署名 · 添付の表示) */
+  function sndRelayOn() { return !!(C01.RULES || {}).senderRelay; }
+  var SND_MARK = { '○': '#1F7A3A', '×': '#B3261E', '?': '#777' };
+  function sndEvidenceHtml(c) {
+    var ev = c.evidence || [];
+    if (!ev.length) return '';
+    return '<div class="c01-sndev" id="snd-ev"><div class="k">根拠</div>' + ev.map(function (e) {
+      return '<div class="c01-sndevrow"><span class="m" style="color:' + (SND_MARK[e.mark] || '#777') + '">' + esc(e.mark) + '</span> ' + esc(e.text) + '</div>';
+    }).join('') + '</div>';
+  }
+  function sndMailIdx(c) { var k = (S.sndMail || {})[c.queue_id]; return k === undefined ? 0 : k; }
+  function sndMailsHtml(c) {
+    var ms = c.mail_list || [];
+    if (!ms.length) return '';
+    var k = Math.min(sndMailIdx(c), ms.length - 1), m = ms[k] || {};
+    var h = '<div class="c01-sndmails" id="snd-mails"><div class="k">メール（' + ms.length + (c.mails > ms.length ? ' / ' + c.mails : '') + '通 · 新しい順）</div>' + ms.map(function (x, i) {
+      return '<button class="c01-sndmail' + (i === k ? ' on' : '') + '" data-sndm="' + i + '"><span class="t">' + esc(md(String(x.received_at || '').slice(0, 10)) + ' ' + String(x.received_at || '').slice(11, 16)) + '</span>' +
+        '<span class="s">' + esc(String(x.subject || '（件名なし）').slice(0, 60)) + '</span>' +
+        '<span class="a">' + (x.attach_n || (x.attach || []).length ? '添付 ' + (x.attach_n || (x.attach || []).length) : '添付なし') + (x.photos ? ' · 写真 ' + x.photos : '') +
+        (x.hannyu ? ' · <b>搬入票</b>' : '') + ((x.ivs || []).length ? ' · ' + esc(x.ivs.slice(0, 2).join(' / ')) : '') + '</span></button>';
+    }).join('');
+    h += '<div class="c01-sndmailb" id="snd-mailbody"><div class="r"><span class="t2">件名</span> ' + esc(m.subject || '') + '</div>' +
+      ((m.bkgs || []).length || (m.ivs || []).length ? '<div class="r"><span class="t2">BKG / IV</span> <span class="mono">' + esc((m.bkgs || []).concat(m.ivs || []).join(' / ')) + '</span></div>' : '') +
+      ((m.attach || []).length ? '<div class="r"><span class="t2">添付</span> ' + esc(m.attach.join(' · ')) + '</div>' : '') +
+      '<div class="r"><span class="t2">本文（引用は除く · 頭の部分）</span><pre class="c01-sndpre">' + esc((m.body_head || []).join('\n') || '（本文なし）') + '</pre></div>' +
+      '<div class="r"><span class="t2">署名</span><pre class="c01-sndpre">' + esc((m.sig_lines || []).join('\n') || '（署名に会社名がありません）') + '</pre></div>';
+    var fs = m.files || [];
+    if (fs.length) {
+      var fk = Math.min((S.sndFile || {})[c.queue_id + ':' + k] || 0, fs.length - 1), f = fs[fk] || {};
+      h += '<div class="c01-qfiles">' + fs.map(function (x, i) {
+        return '<button class="c01-chip' + (i === fk ? ' on' : '') + '" data-sndf="' + i + '" title="' + esc(x.name || '') + '">' + (i + 1) + '. ' + esc(String(x.name || '').slice(0, 24)) + '</button>';
+      }).join('') + ' <button class="c01-btn-sub" data-sndopen="' + esc(f.path || '') + '" title="SharePoint で開く（別タブ）">別タブで開く</button></div>';
+      if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(f.path || '')) h += '<div class="c01-sndprev">' + imgTag(f.path, 'c01-sndimg', f.name) + '</div>';
+      else if (/\.pdf$/i.test(f.path || '')) h += '<div class="c01-sndprev">' + pdfTag(f.path, 1, false, {}, 'snd:' + f.path, 520) + '</div>';
+      else h += '<p class="c01-note2">このファイルは画面に表示できません（' + esc(f.name || '') + '）— 「別タブで開く」で開けます</p>';
+    } else {
+      h += '<p class="c01-note2">表示できる添付はありません' + ((m.attach || []).length ? '（添付はまだ出力されていません · ZIP は登録後に開きます）' : '') + '</p>';
+    }
+    return h + '</div></div>';
   }
   function sndDeclineDialog(c, done) {
     var old = $('c01-nhdlg');
@@ -3175,6 +3226,13 @@ window.C01 = window.C01 || {};
     });
     var c = sndOf(S.sndSel);
     if (!c) return;
+    root.querySelectorAll('[data-sndm]').forEach(function (el) {
+      el.onclick = function () { S.sndMail = S.sndMail || {}; S.sndMail[c.queue_id] = +el.getAttribute('data-sndm'); render(); };
+    });
+    root.querySelectorAll('[data-sndf]').forEach(function (el) {
+      el.onclick = function () { S.sndFile = S.sndFile || {}; S.sndFile[c.queue_id + ':' + sndMailIdx(c)] = +el.getAttribute('data-sndf'); render(); };
+    });
+    root.querySelectorAll('[data-sndopen]').forEach(function (el) { el.onclick = function () { if (el.getAttribute('data-sndopen')) openTab(el.getAttribute('data-sndopen')); }; });
     var key = 'snd:' + c.queue_id;
     var v = function () { return S.qvals[key] || (S.qvals[key] = {}); };
     var inp = $('snd-packer');
@@ -3185,17 +3243,20 @@ window.C01 = window.C01 || {};
     }
     if ($('snd-plant')) $('snd-plant').onchange = function () { v().regPlant = $('snd-plant').value || null; };
     if ($('snd-skip')) $('snd-skip').onclick = function () { S.sndSel = sndNext(c); render(); };
-    if ($('snd-regbtn')) $('snd-regbtn').onclick = function () {
+    var regAs = function (relay) {
       var g = c.guess || {}, x = S.qvals[key] || {};
       var code = x.regPacker !== undefined ? x.regPacker : (g.packer || '');
       var pk = regPackers().filter(function (p) { return p.code === code; })[0];
       if (!S.me || !pk) return;
-      if (!window.confirm(c.address + ' を ' + pk.code + (x.regPlant ? ' · ' + x.regPlant : '') + ' として登録します。よろしいですか？')) return;
+      if (!window.confirm(c.address + ' を ' + pk.code + (x.regPlant ? ' · ' + x.regPlant : '') + (relay ? ' の「代わりに送る所」（港運 · 倉庫 · 下請）' : '') + ' として登録します。よろしいですか？')) return;
       var nx = sndNext(c);
-      writeAction(mkAction('register_sender', { iv: null, ct: null, field: null, source: null, queue_id: c.queue_id,
-        value: { address: c.address, packer: pk.code, plant: x.regPlant || null } }))
-        .then(function () { S.sndSel = nx; toast('業者を登録しました（1 分ほどで分類し直します · 「登録した · 登録しない」 から元に戻せます）', 'success'); render(); });
+      var val = { address: c.address, packer: pk.code, plant: x.regPlant || null };
+      if (relay) val.relay = true;                                  /* v0.3.41 (R9O 00-3): ② 代わりに送る所 = human_sender relay (催促の宛先にしない) */
+      writeAction(mkAction('register_sender', { iv: null, ct: null, field: null, source: null, queue_id: c.queue_id, value: val }))
+        .then(function () { S.sndSel = nx; toast((relay ? '「代わりに送る所」として' : '業者を') + '登録しました（1 分ほどで分類し直します · 「登録した · 登録しない」 から元に戻せます）', 'success'); render(); });
     };
+    if ($('snd-regbtn')) $('snd-regbtn').onclick = function () { regAs(false); };
+    if ($('snd-relaybtn')) $('snd-relaybtn').onclick = function () { regAs(true); };
     if ($('snd-decline')) $('snd-decline').onclick = function () {
       if (!S.me) return;
       sndDeclineDialog(c, function (why) {
