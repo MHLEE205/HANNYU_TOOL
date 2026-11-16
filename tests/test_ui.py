@@ -135,7 +135,7 @@ def photo_tab_checks(page, ctx, shots):
     tab2.wait_for_selector(".c01-pv-th", timeout=10000)
     ok("E 다른 컨테이너 = 다른 탭 (이름 다름)", tab2.evaluate("window.name") != name and tab2.evaluate("window.name").startswith("c01-photo-"))
     tab2.close()
-    # 실況表에 없는 해시 · 원래 화면 없음
+    # 実況表에 없는 해시 · 원래 화면 없음
     with ctx.expect_page(timeout=10000) as pi3:
         page.evaluate("window.open('photo.html?k=00000000', 'c01-photo-test')")
     t3 = pi3.value
@@ -1978,6 +1978,132 @@ def r9f_ask_checks(page, root, shots):
     page.wait_for_timeout(200)
 
 
+def r9l_gask_checks(page, root, shots, engine):
+    """v0.3.39 (R9L · #273): 오른쪽 위 「AI 相談」 (화면 전체) — 使い方 옆 버튼 · 오른쪽 드로어 (実況表 · 確認・入力 둘 다) · 카드 대화와 따로 (global:{담당자}) ·
+    답의 「改善依頼の案」 → 「この内容で依頼」 = _actions improve_request (엔진 스키마 통과) · 「やめる」 = 기록 0 · 접수 (requests.json) = 토스트 No ·
+    「依頼一覧」 탭 (自分 / 全体) · Esc · 카드 드로어 열면 닫힘 · Powered 줄."""
+    page.evaluate("() => { window._toasts = []; const o = LEENAI.toast; LEENAI.toast = (m, t) => { window._toasts.push(m); return o && o(m, t); }; }")
+    page.keyboard.press("Escape")
+    page.click("#tab-main")
+    page.wait_for_timeout(300)
+    nav = page.evaluate("""() => { const h = document.getElementById('help-open'), g = document.getElementById('gask-open');
+        return { g: !!g, txt: g && g.textContent, next: !!(h && g && h.nextElementSibling === g) }; }""")
+    ok("R9L 「AI 相談」 버튼 = 使い方 바로 옆 (実況表)", nav["g"] and nav["txt"] == "AI 相談" and nav["next"], nav)
+    page.click("#gask-open")
+    page.wait_for_timeout(300)
+    box = page.locator("#gask-box")
+    ok("R9L 実況表 에서 드로어 열림 · 제목 「AI 相談（全体）」 · 試験表示 · Powered 줄", box.count() == 1 and "AI 相談（全体）" in box.inner_text()
+       and "✦ Powered by LEENAI Automation System" in box.inner_text() and page.locator("#gask-open").get_attribute("aria-expanded") == "true")
+    before = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
+    page.fill("#gask-in", "沖縄テスト紙業 から TSTBK0000001 のメール来てるのに写真がない")
+    page.press("#gask-in", "Enter")
+    page.wait_for_timeout(500)
+    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
+    me = page.evaluate("() => (C01.state.me || {}).email")
+    gc = g.get("card") or {}
+    ok("R9L 질문 → _actions/ask/{날짜}/{id}.json · scope global · key global:{담당자} · IV/CT 없음", len(new) == 1 and g.get("scope") == "global"
+       and gc.get("key") == "global:" + str(me) and gc.get("kind") == "global" and gc.get("iv") is None and gc.get("ct") is None, g)
+    ok("R9L 보낸 뒤 「回答待ち…」 (전체 드로어)", page.locator("#gask-box .c01-ask-a.wait").count() == 1)
+    # 카드 대화와 섞이지 않음: 카드 드로어 열면 전체 드로어 닫힘 · 카드 기록에 전체 질문 없음
+    page.click("#tab-input")
+    page.wait_for_timeout(300)
+    page.locator("[data-q='" + "z" * 15 + "7']").first.click()
+    page.wait_for_timeout(300)
+    page.click("#q-ask")
+    page.wait_for_timeout(300)
+    card_qs = page.locator("#ask-box .c01-ask-q").all_inner_texts()
+    ok("R9L 카드 드로어 열면 전체 드로어 닫힘 · 카드 기록에 전체 질문 0", page.locator("#gask-box").count() == 0 and page.locator("#ask-box").count() == 1
+       and not any("沖縄テスト紙業" in t for t in card_qs), card_qs)
+    page.click("#gask-open")
+    page.wait_for_timeout(300)
+    gq = page.locator("#gask-box .c01-ask-q").all_inner_texts()
+    ok("R9L 確認・入力 에서도 열림 · 카드 드로어 닫힘 · 전체 기록 = 전체 질문만 (1건)", page.locator("#ask-box").count() == 0 and len(gq) == 1 and "沖縄テスト紙業" in gq[0], gq)
+    imp = {"title": "分類済みメールの ZIP を開く", "summary": "BKG で分類済みでも 発信者未登録で ZIP が開かれていない。", "cause": "発信者未登録",
+           "mail_ids": [478], "ivs": ["TST2611-01"], "bkgs": ["TSTBK0000001"]}
+    rep = {"ask_id": g["ask_id"], "scope": "global", "status": "ok", "kind": "investigation", "suggestions": [], "approval_request": "", "improve": imp,
+           "answer": "メール 478 は BKG で分類済みですが、ZIP が開かれていません。\n調べた内容: メール検索 TSTBK0000001 · メールの処理経過 478"}
+    (root / "_actions" / "ask_reply").mkdir(parents=True, exist_ok=True)
+    (root / "_actions" / "ask_reply" / f"{g['ask_id']}.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    ib = page.locator("#gask-box .c01-imp")
+    ok("R9L 답 + 「改善依頼の案」 (제목 · 요약 · 원인 · mail · IV) + 「この内容で依頼」 「やめる」", ib.count() == 1 and "分類済みメールの ZIP を開く" in ib.inner_text()
+       and "推定原因" in ib.inner_text() and page.locator("[data-impsend]").count() == 1 and page.locator("[data-impdrop]").count() == 1
+       and "調べた内容" in page.locator("#gask-box .c01-ask-txt").last.inner_text())
+    page.screenshot(path=str(shots / "r9l_gask_answer.png"), full_page=False)
+    n0 = len([x for x in actions(root) if x.get("action") == "improve_request"])
+    page.locator("[data-impsend]").click()
+    page.wait_for_timeout(500)
+    acts = [x for x in actions(root) if x.get("action") == "improve_request"]
+    a = acts[-1] if acts else {}
+    v = a.get("value") or {}
+    ok("R9L 「この内容で依頼」 → _actions improve_request 1건 (ask_id · 질문 · 제목 · 요약 · mail_ids · by)", len(acts) == n0 + 1 and v.get("ask_id") == g["ask_id"]
+       and v.get("title") == imp["title"] and v.get("mail_ids") == [478] and v.get("question", "").startswith("沖縄テスト紙業") and a.get("by") == me
+       and a.get("iv") is None and a.get("ct") is None and a.get("field") is None and a.get("source") is None, a)
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    ok("R9L 보낸 action = 엔진 스키마 통과 (action.schema.json improve_request)", SC.check_obj(a, "action") == [], SC.check_obj(a, "action"))
+    ok("R9L 보낸 뒤 버튼 사라짐 · 「受付番号は まもなく」 · 토스트", page.locator("[data-impsend]").count() == 0 and "まもなく" in ib.inner_text()
+       and any("依頼を送りました" in t for t in page.evaluate("() => window._toasts")), page.evaluate("() => window._toasts"))
+    rq = {"schema_version": 1, "kind": "improve_requests", "today": "2026-11-16", "items": [
+        {"no": 7, "ask_id": g["ask_id"], "at": "2026-11-16T10:30:00+09:00", "by": me, "by_name": "担当A", "title": imp["title"], "summary": imp["summary"],
+         "question": "q", "status": "受付", "memo": None, "version": None, "plan": "予定: 次のラウンド (〜13:13)", "status_at": None},
+        {"no": 6, "ask_id": "kOTHER", "at": "2026-11-16T09:00:00+09:00", "by": "other@example.invalid", "by_name": "担当B", "title": "他の人の依頼",
+         "summary": "s", "question": "q", "status": "反映済", "memo": "直しました", "version": "v0.5.98", "plan": "反映済 (v0.5.98)", "status_at": None}]}
+    (root / "_data" / "requests.json").write_text(json.dumps(rq, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(900)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    ts = page.evaluate("() => window._toasts")
+    ok("R9L 엔진 접수 (requests.json) → 토스트 「依頼を受け付けました（No.7）」 1번 · 상자에 No.7", ts.count("依頼を受け付けました（No.7）") == 1
+       and "No.7" in page.locator("#gask-box .c01-imp").inner_text(), ts)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(200)
+    ok("R9L 토스트 다시 안 나옴 (render 다시)", page.evaluate("() => window._toasts").count("依頼を受け付けました（No.7）") == 1)
+    page.locator("[data-gtab='reqs']").click()
+    page.wait_for_timeout(300)
+    rows = page.locator("#gask-box .c01-reqs tbody tr")
+    ok("R9L 「依頼一覧」 탭 = 내 요청만 (No.7 · 受付 · 予定)", rows.count() == 1 and "受付" in rows.first.inner_text() and "予定: 次のラウンド" in rows.first.inner_text(),
+       rows.all_inner_texts())
+    page.locator("[data-reqall='1']").click()
+    page.wait_for_timeout(300)
+    txt = page.locator("#gask-box .c01-reqs").inner_text()
+    ok("R9L 「全体」 = 다른 사람 요청도 (No.6 反映済 · 반영 판 · 메모 · 이름)", rows.count() == 2 and "反映済 (v0.5.98)" in txt and "直しました" in txt and "担当B" in txt, txt)
+    page.screenshot(path=str(shots / "r9l_gask_reqs.png"), full_page=False)
+    page.locator("[data-gtab='chat']").click()
+    page.wait_for_timeout(200)
+    # 두 번째 질문 · 「やめる」 = 기록 0
+    page.fill("#gask-in", "今日 FAX が 0 件なのは正常？")
+    page.press("#gask-in", "Enter")
+    page.wait_for_timeout(500)
+    g2 = sorted([p for p in (root / "_actions" / "ask").rglob("*.json")], key=lambda x: x.stat().st_mtime)[-1]
+    g2 = json.loads(g2.read_text(encoding="utf-8"))
+    rep2 = {**rep, "ask_id": g2["ask_id"], "answer": "FAX は今日 3 件受信しています。", "improve": {**imp, "title": "FAX の件数表示"}}
+    (root / "_actions" / "ask_reply" / f"{g2['ask_id']}.json").write_text(json.dumps(rep2, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    n1 = len([x for x in actions(root) if x.get("action") == "improve_request"])
+    page.locator("[data-impdrop]").click()
+    page.wait_for_timeout(300)
+    ok("R9L 「やめる」 = 기록 0 · 「依頼しませんでした」", len([x for x in actions(root) if x.get("action") == "improve_request"]) == n1
+       and "依頼しませんでした" in page.locator("#gask-box").inner_text() and page.locator("[data-impsend]").count() == 0)
+    ok("R9L 전체 기록 2건 · 순서", page.locator("#gask-box .c01-ask-q").count() == 2)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    ok("R9L Esc = 닫힘", page.locator("#gask-box").count() == 0 and page.locator("#gask-open").get_attribute("aria-expanded") == "false")
+    page.evaluate("() => { C01.ASK._g = C01.ASK.global; C01.ASK.global = false; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    ok("R9L C01.ASK.global 거짓 = 버튼 없음 (카드 「AIに相談」 은 그대로)", page.locator("#gask-open").count() == 0 and page.locator("#q-ask").count() == 1)
+    page.evaluate("() => { C01.ASK.global = C01.ASK._g; delete C01.ASK._g; C01.app.render(); }")
+    page.wait_for_timeout(200)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -2034,11 +2160,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.38", page.title() == "LEENAI C-01 搬入票 v0.3.38", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.39", page.title() == "LEENAI C-01 搬入票 v0.3.39", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.38" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.39" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2430,7 +2556,7 @@ def main():
                 page.wait_for_selector(".c01-input")
                 ok("候補書類あり → 確認・入力 「業者・IV 未定」 · IV 거름 표시", page.locator(".c01-qiv").count() == 1 and page.locator(".c01-item").count() == 1)
                 page.click("#qiv-clear")
-            # 실況표 で 確認済 · 確認・入力 바지
+            # 実況表 で 確認済 · 確認・入力 바지
             page.click("#tab-main")
             # v0.3.12 (R7K Part G · #153): 作業日 = 搬入票 값 (검정) · 없으면 칸 COMPASS 예정일 (회색 · 오늘 이전 = 굵은 빨강) · 표시만
             page.click("[data-port='all']")
@@ -2554,6 +2680,7 @@ def main():
             r9e_ccfixed_checks(page, root, shots, a.engine)
             r9k_remind_live_checks(page, root, shots, a.engine)
             r9k_fax_reason_checks(page, root, shots)
+            r9l_gask_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

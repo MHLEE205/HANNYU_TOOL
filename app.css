@@ -438,3 +438,18 @@ button.st-wait.c01-candbtn { background: none; border: 1px dashed var(--warn, #c
 .c01-ask-txt { white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 1500px) { .c01-askdr { flex-basis: 320px; width: 320px; } .c01-input.c01-askon .c01-list { flex-basis: 240px; min-width: 220px; } }
 @media (max-width: 1100px) { .c01-input.c01-askon { flex-wrap: wrap; } .c01-askdr { position: fixed; right: 0; top: var(--c01-hdr-h, 52px); z-index: 30; max-height: calc(100vh - var(--c01-hdr-h, 52px)); height: calc(100vh - var(--c01-hdr-h, 52px)); border-radius: 0; box-shadow: -8px 0 24px rgba(0, 0, 0, .2); } }
+/* v0.3.39 (R9L · #273): 右上 「AI 相談」 (画面全体) — 右横に固定 (実況表 · 確認・入力 どちらでも) · 依頼一覧 */
+body.c01-gdr-on #c01-main { margin-right: 416px; }
+.c01-gaskbtn.on { border-color: var(--text); color: var(--text); font-weight: 600; }
+.c01-askdr.c01-gdr { position: fixed; right: 12px; top: calc(var(--c01-hdr-h, 52px) + 8px); width: 400px; height: calc(100vh - var(--c01-hdr-h, 52px) - 24px); z-index: 40;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, .18); }
+.c01-gtabs { display: flex; gap: 4px; padding: 6px 12px 0; border-bottom: 1px solid var(--border); }
+.c01-gtabs .c01-tab { font-size: 12px; padding: 4px 10px; }
+.c01-imp { margin-top: 8px; padding: 8px; border: 1px dashed var(--warn, #c80); border-radius: 8px; white-space: normal; display: grid; gap: 4px; }
+.c01-imp .k { font-weight: 700; font-size: 12px; } .c01-imp .ttl { font-weight: 600; }
+.c01-imp-b { display: flex; gap: 6px; margin-top: 4px; } .c01-imp-ok { color: var(--ok, #2a7); font-weight: 600; }
+.c01-reqsw { display: flex; gap: 6px; margin-bottom: 8px; }
+.c01-reqs { width: 100%; border-collapse: collapse; font-size: 12px; } .c01-reqs th, .c01-reqs td { border-bottom: 1px solid var(--border); padding: 4px; text-align: left; vertical-align: top; }
+.c01-reqst { font-weight: 600; } .c01-reqst.s-反映済 { color: var(--ok, #2a7); } .c01-reqst.s-対応しない { color: var(--text2); }
+.c01-gdr .c01-powered { margin: 6px 0 0; font-size: 10px; text-align: right; color: var(--text2); }
+@media (max-width: 1100px) { body.c01-gdr-on #c01-main { margin-right: 0; } .c01-askdr.c01-gdr { right: 0; top: var(--c01-hdr-h, 52px); width: 100vw; max-width: 420px; border-radius: 0; } }

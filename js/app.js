@@ -139,7 +139,8 @@ window.C01 = window.C01 || {};
     qkind: 'all', qiv: null, qsel: null, qvals: {}, qchoice: {}, qfocus: null, zoom: 100, rot: 0, qmsg: {}, pdfPage: {}, showOldFax: false, qfile: {},
     timer: null, remind: null, modal: null,
     asks: [], askOpen: {}, askDraft: {}, askTimer: null,    /* v0.3.25 (R7Z Part A): AI 相談 */
-    askDr: false                                            /* v0.3.36 (R9F · #267): AIに相談 ドロアー (カードを替えても開いたまま · 中身 = 今のカード) */
+    askDr: false,                                           /* v0.3.36 (R9F · #267): AIに相談 ドロアー (カードを替えても開いたまま · 中身 = 今のカード) */
+    gDr: false, gTab: 'chat', gDraft: '', gReqAll: false, reqs: null   /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (画面全体) · 依頼一覧 */
   };
   C01.state = S;
 
@@ -822,6 +823,7 @@ window.C01 = window.C01 || {};
       '<span class="c01-sub">' + esc(t) + ' 時点 · 最終更新 <span id="c01-upd">' + upd + '</span>（自動更新）</span>' +
       '<span class="c01-flex"></span>' +
       '<button id="help-open" class="c01-btn-sub c01-helpbtn" title="この TOOL の使い方（並行期間中の注意）">使い方</button>' +
+      (gaskOn() ? '<button id="gask-open" class="c01-btn-sub c01-gaskbtn' + (S.gDr ? ' on' : '') + '" aria-expanded="' + (S.gDr ? 'true' : 'false') + '" aria-controls="gask-box" title="カードと関係ない質問 · 「メールが来ているのに出ない」 などの改善依頼 (画面全体)">AI 相談</button>' : '') +   /* v0.3.39 (R9L · #273) */
       (graphMode()
         ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spLabel || C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spLabel || C01.SOURCE.spRoot) + '</span>' +
           '<span class="c01-me' + (S.me && S.me.unregistered ? ' c01-warn' : '') + '" id="me-name"' + (S.me && S.me.unregistered ? ' title="ログインしたメール (' + esc(S.me.email) + ') が職員マスター (staff) にありません — マスターの確認が必要"' : '') + '>担当者 ' + esc(S.me ? S.me.name : '?') + '</span>'
@@ -830,6 +832,7 @@ window.C01 = window.C01 || {};
     $('tab-main').onclick = function () { S.view = 'main'; render(); };
     $('tab-input').onclick = function () { S.view = 'input'; if (!S.qsel) { var f = openQueue()[0]; S.qsel = f ? f.queue_id : null; } render(); };
     $('help-open').onclick = openHelp;
+    if ($('gask-open')) $('gask-open').onclick = function () { gaskToggle(!S.gDr); };
     if ($('me-select')) $('me-select').onchange = function (e) {
       var s = staffList().filter(function (x) { return x.code === e.target.value; })[0] || null;
       S.me = s ? { code: s.code, name: s.name || s.code, email: s.email } : null;
@@ -2132,6 +2135,7 @@ window.C01 = window.C01 || {};
   }
   document.addEventListener('keydown', function (e) {
     if (!S.lb && e.key === 'Escape' && S.askDr && S.view === 'input' && !S.qedit) { askToggle(false); return; }   /* v0.3.36 (R9F · #267): Esc = ドロアーを閉じる */
+    if (!S.lb && e.key === 'Escape' && S.gDr && !S.modal) { gaskToggle(false); return; }                              /* v0.3.39 (R9L): 全体の AI 相談も Esc で閉じる */
     if (!S.lb) return;
     if (e.key === 'ArrowLeft') { S.lb.idx -= 1; renderLightbox(); }
     if (e.key === 'ArrowRight') { S.lb.idx += 1; renderLightbox(); }
@@ -3099,7 +3103,7 @@ window.C01 = window.C01 || {};
       var changed = sig(S.asks) !== sig(xs.concat(mine));
       S.asks = xs.concat(mine);
       askSchedule();
-      if (changed && S.view === 'input' && !busy()) render({ auto: true });     /* 答えが来た · 他の人の質問 = 描き直す (入力中は後で) */
+      if (changed && (S.view === 'input' || S.gDr) && !busy()) render({ auto: true });     /* 答えが来た · 他の人の質問 = 描き直す (入力中は後で) · v0.3.39: 全体ドロアーも */
     }).catch(function () { /* 読めない時は次回 */ });
   }
   function askPending() { return (S.asks || []).some(function (x) { return !x.reply; }); }
@@ -3124,6 +3128,7 @@ window.C01 = window.C01 || {};
   }
   function askToggle(on) {
     S.askDr = !!on;
+    if (S.askDr) S.gDr = false;                                    /* v0.3.39 (R9L): 右横は 1 つ (全体の AI 相談を閉じる) */
     render();
     if (on) { var inp = $('ask-in'); if (inp) inp.focus(); }
   }
@@ -3226,6 +3231,163 @@ window.C01 = window.C01 || {};
     });
   }
 
+  /* ── v0.3.39 (R9L · #273): 右上 「AI 相談」 = 画面全体の質問 (カードと関係ない質問 · 改善依頼) ──
+     会話 = 'global:{担当者}' (カードの会話と混ざらない) · 質問 = 今までと同じ {base}/ask/{日付}/{ask_id}.json (scope 'global') ·
+     答えに 「改善依頼の案」 があれば 「この内容で依頼」 / 「やめる」 → _actions improve_request (エンジンは受付だけ) ·
+     「依頼一覧」 = エンジン _data/requests.json (見るだけ · 状態はリナイ · トールが変える) */
+  var GASK_QUICK = ['メールが来ているのに写真がない', 'このメールが保留なのはなぜ？', '今日の FAX は正常？'];
+  function gaskOn() { return askOn() && !!(C01.ASK && C01.ASK.global); }
+  function gaskKey() { return 'global:' + ((S.me && S.me.email) || ''); }
+  function gaskBox() {
+    var el = $('c01-gask');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'c01-gask';
+      ($('app') || document.body).appendChild(el);
+    }
+    return el;
+  }
+  function gaskThread() {
+    var k = gaskKey();
+    return (S.asks || []).filter(function (x) { return x.ask && x.ask.card && x.ask.card.key === k; })
+      .sort(function (a, b) { return String(a.ask.at) < String(b.ask.at) ? -1 : 1; });
+  }
+  function gaskToggle(on) {
+    S.gDr = !!on;
+    if (S.gDr) S.askDr = false;                                    /* カードのドロアーと 同時に開かない (右横は 1 つ) */
+    render();
+    if (S.gDr && S.gTab !== 'reqs') { var inp = $('gask-in'); if (inp) inp.focus(); }
+  }
+  /* 依頼を送ったか (エンジンが受け付けた No · 送信中) — _actions improve_request の value.ask_id · requests.json の ask_id */
+  function impState(aid) {
+    var it = ((S.reqs && S.reqs.items) || []).filter(function (x) { return x.ask_id === aid; })[0];
+    if (it) return { no: it.no, status: it.status };
+    var sent = (S.actions || []).concat(S.mine || []).some(function (x) {
+      var a = x.action || x;
+      return a.action === 'improve_request' && a.value && a.value.ask_id === aid;
+    });
+    if (sent) return { sent: true };
+    return S.impDrop && S.impDrop[aid] ? { dropped: true } : null;
+  }
+  function impBox(a, r) {
+    var im = r.improve;
+    if (!im) return '';
+    var st = impState(a.ask_id);
+    var h = '<div class="c01-imp"><div class="k">改善依頼の案</div><div class="ttl">' + esc(im.title || '') + '</div>' +
+      '<div class="t2">' + esc(im.summary || '') + '</div>' + (im.cause ? '<div class="t2">推定原因: ' + esc(im.cause) + '</div>' : '') +
+      ((im.mail_ids || []).length || (im.ivs || []).length ? '<div class="t2 mono">' + esc([(im.mail_ids || []).length ? 'mail ' + im.mail_ids.join(', ') : '',
+        (im.ivs || []).length ? 'IV ' + im.ivs.join(', ') : ''].filter(Boolean).join(' · ')) + '</div>' : '');
+    if (st && st.no) h += '<div class="c01-imp-ok">依頼を受け付けました（No.' + esc(String(st.no)) + '） · ' + esc(st.status || '') + '</div>';
+    else if (st && st.sent) h += '<div class="c01-imp-ok">依頼を送りました（受付番号は まもなく）</div>';
+    else if (st && st.dropped) h += '<div class="t2">依頼しませんでした</div>';
+    else h += '<div class="c01-imp-b"><button class="c01-btn-ghost2" data-impsend="' + esc(a.ask_id) + '">この内容で依頼</button>' +
+      '<button class="c01-btn-sub" data-impdrop="' + esc(a.ask_id) + '">やめる</button></div>';
+    return h + '</div>';
+  }
+  function reqsHtml() {
+    var all = (S.reqs && S.reqs.items) || null;
+    if (!all) return '<p class="t2 c01-ask-empty">依頼一覧はまだありません（エンジンの一覧なし）。</p>';
+    var me = ((S.me && S.me.email) || '').toLowerCase();
+    var mine = S.gReqAll ? all : all.filter(function (x) { return String(x.by || '').toLowerCase() === me; });
+    var h = '<div class="c01-reqsw"><button class="c01-chip' + (S.gReqAll ? '' : ' on') + '" data-reqall="0">自分の依頼</button>' +
+      '<button class="c01-chip' + (S.gReqAll ? ' on' : '') + '" data-reqall="1">全体</button></div>';
+    if (!mine.length) return h + '<p class="t2 c01-ask-empty">依頼はまだありません。</p>';
+    return h + '<table class="c01-reqs"><thead><tr><th>No</th><th>日付</th><th>内容</th><th>状態</th></tr></thead><tbody>' + mine.map(function (x) {
+      return '<tr><td class="mono">' + esc(String(x.no)) + '</td><td class="mono">' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + '</td>' +
+        '<td>' + esc(x.title || '') + (S.gReqAll && x.by_name ? ' <span class="t2">(' + esc(x.by_name) + ')</span>' : '') +
+        (x.memo ? '<div class="t2">' + esc(x.memo) + '</div>' : '') + '</td>' +
+        '<td><span class="c01-reqst s-' + esc(x.status || '') + '">' + esc(x.status || '') + '</span><div class="t2">' + esc(x.plan || '') + '</div></td></tr>';
+    }).join('') + '</tbody></table>';
+  }
+  function gaskDrawer() {
+    var th = gaskThread(), tab = S.gTab === 'reqs' ? 'reqs' : 'chat';
+    var h = '<aside class="c01-askdr c01-gdr" id="gask-box" role="complementary" aria-label="AI 相談（全体）">' +
+      '<div class="c01-askdr-h"><div><b>AI 相談（全体）</b>' + (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') +
+      '<span class="t2">カードと関係ない質問 · 「来ているのに出ない」 などの改善依頼</span></div>' +
+      '<button type="button" class="c01-x" id="gask-close" title="閉じる (Esc)" aria-label="閉じる">✕</button></div>' +
+      '<div class="c01-gtabs"><button class="c01-tab' + (tab === 'chat' ? ' on' : '') + '" data-gtab="chat">相談</button>' +
+      '<button class="c01-tab' + (tab === 'reqs' ? ' on' : '') + '" data-gtab="reqs">依頼一覧</button></div>';
+    if (tab === 'reqs') return h + '<div class="c01-ask-log">' + reqsHtml() + '</div><p class="c01-powered">✦ Powered by LEENAI Automation System</p></aside>';
+    h += '<div class="c01-ask-log">' + (th.length ? '' : '<p class="t2 c01-ask-empty">画面全体についての質問はまだありません。例: 「〇〇 から BKG △△ のメールが来ているのに写真がない」。AI がメール · ブッキングを調べて 原因を答えます (データは変えません)。</p>') + th.map(function (x) {
+      var a = x.ask, r = x.reply;
+      var who = esc(a.by_name || a.by || '') + ' · ' + esc(String(a.at || '').slice(11, 16));
+      var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
+      if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
+      return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
+        (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') + impBox(a, r) + '</div>';
+    }).join('') + '</div>';
+    h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + GASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-gaskq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
+    h += '<div class="c01-ask-in"><input id="gask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.gDraft || '') + '" aria-label="AI への質問（全体）">' +
+      '<button id="gask-send" class="c01-btn-ghost2">送信</button></div><p class="c01-powered">✦ Powered by LEENAI Automation System</p></div></aside>';
+    return h;
+  }
+  function gaskSend(text) {
+    text = String(text || '').trim();
+    if (!text) return;
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    var a = { schema_version: 1, ask_id: askId(), at: jstNow(), by: S.me.email, by_name: S.me.name || '', lang: /[가-힣]/.test(text) ? 'ko' : 'ja',
+      question: text.slice(0, 1000), scope: 'global', card: { key: gaskKey(), kind: 'global', queue_id: null, iv: null, ct: null, open: {} } };
+    S.asks.push({ ask: a, reply: null, local: true });
+    S.gDraft = '';
+    render();
+    S.src.writeAsk(a).then(function () { askSchedule(); }).catch(function (e) {
+      S.asks = S.asks.filter(function (x) { return x.ask.ask_id !== a.ask_id; });
+      toast('送信できませんでした: ' + e.message, 'error'); render();
+    });
+  }
+  function impSend(aid) {
+    var x = (S.asks || []).filter(function (y) { return y.ask.ask_id === aid; })[0];
+    var im = x && x.reply && x.reply.improve;
+    if (!im) return;
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    if (impState(aid)) return;                                     /* 2 回押し = 1 件 */
+    var v = { ask_id: aid, question: String(x.ask.question || '').slice(0, 1000), title: String(im.title || '').slice(0, 200),
+      summary: String(im.summary || '').slice(0, 1200), cause: im.cause ? String(im.cause).slice(0, 600) : null,
+      mail_ids: (im.mail_ids || []).filter(function (n) { return typeof n === 'number'; }).slice(0, 20),
+      ivs: (im.ivs || []).map(String).slice(0, 20), bkgs: (im.bkgs || []).map(String).slice(0, 20), by_name: S.me.name || null };
+    var a = mkAction('improve_request', { value: v });
+    S.impWait = S.impWait || {};
+    S.impWait[aid] = 1;
+    writeAction(a).then(function () { toast('依頼を送りました（受付番号は まもなく）', 'success'); }).catch(function () { delete S.impWait[aid]; });
+  }
+  /* エンジンが受け付けた (requests.json に ask_id が出た) = トースト 「依頼を受け付けました（No.xx）」 (1 回だけ) */
+  function impToasts() {
+    if (!S.impWait) return;
+    Object.keys(S.impWait).forEach(function (aid) {
+      var st = impState(aid);
+      if (st && st.no) { delete S.impWait[aid]; toast('依頼を受け付けました（No.' + st.no + '）', 'success'); }
+    });
+  }
+  function gaskBind() {
+    var box = $('gask-box');
+    if (!box) return;
+    if ($('gask-close')) $('gask-close').onclick = function () { gaskToggle(false); };
+    box.querySelectorAll('[data-gtab]').forEach(function (el) { el.onclick = function () { S.gTab = el.getAttribute('data-gtab'); render(); }; });
+    box.querySelectorAll('[data-reqall]').forEach(function (el) { el.onclick = function () { S.gReqAll = el.getAttribute('data-reqall') === '1'; render(); }; });
+    var lg = box.querySelector('.c01-ask-log'), n = gaskThread().length + (S.gTab === 'reqs' ? 1000 : 0);
+    if (lg && S.gLogN !== n) { S.gLogN = n; lg.scrollTop = S.gTab === 'reqs' ? 0 : lg.scrollHeight; }
+    var inp = $('gask-in');
+    if (inp) {
+      inp.oninput = function () { S.gDraft = inp.value; };
+      inp.onkeydown = function (ev) { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); gaskSend(inp.value); } };
+    }
+    if ($('gask-send')) $('gask-send').onclick = function () { gaskSend(inp && inp.value); };
+    box.querySelectorAll('[data-gaskq]').forEach(function (el) { el.onclick = function () { S.gDraft = GASK_QUICK[+el.getAttribute('data-gaskq')] + ' : '; render(); var i2 = $('gask-in'); if (i2) i2.focus(); }; });
+    box.querySelectorAll('[data-impsend]').forEach(function (el) { el.onclick = function () { impSend(el.getAttribute('data-impsend')); }; });
+    box.querySelectorAll('[data-impdrop]').forEach(function (el) {
+      el.onclick = function () { S.impDrop = S.impDrop || {}; S.impDrop[el.getAttribute('data-impdrop')] = 1; render(); };
+    });
+  }
+  function renderGask() {
+    var el = gaskBox();
+    var on = gaskOn() && S.gDr;
+    document.body.classList.toggle('c01-gdr-on', !!on);           /* 本文の右に 余白 = ドロアーが カード · 原本 · 表を隠さない */
+    if (!on) { if (el.innerHTML) el.innerHTML = ''; return; }
+    setHtml(el, gaskDrawer(), 6);
+    gaskBind();
+  }
+  C01.gask = { key: gaskKey, thread: gaskThread, imp: impState };
+
   /* ── _actions 書き込み (設計 §5 の形) ── */
   function mkAction(action, f) {
     var a = { schema_version: 1, action_id: actionId(), action: action, iv: f.iv == null ? null : f.iv, ct: f.ct == null ? null : f.ct,
@@ -3268,7 +3430,10 @@ window.C01 = window.C01 || {};
       /* v0.3.33 (R8Z Part B): 業者登録 の一覧 = エンジン packers.json — 送信元のある 業者・IV 未定 カードがある時だけ読む (無いエンジンに 404 を出さない) */
       var needPk = regSenderOn() && ((S.queue && S.queue.items) || []).some(function (q) { return q.kind === HOLD && q.mail_info && q.mail_info.from; });
       var pkP = needPk ? S.src.getJson('packers.json').then(function (x) { S.packers = x; }).catch(function () { S.packers = null; }) : null;
-      return Promise.all([pkP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
+      /* v0.3.39 (R9L · #273): 依頼一覧 = エンジン requests.json (全体の AI 相談がある時だけ · 無い = 「一覧なし」) */
+      var rqP = gaskOn() && !(S.reqsMiss && Date.now() - S.reqsMiss < 300000)            /* 無い (404) = 5 分は読まない */
+        ? S.src.getJson('requests.json').then(function (x) { S.reqs = x; S.reqsMiss = 0; }).catch(function () { S.reqs = null; S.reqsMiss = Date.now(); }) : null;
+      return Promise.all([pkP, rqP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
         if (seen[iv.iv_no]) return null;
         seen[iv.iv_no] = 1;
         var sig = iv.photos_sig;
@@ -3307,8 +3472,8 @@ window.C01 = window.C01 || {};
   function typingNow() {
     var a = document.activeElement;
     if (!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || /^(checkbox|radio|button)$/i.test(a.type || '')) return false;
-    if (a.id === 'ask-in' && !a.value) return false;     /* v0.3.36 (R9F · #267): 空の質問欄に カーソルがあるだけ = 答えを待っている (描き直してよい) */
-    return !!(a.closest && a.closest('#c01-main, #c01-panel'));
+    if ((a.id === 'ask-in' || a.id === 'gask-in') && !a.value) return false;     /* v0.3.36 (R9F · #267): 空の質問欄に カーソルがあるだけ = 答えを待っている (描き直してよい) */
+    return !!(a.closest && a.closest('#c01-main, #c01-panel, #c01-gask'));
   }
   function unsavedNow() {
     if (S.qedit) return true;
@@ -3350,6 +3515,8 @@ window.C01 = window.C01 || {};
     var wy = window.scrollY || 0, view0 = S.lastView;
     renderNav();
     if (S.view === 'main') renderMain(); else { $('c01-panel').hidden = true; renderInput(); }
+    renderGask();                                                  /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (全体) — どの画面でも */
+    impToasts();
     /* 差し替えで箱が新しくなった時も 同じ画面ならスクロール位置を戻す */
     if (view0 === S.view) {
       Object.keys(keep).forEach(function (id) { var e = $(id); if (e && e !== keep[id][0]) { e.scrollTop = keep[id][1]; e.scrollLeft = keep[id][2]; } });

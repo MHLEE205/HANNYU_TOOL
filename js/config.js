@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.38',
+  version: '0.3.39',
   date: '2026-11-15',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -119,5 +119,6 @@ C01.ASK = {
   enabled: true,
   base: '_actions',
   pollMs: 10000,          /* 答え待ちの間だけ 10 秒ごと */
-  trial: true
+  trial: true,
+  global: true            /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (画面全体 · 改善依頼 · 依頼一覧) — エンジン ask_global が切れていれば 「準備中」 の答え */
 };
