@@ -821,6 +821,37 @@ window.C01 = window.C01 || {};
     return { groups: out, cnt: cnt, ov: ov };
   }
 
+  /* v0.3.44 (R9U Part 1-1): 自動処理の状態の帯 (画面の上に固定)。
+     赤 = エンジン meta.cycle_stop (周期が STOP) → 「自動処理が停止しています（最終更新 HH:MM）· 表示は最終更新時点の内容です」 (最終更新 = meta.generated_at)。
+     黄 = エンジン heartbeat.json (失敗のない 10 分周期ごとの時刻) が 07:00〜20:00 の間に 30 分を超えて変わらない (今日 07:00 より前の時刻は 07:00 として数える)
+          → 「データ更新が遅れています（最終更新 HH:MM）」。heartbeat.json が無い (古いエンジン · ローカル) = 黄の帯なし。どちらでもない = 帯なし。 */
+  function hhmm(iso) { var m = /T(\d{2}:\d{2})/.exec(String(iso || '')); return m ? m[1] : '--:--'; }
+  function alertState(nowIso) {
+    var m = S.meta || {};
+    if (m.cycle_stop) return { kind: 'stop', text: '自動処理が停止しています（最終更新 ' + hhmm(m.generated_at) + '）· 表示は最終更新時点の内容です', title: m.cycle_stop.text || '' };
+    var at = S.hb && S.hb.at;
+    if (!at) return null;
+    var now = String(nowIso || jstNow());
+    var hm = now.slice(11, 16);
+    if (hm < '07:00' || hm > '20:00') return null;
+    var day0 = now.slice(0, 10) + 'T07:00:00+09:00';
+    var base = String(at) < day0 ? day0 : String(at);
+    var lagMin = (Date.parse(now) - Date.parse(base)) / 60000;
+    if (!(lagMin > 30)) return null;
+    return { kind: 'late', text: 'データ更新が遅れています（最終更新 ' + hhmm(at) + '）', title: '自動処理の最後の正常な実行: ' + String(at).slice(0, 16).replace('T', ' ') };
+  }
+  C01.alertState = alertState;
+  function renderAlert() {
+    var el = $('c01-alert');
+    if (!el) return;
+    var a = alertState();
+    var html = a ? '<div class="c01-alert c01-alert-' + a.kind + '" role="alert" data-alert="' + a.kind + '" title="' + esc(a.title) + '">' + (a.kind === 'stop' ? '⛔ ' : '⚠ ') + esc(a.text) + '</div>' : '';
+    if (el.getAttribute('data-k') !== html) { el.innerHTML = html; el.setAttribute('data-k', html); }
+    el.hidden = !a;
+    var hd = document.querySelector('.ln-header');
+    if (a) el.style.top = (hd && getComputedStyle(hd).position === 'sticky' ? hd.offsetHeight : 0) + 'px';
+  }
+
   /* ── 描画: ナビ ── */
   function renderNav() {
     var open = queueCards(overlay()).cards.filter(function (cd) { return !cd.done; }).length;     /* v0.3.11: 枚数 (コンテナ 1 台 = 1 枚) */
@@ -1504,6 +1535,9 @@ window.C01 = window.C01 || {};
     if (si) out += ' <span class="c01-ibadge" data-info="slot_change" title="' + esc(slotInfoText(iv, si)) + '">⇄ 枠変更</span>';
     /* v0.3.41 (R9O · R9N 리나이에게 1): 自動推薦（仮登録）の送信元 · 「登録しない」 にした送信元の書類 · 写真の行 = 自動OK にしない理由 */
     var ap = (r.info || []).filter(function (s) { return /^(自動推薦発信者|登録しない発信者の写真)/.test(s); });
+    /* v0.3.44 (R9U Part 1-2): エンジン cancel_regroup = COMPASS で取消になったブッキングの写真を 新しいブッキングの同じ CT へ まとめた行 (表示だけ) */
+    var cg = r.cancel_regroup;
+    if (cg && cg.from_iv) out += ' <span class="c01-ibadge c01-cgbadge" data-info="cancel_regroup" title="' + esc('統合した日 ' + (cg.at || '?') + ' · 写真 ' + (cg.photos == null ? '?' : cg.photos) + ' 枚 — 取消になったブッキング ' + cg.from_iv + ' の写真を このブッキングの同じ CT にまとめました') + '">取消BKG（' + esc(cg.from_iv) + '）から統合</span>';
     if (ap.length) out += ' <span class="c01-ibadge" data-info="auto_sender" title="' + esc(INFO_TEXT.AUTO_SENDER) + '">自動推薦</span>';
     return out;
   }
@@ -3741,6 +3775,8 @@ window.C01 = window.C01 || {};
     return Promise.all([S.src.getJson('jikkyou.json'), S.src.getJson('queue.json').catch(function () { return { items: [] }; }),
       S.src.getJson('remind.json').catch(function () { return null; }), S.src.getJson('meta.json').catch(function () { return null; })]).then(function (r) {
       S.jik = r[0]; S.queue = r[1]; S.remind = r[2]; S.meta = r[3]; S.lastLoad = new Date();
+      /* v0.3.44 (R9U Part 1-1): 周期の時刻 heartbeat.json = エンジンが書くと言った時 (meta.heartbeat) だけ読む (古いエンジン · 切 = 読まない = 404 なし · 遅延の帯なし) */
+      var hbP = (S.meta && S.meta.heartbeat) ? S.src.getJson(S.meta.heartbeat).then(function (x) { S.hb = x; }).catch(function () { S.hb = null; }) : (S.hb = null);
       var seen = {};
       /* v0.3.33 (R8Z Part B): 業者登録 の一覧 = エンジン packers.json — 送信元のある 業者・IV 未定 カードがある時だけ読む (無いエンジンに 404 を出さない) */
       var needPk = regSenderOn() && ((S.queue && S.queue.items) || []).some(function (q) { return q.kind === HOLD && q.mail_info && q.mail_info.from; });
@@ -3755,7 +3791,7 @@ window.C01 = window.C01 || {};
           /* カードがある時だけ 業者の一覧 (packers.json) も読む (上で読まなかった時 · 無いエンジンに 404 を出さない) */
           if (!needPk && regSenderOn() && x && (x.cards || []).length) return S.src.getJson('packers.json').then(function (y) { S.packers = y; }).catch(function () { S.packers = null; });
         }).catch(function () { S.snd = null; S.sndMiss = Date.now(); }) : null;
-      return Promise.all([pkP, rqP, sdP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
+      return Promise.all([pkP, rqP, sdP, hbP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
         if (seen[iv.iv_no]) return null;
         seen[iv.iv_no] = 1;
         var sig = iv.photos_sig;
@@ -3784,7 +3820,7 @@ window.C01 = window.C01 || {};
      描き直す時も 変わった行 · 欄だけ差し替え (setHtml) — スクロール位置 · 開いたカード · 入力中の値はそのまま */
   function dataSig() {
     try {
-      return JSON.stringify([S.jik, S.queue, S.remind, S.meta, S.photos, (S.actions || []).map(function (x) { return (x.action || x).action_id; }).sort()]);
+      return JSON.stringify([S.jik, S.queue, S.remind, S.meta, S.hb, S.photos, (S.actions || []).map(function (x) { return (x.action || x).action_id; }).sort()]);
     } catch (e) { return String(Date.now()); }
   }
   function updateStamp() {
@@ -3817,6 +3853,7 @@ window.C01 = window.C01 || {};
       var sg = dataSig();
       if (sg !== S.sig) { S.sig = sg; S.dirty = true; }
       updateStamp();
+      renderAlert();                             /* v0.3.44: 時間がたてば 遅延 になる (データが同じでも) */
       if (!S.dirty) return;                      /* 変わっていない = 描き直さない */
       if (busy()) { S.held = (S.held || 0) + 1; return; }    /* 入力中 = 後で */
       render({ auto: true });
@@ -3835,6 +3872,7 @@ window.C01 = window.C01 || {};
     var lst = document.querySelector('.c01-items'), ob = document.querySelector('.c01-orig-b');
     var lstY = lst ? lst.scrollTop : 0, obY = ob ? ob.scrollTop : 0, obX = ob ? ob.scrollLeft : 0;
     var wy = window.scrollY || 0, view0 = S.lastView;
+    renderAlert();                                                 /* v0.3.44 (R9U Part 1-1) */
     renderNav();
     if (S.view === 'main') renderMain(); else { $('c01-panel').hidden = true; renderInput(); }
     renderGask();                                                  /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (全体) — どの画面でも */

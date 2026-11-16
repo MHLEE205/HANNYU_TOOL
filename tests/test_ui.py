@@ -2412,6 +2412,135 @@ def r9m_checks(page, root, shots, engine):
     page.wait_for_timeout(500)
 
 
+def r9u_checks(page, root, shots, engine):
+    """v0.3.44 (R9U Part 1-1 · 1-2): 자동 처리 상태 띠 (STOP 빨강 · 지연 노랑 · 정상 없음) · 取消BKG 統合 표시 · 받는 쪽 대조 (엔진 스키마 키)."""
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    eng = Path(engine)
+    js_ = json.loads((eng / "engine" / "output" / "schema" / "jikkyou.schema.json").read_text(encoding="utf-8"))
+    rowp = js_["properties"]["ivs"]["items"]["properties"]["rows"]["items"]["properties"]
+    hb_s = json.loads((eng / "engine" / "output" / "schema" / "heartbeat.schema.json").read_text(encoding="utf-8"))
+    ms = json.loads((eng / "engine" / "output" / "schema" / "meta.schema.json").read_text(encoding="utf-8"))
+    ok("R9U 받는 쪽 대조: 엔진 스키마 jikkyou 줄 cancel_regroup (from_iv · at · photos) · heartbeat.json at · meta cycle_stop · generated_at",
+       set(rowp.get("cancel_regroup", {}).get("properties", {})) == {"from_iv", "at", "photos"} and set(hb_s["properties"]) == {"at"}
+       and "generated_at" in ms["properties"], (sorted(rowp.get("cancel_regroup", {}).get("properties", {})), sorted(hb_s["properties"])))
+    dp = root / "_data"
+    page.click("#tab-main")
+    jp = dp / "jikkyou.json"
+    orig_j = jp.read_text(encoding="utf-8")
+    mp = dp / "meta.json"
+    orig_m = mp.read_text(encoding="utf-8")
+    # ── 정상 (heartbeat 없음 · cycle_stop 없음) = 띠 없음
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(700)
+    ok("R9U 정상: 띠 없음 (#c01-alert hidden)", page.locator("#c01-alert").is_hidden(), page.locator("#c01-alert").inner_html()[:200])
+    # 시각 계산 (C01.alertState · 시각을 넣어 확인)
+    st = page.evaluate("""() => { var S = C01.state, keep = [S.meta, S.hb], out = {};
+        S.meta = { generated_at: '2026-11-17T09:02:20+09:00' };
+        S.hb = { at: '2026-11-17T09:00:01+09:00' };
+        out.ok_10 = C01.alertState('2026-11-17T09:20:00+09:00');
+        out.late_31 = C01.alertState('2026-11-17T09:31:30+09:00');
+        out.night = C01.alertState('2026-11-17T21:30:00+09:00');
+        out.early = C01.alertState('2026-11-17T06:50:00+09:00');
+        S.hb = { at: '2026-11-16T20:00:02+09:00' };
+        out.morning_0715 = C01.alertState('2026-11-17T07:15:00+09:00');
+        out.morning_0731 = C01.alertState('2026-11-17T07:31:00+09:00');
+        S.hb = null;
+        out.no_hb = C01.alertState('2026-11-17T12:00:00+09:00');
+        S.meta = { generated_at: '2026-11-17T09:02:20+09:00', cycle_stop: { text: 'x', at: '09:05', stage: '3段階' } };
+        out.stop = C01.alertState('2026-11-17T09:10:00+09:00');
+        S.meta = keep[0]; S.hb = keep[1]; return out; }""")
+    ok("R9U 시각: 정상 (20분) = 없음 · 31분 = 지연 · 21:30 · 06:50 = 없음 (07:00〜20:00 만)",
+       st["ok_10"] is None and (st["late_31"] or {}).get("kind") == "late" and st["night"] is None and st["early"] is None, st)
+    ok("R9U 시각: 아침 = 어제 20:00 마지막이어도 07:30 까지 없음 · 07:31 지연 (今日 07:00 기준)",
+       st["morning_0715"] is None and (st["morning_0731"] or {}).get("kind") == "late", st)
+    ok("R9U 시각: heartbeat 없음 = 지연 띠 없음 (옛 엔진 · 거짓 경보 0) · STOP = 빨강 (최종 갱신 = generated_at 09:02)",
+       st["no_hb"] is None and (st["stop"] or {}).get("kind") == "stop" and "最終更新 09:02" in st["stop"]["text"]
+       and "表示は最終更新時点の内容です" in st["stop"]["text"], st)
+    # ── 지연 (화면): 지금 시각 고정 + heartbeat 45분 전 · 엔진이 meta.heartbeat 를 씀 (out_cycle_heartbeat)
+    page.clock.set_fixed_time("2026-11-17T10:00:00+09:00")
+    mh = json.loads(orig_m)
+    mh["heartbeat"] = "heartbeat.json"
+    mp.write_text(dump(mh), encoding="utf-8")
+    (dp / "heartbeat.json").write_text(dump({"at": "2026-11-17T09:15:02+09:00"}), encoding="utf-8")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(900)
+    late_txt = page.locator("#c01-alert").inner_text() if page.locator("#c01-alert").is_visible() else ""
+    ok("R9U 지연: 노란 띠 「データ更新が遅れています（最終更新 09:15）」", page.locator("#c01-alert [data-alert=late]").count() == 1
+       and "データ更新が遅れています（最終更新 09:15）" in late_txt, late_txt)
+    bg = page.evaluate("() => getComputedStyle(document.querySelector('.c01-alert')).backgroundColor")
+    ok("R9U 지연: 띠 색 = 노랑 (#facc15)", bg == "rgb(250, 204, 21)", bg)
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(120)
+        page.screenshot(path=str(shots / f"r9u_late_{th}.png"), full_page=False)
+    # 정상으로 돌아옴 (heartbeat 5분 전)
+    (dp / "heartbeat.json").write_text(dump({"at": "2026-11-17T09:55:01+09:00"}), encoding="utf-8")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(900)
+    ok("R9U 정상 복귀: heartbeat 5분 전 = 띠 없음", page.locator("#c01-alert").is_hidden(), page.locator("#c01-alert").inner_html()[:200])
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(120)
+        page.screenshot(path=str(shots / f"r9u_ok_{th}.png"), full_page=False)
+    # ── STOP (화면)
+    mm = json.loads(orig_m)
+    mm["heartbeat"] = "heartbeat.json"
+    mm["generated_at"] = "2026-11-17T09:42:20+09:00"
+    mm["cycle_stop"] = {"text": "⚠️ 自動処理停止中 (09:50 · 3段階)", "at": "09:50", "stage": "3段階"}
+    mp.write_text(dump(mm), encoding="utf-8")
+    # 取消BKG 統合 표시 (가명 줄 1개 · 엔진 data_json 형식 그대로)
+    jj = json.loads(orig_j)
+    row0 = jj["ivs"][0]["rows"][0]
+    row0["cancel_regroup"] = {"from_iv": "TST2611-09", "at": "2026-11-16", "photos": 8}
+    jp.write_text(dump(jj), encoding="utf-8")
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    ok("R9U 시험 jikkyou (cancel_regroup) · heartbeat · meta (cycle_stop · heartbeat) = 엔진 스키마 통과",
+       SC.check_obj(jj, "jikkyou") == [] and SC.check_obj({"at": "2026-11-17T09:55:01+09:00"}, "heartbeat") == [] and SC.check_obj(mm, "meta") == [],
+       (SC.check_obj(jj, "jikkyou")[:3], SC.check_obj(mm, "meta")[:3]))
+    cards0 = page.evaluate("() => document.getElementById('badge-open').textContent")
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(1000)
+    stop_txt = page.locator("#c01-alert").inner_text() if page.locator("#c01-alert").is_visible() else ""
+    ok("R9U STOP: 빨간 띠 「自動処理が停止しています（最終更新 09:42）· 表示は最終更新時点の内容です」",
+       page.locator("#c01-alert [data-alert=stop]").count() == 1 and "自動処理が停止しています（最終更新 09:42）· 表示は最終更新時点の内容です" in stop_txt, stop_txt)
+    bg = page.evaluate("() => getComputedStyle(document.querySelector('.c01-alert')).backgroundColor")
+    ok("R9U STOP: 띠 색 = 빨강 (#b91c1c) · 위에 고정 (sticky)", bg == "rgb(185, 28, 28)"
+       and page.evaluate("() => getComputedStyle(document.getElementById('c01-alert')).position") == "sticky", bg)
+    b = page.locator(".c01-cgbadge")
+    ok("R9U 取消BKG 統合: 회색 표시 1개 「取消BKG（TST2611-09）から統合」 · 마우스 = 날짜 · 사진 수",
+       b.count() == 1 and b.first.inner_text() == "取消BKG（TST2611-09）から統合" and "2026-11-16" in (b.first.get_attribute("title") or "")
+       and "写真 8 枚" in (b.first.get_attribute("title") or ""), (b.count(), b.first.get_attribute("title") if b.count() else None))
+    cards1 = page.evaluate("() => document.getElementById('badge-open').textContent")
+    ok("R9U 確認・入力 장 수 변화 0 (표시만)", cards0 == cards1, (cards0, cards1))
+    page.evaluate("window.scrollTo(0, 400)")
+    page.wait_for_timeout(150)
+    pos = page.evaluate("""() => { var a = document.getElementById('c01-alert').getBoundingClientRect(), h = document.querySelector('.ln-header');
+        var hb = h ? h.getBoundingClientRect().bottom : 0, el = document.elementFromPoint(a.left + a.width / 2, a.top + a.height / 2);
+        return { top: Math.round(a.top), head: Math.round(hb), y: window.scrollY, mine: !!(el && el.closest('#c01-alert')) }; }""")
+    ok("R9U STOP 띠 = 내려도 공통 헤더 바로 아래에 보임 (가려지지 않음)", abs(pos["top"] - pos["head"]) <= 1 and pos["mine"], pos)
+    page.evaluate("window.scrollTo(0, 0)")
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(120)
+        page.screenshot(path=str(shots / f"r9u_stop_{th}.png"), full_page=False)
+    # 휴대폰 폭 1장
+    vp = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(200)
+    ow = page.evaluate("() => document.getElementById('c01-alert').scrollWidth <= window.innerWidth + 1")
+    page.screenshot(path=str(shots / "r9u_stop_phone.png"), full_page=False)
+    ok("R9U 휴대폰 폭 (390): STOP 띠 가로 넘침 없음", ow, ow)
+    page.set_viewport_size(vp)
+    # 되돌림
+    jp.write_text(orig_j, encoding="utf-8")
+    mp.write_text(orig_m, encoding="utf-8")
+    (dp / "heartbeat.json").unlink()
+    page.evaluate("() => { C01.app.tick(); }")
+    page.wait_for_timeout(900)
+    ok("R9U 되돌림 뒤 띠 없음 · 표시 없음", page.locator("#c01-alert").is_hidden() and page.locator(".c01-cgbadge").count() == 0)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -2468,11 +2597,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.43", page.title() == "LEENAI C-01 搬入票 v0.3.43", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.44", page.title() == "LEENAI C-01 搬入票 v0.3.44", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.43" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.44" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2991,6 +3120,7 @@ def main():
             r9l_gask_checks(page, root, shots, a.engine)
             r9m_checks(page, root, shots, a.engine)
             r9o_checks(page, root, shots, a.engine)
+            r9u_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

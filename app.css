@@ -488,3 +488,10 @@ body.c01-gdr-on #c01-main { margin-right: 416px; }
 .c01-sndprev { margin-top: 6px; max-width: 540px; }
 .c01-sndimg { max-width: 520px; max-height: 420px; }
 .c01-sndask { margin: 6px 0; font-size: 13px; }
+
+/* v0.3.44 (R9U Part 1-1 · 1-2): 自動処理の状態の帯 (上に固定 · テーマに関係なく読める色) · 取消BKG 統合 (灰色の小さな表示) */
+#c01-alert:not([hidden]) { position: sticky; top: 0; z-index: 45; }   /* top = 共通ヘッダー (.ln-header sticky) の高さ (app.js renderAlert) */
+.c01-alert { padding: 8px 24px; font-size: 14px; font-weight: 700; text-align: center; line-height: 1.4; }
+.c01-alert-stop { background: #b91c1c; color: #ffffff; }
+.c01-alert-late { background: #facc15; color: #1f2937; }
+.c01-cgbadge { color: var(--text3, #888); border-color: var(--border, #8884); font-weight: 400; }
