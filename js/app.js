@@ -818,7 +818,8 @@ window.C01 = window.C01 || {};
     setHtml($('c01-nav'),
       '<nav class="c01-tabs" aria-label="画面">' +
       '<button id="tab-main" class="c01-tab' + (S.view === 'main' ? ' on' : '') + '">実況表</button>' +
-      '<button id="tab-input" class="c01-tab' + (S.view === 'input' ? ' on' : '') + '">確認・入力 <span class="c01-badge" id="badge-open">' + open + '</span></button>' +
+      '<button id="tab-input" class="c01-tab' + (S.view === 'input' ? ' on' : '') + '">確認・入力 <span class="c01-badge" id="badge-open">' + open + '</span>' +
+      (sndShow() ? '<span class="c01-sndtab" id="badge-snd" title="登録されていない送信元 (確認・入力 の枚数とは別)"> · 発信者未登録 ' + sndBadgeN() + '</span>' : '') + '</button>' +   /* v0.3.40 (R9M Part A · #271) */
       '</nav>' +
       '<span class="c01-sub">' + esc(t) + ' 時点 · 最終更新 <span id="c01-upd">' + upd + '</span>（自動更新）</span>' +
       '<span class="c01-flex"></span>' +
@@ -905,6 +906,7 @@ window.C01 = window.C01 || {};
         (otherList(iv, ov).length ? '<button class="c01-btn-sub c01-otherct" data-otherct="' + esc(iv.iv_no) + '" title="「他社のコンテナ」にした行（写真・書類をこの IV から外しています · 元に戻せます）">他社のコンテナ ' + otherList(iv, ov).length + '</button>' : '') +
         /* v0.3.26 (R8B Part E-2 · 決定 #219): 通関書類 (D/R · E/D · 輸出許可書) = 参考 · 値には使わない (エンジン customs_docs) */
         ((iv.customs_docs || []).length ? '<button class="c01-btn-sub c01-customs" data-customs="' + esc(iv.iv_no) + '" title="通関業者から届いた書類（参考 · 値には使いません）">通関書類 ' + iv.customs_docs.length + '</button>' : '') +
+        remindRoundHtml(iv) +                                     /* v0.3.40 (R9M Part B-2) */
         (g.remind ? '<button class="c01-btn-sub" data-remind="' + esc(iv.iv_no) + '">✉ 催促</button>' : '') +
         (g.compassDone ? '<button class="c01-done" data-compass="' + esc(iv.iv_no) + '" title="Compass入力の記録 · 元に戻す">✓ 入力済</button>' :
           g.allOk ? '<button class="c01-btn-pri" data-compass="' + esc(iv.iv_no) + '">⬇ Compass入力</button>' :
@@ -1566,7 +1568,7 @@ window.C01 = window.C01 || {};
           ' 受信）への返信として送ります</span></div>' : '') +
         '<div><span class="k">差出人</span><span>' + esc(S.me ? S.me.email || S.me.name : '（ログイン者）') + '</span></div>' +
         '<div><span class="k">件名</span><span class="rsub">' + esc(d.subject) + '</span></div>' +
-        '<div><span class="k">回数</span><span>' + esc(d.round) + ' 回目 · ' + esc(STAGE[d.stage] || d.stage) + ' · ' + esc(d.packer) + '</span></div></div>' +
+        '<div><span class="k">回数</span><span>' + esc(d.round) + ' 回目 · ' + esc(STAGE[d.stage] || d.stage) + ' · ' + esc(d.packer) + '</span></div>' + remindRecentHtml(d) + '</div>' +
         /* v0.3.12 (R7K Part D ② · D-55 (나)): BKG だけ合う候補がある行も催促の対象 — 送る前に確認 */
         (d.cand_note ? '<p class="c01-note2 c01-rcand c01-rcand-bkg">' + esc(d.cand_note) + '（BKG ' + (+d.cand_bkg || 0) + '台）</p>' : '') +
         remindTodayHtml(iv, d) + '<pre class="c01-rbody">' + esc(signed(d.body_text || '')) + '</pre>' + remindSendRow(iv, d, i) + '</section>';
@@ -1640,6 +1642,38 @@ window.C01 = window.C01 || {};
   function remindTodayHtml(iv, d) {
     var t = remindToday(iv, d);
     return t ? '<p class="c01-note2 c01-rtoday" data-rtoday>本日送信済み（' + esc(staffName(t.by)) + ' ' + esc(String(t.at || '').slice(11, 16)) + '）</p>' : '';
+  }
+  /* v0.3.40 (R9M Part B-1 · R9K A-3): エンジン recent_mail = この業者 (元請 + その元請のメールを送った下請のアドレス) から最近 7 日のメール · 保留 · 最後の受信。
+     判断は担当者 (送信は止めない) · 無いエンジン = 出さない */
+  function remindRecentHtml(d) {
+    var r = d && d.recent_mail;
+    if (!r || typeof r.n !== 'number') return '';
+    var last = r.last_at ? md(String(r.last_at).slice(0, 10)) + ' ' + String(r.last_at).slice(11, 16) : '—';
+    return '<div class="c01-rrecent" data-rrecent><span class="k">最近</span><span>この業者から最近' + (r.days || 7) + '日のメール ' + r.n + '通 · 保留 ' + (r.held || 0) + '通' +
+      (r.unsorted ? ' · 未分類 ' + r.unsorted + '通' : '') + ' · 最後の受信 ' + esc(last) + '</span></div>';
+  }
+  /* v0.3.40 (R9M Part B-2 · R9K A-4): 実況表 IV 見出しの小さな表示 「催促 n回目（MM/DD）」 — 本番の送信記録 (reminder_sent · test でない) だけ数える
+     (試験送信は数えない · エンジンの回数と同じ) · 業者 2 つ以上 = 業者ごと · 行の高さ · 列の幅は変えない (#193) */
+  function remindRounds(iv) {
+    var seen = {}, by = {};
+    var add = function (a) {
+      var v = (a && a.value) || {};
+      if (!v.packer || v.test || (a.action_id && seen[a.action_id])) return;
+      if (a.action_id) seen[a.action_id] = 1;
+      var x = by[v.packer] || (by[v.packer] = { n: 0, last: '' });
+      x.n += 1;
+      if (String(a.at || '') > x.last) x.last = String(a.at || '');
+    };
+    ((iv && iv.reminders) || []).forEach(add);
+    (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'reminder_sent' && iv && a.iv === iv.iv_no) add(a); });
+    return by;
+  }
+  function remindRoundHtml(iv) {
+    var by = remindRounds(iv), ks = Object.keys(by).sort();
+    if (!ks.length) return '';
+    return '<span class="c01-rround" data-rround title="催促メールを送った回数（本番の送信だけ · 最後に送った日）">' + ks.map(function (k) {
+      return '催促' + (ks.length > 1 ? ' ' + esc(k) : '') + ' ' + by[k].n + '回目（' + esc(md(by[k].last.slice(0, 10))) + '）';
+    }).join(' · ') + '</span>';
   }
   function remindUnrec(d) { return [].concat((d && d.to_unreceived) || [], (d && d.cc_unreceived) || []); }
   /* v0.3.35 (R9D Part C · 決定 #263): 催促の宛先 = 元請 packer の会社アドレスだけ。元請のアドレスが 0 = エンジン no_recipient → 「宛先なし — 担当者が確認」 · 送信ボタンは押せない (no_recipient の無い 「送信先未登録」 は今まで通り) */
@@ -2292,6 +2326,7 @@ window.C01 = window.C01 || {};
   }
   function renderInput() {
     var ov = overlay();
+    if (S.qkind === SND && !(sndOn() && S.snd)) S.qkind = 'all';   /* v0.3.40 (R9M Part A): 発信者未登録 が無いエンジン = すべて */
     var all0 = ((S.queue && S.queue.items) || []).filter(queuePortOk);
     var oldFaxN = all0.filter(faxOld).length;
     var qc = queueCards(ov);
@@ -2305,6 +2340,7 @@ window.C01 = window.C01 || {};
     var vis = cards.filter(function (cd) {
       if (!ivOk(cd)) return false;
       if (S.qkind === 'done') return cd.done;
+      if (S.qkind === SND) return false;                         /* v0.3.40 (R9M Part A): 発信者未登録 = 別の一覧 (確認・入力 のカードは出さない) */
       return !cd.done && (S.qkind === 'all' || cd.open.some(function (q) { return q.kind === S.qkind; }));
     });
     var firstOf = function (cd) { return (cd.open[0] || cd.items[0]).queue_id; };
@@ -2322,12 +2358,12 @@ window.C01 = window.C01 || {};
     html += '<aside class="c01-list" aria-label="作業リスト"><div class="c01-kinds">' +
       [['all', 'すべて']].concat(kindKeys.map(function (k) { return [k, kindLabel(k)]; })).concat([['done', '完了']]).map(function (k) {
         return '<button class="c01-chip' + (S.qkind === k[0] ? ' on' : '') + (k[0] === 'done' ? ' c01-chip-done' : '') + '" data-kind="' + esc(k[0]) + '">' + esc(k[1]) + ' ' + (counts[k[0]] || 0) + '</button>';
-      }).join('') + '</div>' +
+      }).join('') + (sndShow() ? '<button class="c01-chip c01-chip-snd' + (S.qkind === SND ? ' on' : '') + '" data-kind="' + esc(SND) + '" title="登録されていない送信元 (確認・入力 の枚数とは別)">' + esc(SND) + ' ' + sndBadgeN() + '</button>' : '') + '</div>' +
       (S.qiv ? '<div class="c01-qiv"><span class="t2">IV で絞り込み:</span> <span class="mono">' + esc(S.qiv) + '</span> <button class="c01-btn-ghost2" id="qiv-clear">解除</button></div>' : '') +
       (oldFaxN ? '<label class="c01-chk" id="fax-old-lab"><input type="checkbox" id="fax-old"' + (S.showOldFax ? ' checked' : '') + '>古い未分類 FAX も表示（受信 ' +
         C01.QUEUE.faxHideAfterDays + '日超 · ' + oldFaxN + '件）</label>' : '') +
       '<div class="c01-prog"><div class="bar"><div style="width:' + (cards.length ? Math.round(doneN / cards.length * 100) : 0) + '%"></div></div><span>' + doneN + ' / ' + cards.length + ' 完了</span></div>' +
-      '<div class="c01-items">' + vis.map(function (cd) {
+      '<div class="c01-items">' + (S.qkind === SND ? sndListHtml() : vis.map(function (cd) {
         var x = cd.open[0] || cd.items[0];
         var on = cd.items.some(function (y) { return y.queue_id === S.qsel; });
         var flds = [];
@@ -2340,7 +2376,7 @@ window.C01 = window.C01 || {};
           '<span class="s">' + esc((x.iv_no ? x.iv_no + ' · ' : (x.kind === HOLD && (x.candidates || []).length ? '候補 ' + x.candidates.join(' / ') + ' · ' : '')) + flds.join('・') + (x.issuer ? ' · ' + x.issuer : '') +
             ((x.kind === '未分類FAX' || x.kind === HOLD) && x.received_at ? '受信 ' + md(String(x.received_at).slice(0, 10)) : '') + (cd.items.length > 1 ? ' · ' + cd.items.length + '項目' : '')) + '</span>' +
           (cd.done ? '<span class="d">' + (last.mineLost ? '他の人が先に確認しました' : (last.act === 'not_hannyuhyo' || last.act === 'not_ours' ? '搬入票ではない' : last.act === 'other_ct' ? '他社のコンテナ' : '完了') + (last.by ? ' · ' + esc(last.by) : '')) + '</span>' : '') + '</button>';
-      }).join('') + (vis.length ? '' : '<p class="c01-empty">' + (S.qkind === 'done' ? '完了した作業はまだありません' : '作業はありません') + '</p>') + '</div></aside>';
+      }).join('') + (vis.length ? '' : '<p class="c01-empty">' + (S.qkind === 'done' ? '完了した作業はまだありません' : '作業はありません') + '</p>')) + '</div></aside>';
     /* 原本 */
     html += '<section class="c01-orig" aria-label="原本">';
     var curF = null;
@@ -2419,6 +2455,8 @@ window.C01 = window.C01 || {};
           }).join('') : '<p class="c01-note2">写真がありません</p>') + '</div>';
       }
       html += '</div>';                                             /* .c01-orig-b (同一候補 = .c01-samerow) */
+    } else if (S.qkind === SND) {
+      html += sndPanelHtml();                                      /* v0.3.40 (R9M Part A): 発信者未登録 = 真ん中の広い所 */
     }
     html += '</section>';
     /* 入力 */
@@ -2559,7 +2597,8 @@ window.C01 = window.C01 || {};
         (askOn() && q.kind !== '写真のCT' ? '<button id="q-ask" class="c01-btn-ghost2 c01-askbtn' + (askDr ? ' on' : '') + '" aria-expanded="' + (askDr ? 'true' : 'false') + '" aria-controls="ask-box" title="このカードと開いている原本について AI に質問します（右横に開きます）">AIに相談</button>' : '') + '</div></div>';   /* v0.3.36 (R9F · #267) */
       html = html.replace(ACT_MARK, acts);
     } else {
-      html += '<p class="c01-empty">作業はありません</p>';
+      html += S.qkind === SND ? '<p class="c01-note2 c01-sndhelp">「業者登録」 = このアドレスを業者として登録 (次から自動で分類) · 「登録しない」 = 業者ではない (次から推定しない)。どちらも 「登録した · 登録しない」 から元に戻せます。</p>' :
+        '<p class="c01-empty">作業はありません</p>';      /* v0.3.40 (R9M Part A) */
     }
     html += '</section>' + (askDr ? askDrawer(q) : '') + '</div><p class="c01-powered">✦ Powered by LEENAI Automation System</p>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった所だけ (原本 · 入力中の値 · 一覧のスクロールはそのまま) */
@@ -2570,6 +2609,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-kind]').forEach(function (el) { el.onclick = function () { S.qkind = el.getAttribute('data-kind'); S.qsel = null; render(); }; });
     root.querySelectorAll('[data-q]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-q'); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); }; });
     root.querySelectorAll('[data-sec]').forEach(function (el) { el.onclick = function () { S.qsel = el.getAttribute('data-sec'); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); }; });
+    if (S.qkind === SND) bindSenders(root);                       /* v0.3.40 (R9M Part A) */
     if (!q) return;
     var zi = $('z-in'), zo = $('z-out'), ro = $('rot');
     if (zi) zi.onclick = function () { S.zoom = Math.min(200, S.zoom + 20); render(); };
@@ -2964,6 +3004,206 @@ window.C01 = window.C01 || {};
     var a = mkAction('register_sender', { iv: null, ct: null, field: null, source: null, queue_id: q.queue_id,
       value: { address: from, packer: pk.code, plant: v.regPlant || null } });
     writeAction(a).then(function () { toast('業者を登録しました（1 分ほどで分類し直します）', 'success'); S.qsel = nextQueueId(q); render(); });
+  }
+  /* ── v0.3.40 (R9M Part A · 決定 #271 · #272 c): 「発信者未登録」 — 登録されていない送信元のメール (業者の書類 · 写真 · ZIP がある) をアドレスごとに 1 枚。
+     確認・入力 の枚数とは別に数える (見出し 「確認・入力 n · 発信者未登録 m」)。並び = 推定 強 → 弱 → 推定なし (推定なしは最初は閉じる 「他 n件（推定なし）」)。
+     「業者登録」 = 今までと同じ register_sender (1 分で分類し直し) · 「登録しない」 = sender_decline (理由はひとことでOK · 空でも押せる · 次から推定しない ·
+     同じドメイン 2 件 = ドメインごと推定しない) · 元に戻す = undo。エンジン out_sender_cards が on の時だけ (RULES.senderCards · _data/senders.json) */
+  var SND = '発信者未登録';
+  var SND_REASONS = ['運送会社・ドレージ', '通関・船会社', '当社と関係ない', '一回だけ・個人', 'その他'];
+  var SND_SRC = { bkg: 'メールの BKG / IV の業者', sig: '署名の会社名', dom: '同じドメインの登録' };
+  var SND_ST = { strong: ['推定（強）', '#1F7A3A'], weak: ['推定（弱）', '#A15C00'], none: ['推定なし', '#777'] };
+  function sndOn() { return !!(C01.RULES || {}).senderCards; }
+  /* この画面で 登録 · 登録しない にしたアドレス (元に戻したものは除く) — エンジンの次の出力までカードを隠す */
+  function sndLocal() {
+    var undone = {}, out = {};
+    allActions().forEach(function (a) { if (a.action === 'undo' && a.value && a.value.action_id) undone[a.value.action_id] = 1; });
+    allActions().forEach(function (a) {
+      if ((a.action === 'register_sender' || a.action === 'sender_decline') && a.value && a.value.address && !undone[a.action_id]) {
+        out[String(a.value.address).trim().toLowerCase()] = a;
+      }
+    });
+    return { done: out, undone: undone };
+  }
+  function sndCards() {
+    if (!sndOn() || !S.snd || !S.snd.cards) return [];
+    var loc = sndLocal().done, rank = { strong: 0, weak: 1, none: 2 };
+    return S.snd.cards.filter(function (c) { return !loc[String(c.address || '').toLowerCase()]; }).slice().sort(function (a, b) {
+      var ra = rank[(a.guess || {}).strength] === undefined ? 2 : rank[(a.guess || {}).strength], rb = rank[(b.guess || {}).strength] === undefined ? 2 : rank[(b.guess || {}).strength];
+      if (ra !== rb) return ra - rb;
+      if ((b.mails || 0) !== (a.mails || 0)) return (b.mails || 0) - (a.mails || 0);
+      return String(b.last_at || '').localeCompare(String(a.last_at || ''));
+    });
+  }
+  /* 登録しない · 登録した (元に戻せる) = エンジンの declined + この画面の操作 (エンジン反映前) */
+  function sndDoneList() {
+    var L = sndLocal(), seen = {}, out = [];
+    ((S.snd && S.snd.declined) || []).forEach(function (d) {
+      if (L.undone[d.action_id]) return;
+      seen[d.action_id] = 1;
+      out.push({ act: 'sender_decline', address: d.address, domain: d.domain, action_id: d.action_id, by: d.by, at: d.at, reason: d.reason_text });
+    });
+    Object.keys(L.done).forEach(function (k) {
+      var a = L.done[k];
+      if (seen[a.action_id]) return;
+      out.push({ act: a.action, address: a.value.address, domain: String(a.value.address).split('@')[1] || '', action_id: a.action_id, by: a.by, at: a.at,
+        reason: a.value.reason_text || null, packer: a.value.packer || null, mine: true });
+    });
+    return out.sort(function (a, b) { return String(b.at || '').localeCompare(String(a.at || '')); });
+  }
+  function sndBadgeN() { return sndCards().length; }
+  /* 見出し · 칩 = カードがある時 (または 元に戻せる記録 · この一覧を見ている時) だけ — 0 件の日は出さない */
+  function sndShow() { return sndOn() && !!S.snd && (sndBadgeN() > 0 || sndDoneList().length > 0 || S.qkind === SND); }
+  function sndItemHtml(c) {
+    var g = c.guess || {}, st = SND_ST[g.strength] || SND_ST.none;
+    return '<button class="c01-item c01-snditem' + (S.sndSel === c.queue_id ? ' on' : '') + '" data-snd="' + esc(c.queue_id) + '">' +
+      '<span class="r1"><span class="k" style="color:' + st[1] + '">' + esc(st[0]) + (g.packer ? ' ' + esc(g.packer) : '') + '</span><span class="c01-flex"></span>' +
+      '<span class="cy">メール ' + (c.mails || 0) + '通</span></span>' +
+      '<span class="mono t">' + esc(c.domain || '') + '</span>' +
+      '<span class="s">' + esc((c.name ? c.name + ' · ' : '') + ((c.ivs || []).length ? (c.ivs || []).slice(0, 2).join(' / ') + ((c.ivs || []).length > 2 ? ' 他' : '') + ' · ' : '') +
+        (c.last_at ? '受信 ' + md(String(c.last_at).slice(0, 10)) : '')) + '</span></button>';
+  }
+  function sndListHtml() {
+    var cs = sndCards();
+    var none = cs.filter(function (c) { return ((c.guess || {}).strength || 'none') === 'none'; });
+    var top = cs.filter(function (c) { return ((c.guess || {}).strength || 'none') !== 'none'; });
+    var h = '<p class="t2 c01-sndhead">登録されていない送信元です（確認・入力 の枚数とは別）。業者なら 「業者登録」、違えば 「登録しない」。</p>' + top.map(sndItemHtml).join('');
+    if (none.length) {
+      h += '<button class="c01-btn-ghost2 c01-sndnone" id="snd-none" aria-expanded="' + (S.sndNoneOpen ? 'true' : 'false') + '">' +
+        (S.sndNoneOpen ? '▾ ' : '▸ ') + '他 ' + none.length + '件（推定なし）</button>' + (S.sndNoneOpen ? none.map(sndItemHtml).join('') : '');
+    }
+    if (!cs.length) h += '<p class="c01-empty">発信者未登録はありません</p>';
+    var dl = sndDoneList();
+    if (dl.length) {
+      h += '<button class="c01-btn-ghost2 c01-sndnone" id="snd-done" aria-expanded="' + (S.sndDoneOpen ? 'true' : 'false') + '">' + (S.sndDoneOpen ? '▾ ' : '▸ ') +
+        '登録した · 登録しない ' + dl.length + '件</button>' + (S.sndDoneOpen ? '<div class="c01-snddone">' + dl.map(function (d) {
+          return '<div class="c01-snddrow"><span class="k">' + (d.act === 'register_sender' ? '登録 ' + esc(d.packer || '') : '登録しない') + '</span> <span class="mono">' + esc(d.domain || '') + '</span>' +
+            (d.reason ? ' <span class="t2">' + esc(d.reason) + '</span>' : '') + ' <span class="t2">' + esc(staffName(d.by) + ' ' + md(String(d.at || '').slice(0, 10))) + '</span>' +
+            (S.me ? ' <button class="c01-btn-ghost2" data-sndundo="' + esc(d.action_id) + '">元に戻す</button>' : '') + '</div>';
+        }).join('') + '</div>' : '');
+    }
+    return h;
+  }
+  function sndOf(id) { return ((S.snd && S.snd.cards) || []).filter(function (c) { return c.queue_id === id; })[0] || null; }
+  function sndPanelHtml() {
+    var cs = sndCards();
+    var c = sndOf(S.sndSel);
+    if (!c || cs.indexOf(c) < 0) { c = cs[0] || null; S.sndSel = c ? c.queue_id : null; }
+    if (!c) return '<p class="c01-empty">発信者未登録はありません</p>';
+    var g = c.guess || {}, st = SND_ST[g.strength] || SND_ST.none;
+    var v = S.qvals['snd:' + c.queue_id] || {};
+    var pkCode = v.regPacker !== undefined ? v.regPacker : (g.packer || '');
+    var pk = regPackers().filter(function (p) { return p.code === pkCode; })[0];
+    var src = (g.sources || []).map(function (s) { return SND_SRC[s] || s; });
+    var h = '<div class="c01-sndpanel" id="snd-panel"><div class="c01-orig-h"><span class="t2">' + esc(SND) + '</span><span class="mono">' + esc(c.domain || '') + '</span></div>' +
+      '<table class="c01-sndtbl"><tbody>' +
+      '<tr><th>送信元</th><td><span class="mono">' + esc(c.address || '') + '</span>' + (c.name ? ' （' + esc(c.name) + '）' : '') + '</td></tr>' +
+      '<tr><th>メール</th><td>' + (c.mails || 0) + '通' + (c.hold_mails ? ' · 保留 ' + c.hold_mails + '通' : '') + (c.zip_pending ? ' · 開いていない ZIP ' + c.zip_pending + '件' : '') +
+        (c.last_at ? ' · 最後の受信 ' + esc(md(String(c.last_at).slice(0, 10)) + ' ' + String(c.last_at).slice(11, 16)) : '') + '</td></tr>' +
+      '<tr><th>IV</th><td class="mono">' + esc((c.ivs || []).join(' / ') || '—') + '</td></tr>' +
+      '<tr><th>推定の業者</th><td><span style="color:' + st[1] + ';font-weight:700">' + esc(st[0]) + '</span>' + (g.packer ? ' <span class="mono">' + esc(g.packer) + '</span>' : '') +
+        (src.length ? ' — 根拠: ' + esc(src.join(' · ')) : '') + (g.other_packers_n ? ' · 他の業者の根拠 ' + g.other_packers_n + '件' : '') +
+        (g.note === 'domain_declined' ? '<br><span class="t2">同じドメインを 2 件 「登録しない」 にしたので推定しません</span>' : '') + '</td></tr>' +
+      '</tbody></table>';
+    if (!S.me) return h + '<p class="c01-note2">担当者を選んでください（右上）</p></div>';
+    h += '<div class="c01-regsender" id="snd-reg"><div class="k">業者登録</div>';
+    if (!regSenderOn() || !regPackers().length) {
+      h += '<p class="c01-note2">' + (regSenderOn() ? '業者の一覧がまだありません（エンジンの次の出力で出ます）' : '業者登録はまだ使えません') + '</p>';
+    } else {
+      h += '<label class="c01-direct">業者<input id="snd-packer" type="text" list="snd-packer-list" placeholder="業者コード · 名前で検索" value="' + esc(pkCode) + '" autocomplete="off"></label>' +
+        '<datalist id="snd-packer-list">' + regPackers().map(function (p) { return '<option value="' + esc(p.code) + '">' + esc(p.name || '') + '</option>'; }).join('') + '</datalist>';
+      if (pkCode && !pk) h += '<p class="c01-err">この業者はマスターにありません（一覧から選んでください）</p>';
+      if (pk) {
+        h += '<label class="c01-direct">営業所<select id="snd-plant"><option value="">（指定しない）</option>' +
+          (pk.plants || []).map(function (x) { return '<option value="' + esc(x) + '"' + (v.regPlant === x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></label>';
+      }
+      h += '<button class="c01-btn-sub" id="snd-regbtn"' + (pk ? '' : ' disabled') + '>業者登録</button>' +
+        '<p class="c01-note2">このアドレスだけ登録します（1 分ほどでこのアドレスの保留メールを分類し直し · ZIP も開きます · 元に戻せます）。推定は参考です — 必ず確認してください。</p>';
+    }
+    h += '</div><div class="c01-form-a"><div class="row"><button id="snd-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
+      '<button id="snd-decline" class="c01-btn-ghost2 danger" title="業者ではない送信元です（次からこのアドレスを推定しません · 元に戻せます）">登録しない</button></div></div></div>';
+    return h;
+  }
+  function sndDeclineDialog(c, done) {
+    var old = $('c01-nhdlg');
+    if (old) old.parentNode.removeChild(old);
+    var box = document.createElement('div');
+    box.id = 'c01-nhdlg';
+    box.className = 'c01-nhdlg';
+    box.innerHTML = '<div class="c01-nhbox" role="dialog" aria-label="登録しない">' +
+      '<div class="t">この送信元を「登録しない」にしますか？</div>' +
+      '<div class="s">' + esc(c.domain || '') + ' · メールは消しません · 次からこのアドレスを推定しません（同じドメイン 2 件でドメインごと）· 元に戻せます</div>' +
+      '<div class="r">理由 <span class="ok">ひとことでOK（簡単で大丈夫です）</span></div>' +
+      '<div class="b">' + SND_REASONS.map(function (x, i) { return '<button type="button" class="c01-nhr" data-sndr="' + i + '">' + esc(x) + '</button>'; }).join('') + '</div>' +
+      '<textarea id="c01-nhtext" maxlength="' + NH_TEXT_MAX + '" rows="2" placeholder="自由に（どの言語でも · 書かなくても押せます）"></textarea>' +
+      '<div class="f"><button type="button" id="c01-nhok" class="c01-btn-ghost2 danger">登録しない</button> <button type="button" id="c01-nhno" class="c01-btn-ghost2">やめる</button></div>' +
+      '<div class="c01-foot">✦ Powered by LEENAI Automation System</div></div>';
+    document.body.appendChild(box);
+    var pick = null;
+    box.querySelectorAll('[data-sndr]').forEach(function (el) {
+      el.onclick = function () {
+        var i = +el.getAttribute('data-sndr');
+        pick = pick === i ? null : i;
+        box.querySelectorAll('[data-sndr]').forEach(function (y) { y.classList.toggle('on', +y.getAttribute('data-sndr') === pick); });
+      };
+    });
+    var close = function () { if (box.parentNode) box.parentNode.removeChild(box); };
+    $('c01-nhno').onclick = close;
+    $('c01-nhok').onclick = function () {
+      var t = String($('c01-nhtext').value || '').trim();
+      var r = [pick === null ? '' : SND_REASONS[pick], t].filter(function (x) { return x; }).join(' · ').slice(0, NH_TEXT_MAX);
+      close();
+      done(r || null);
+    };
+  }
+  function sndNext(c) {
+    var cs = sndCards(), i = cs.indexOf(c);
+    var n = cs.filter(function (x) { return x !== c; })[Math.max(0, i)] || null;
+    return n ? n.queue_id : null;
+  }
+  function bindSenders(root) {
+    root.querySelectorAll('[data-snd]').forEach(function (el) { el.onclick = function () { S.sndSel = el.getAttribute('data-snd'); render(); }; });
+    if ($('snd-none')) $('snd-none').onclick = function () { S.sndNoneOpen = !S.sndNoneOpen; render(); };
+    if ($('snd-done')) $('snd-done').onclick = function () { S.sndDoneOpen = !S.sndDoneOpen; render(); };
+    root.querySelectorAll('[data-sndundo]').forEach(function (el) {
+      el.onclick = function () {
+        if (!S.me) return;
+        var aid = el.getAttribute('data-sndundo');
+        writeAction(mkAction('undo', { iv: null, ct: null, field: null, value: { action_id: aid }, source: null, queue_id: null }))
+          .then(function () { toast('元に戻しました（次の出力で カードがまた出ます）', 'success'); render(); });
+      };
+    });
+    var c = sndOf(S.sndSel);
+    if (!c) return;
+    var key = 'snd:' + c.queue_id;
+    var v = function () { return S.qvals[key] || (S.qvals[key] = {}); };
+    var inp = $('snd-packer');
+    if (inp) {
+      var setPk = function (t) { var x = v(); t = String(t || '').trim(); if (x.regPacker === t) return; x.regPacker = t; x.regPlant = null; setTimeout(render, 0); };
+      inp.onchange = function () { setPk(inp.value); };
+      inp.onkeydown = function (e) { if (e.key === 'Enter') setPk(inp.value); };
+    }
+    if ($('snd-plant')) $('snd-plant').onchange = function () { v().regPlant = $('snd-plant').value || null; };
+    if ($('snd-skip')) $('snd-skip').onclick = function () { S.sndSel = sndNext(c); render(); };
+    if ($('snd-regbtn')) $('snd-regbtn').onclick = function () {
+      var g = c.guess || {}, x = S.qvals[key] || {};
+      var code = x.regPacker !== undefined ? x.regPacker : (g.packer || '');
+      var pk = regPackers().filter(function (p) { return p.code === code; })[0];
+      if (!S.me || !pk) return;
+      if (!window.confirm(c.address + ' を ' + pk.code + (x.regPlant ? ' · ' + x.regPlant : '') + ' として登録します。よろしいですか？')) return;
+      var nx = sndNext(c);
+      writeAction(mkAction('register_sender', { iv: null, ct: null, field: null, source: null, queue_id: c.queue_id,
+        value: { address: c.address, packer: pk.code, plant: x.regPlant || null } }))
+        .then(function () { S.sndSel = nx; toast('業者を登録しました（1 分ほどで分類し直します · 「登録した · 登録しない」 から元に戻せます）', 'success'); render(); });
+    };
+    if ($('snd-decline')) $('snd-decline').onclick = function () {
+      if (!S.me) return;
+      sndDeclineDialog(c, function (why) {
+        var nx = sndNext(c);
+        writeAction(mkAction('sender_decline', { iv: null, ct: null, field: null, source: null, queue_id: c.queue_id, value: { address: c.address, reason_text: why } }))
+          .then(function () { S.sndSel = nx; toast('「登録しない」にしました（「登録した · 登録しない」 から元に戻せます）', 'success'); render(); });
+      });
+    };
   }
   function linkIvForm(q) {
     var v = S.qvals[q.queue_id] || {};
@@ -3433,7 +3673,14 @@ window.C01 = window.C01 || {};
       /* v0.3.39 (R9L · #273): 依頼一覧 = エンジン requests.json (全体の AI 相談がある時だけ · 無い = 「一覧なし」) */
       var rqP = gaskOn() && !(S.reqsMiss && Date.now() - S.reqsMiss < 300000)            /* 無い (404) = 5 分は読まない */
         ? S.src.getJson('requests.json').then(function (x) { S.reqs = x; S.reqsMiss = 0; }).catch(function () { S.reqs = null; S.reqsMiss = Date.now(); }) : null;
-      return Promise.all([pkP, rqP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
+      /* v0.3.40 (R9M Part A · #271): 発信者未登録 = エンジン senders.json (RULES.senderCards の時だけ · 無い (404) = 5 分は読まない) */
+      var sdP = sndOn() && !(S.sndMiss && Date.now() - S.sndMiss < 300000)
+        ? S.src.getJson('senders.json').then(function (x) {
+          S.snd = x; S.sndMiss = 0;
+          /* カードがある時だけ 業者の一覧 (packers.json) も読む (上で読まなかった時 · 無いエンジンに 404 を出さない) */
+          if (!needPk && regSenderOn() && x && (x.cards || []).length) return S.src.getJson('packers.json').then(function (y) { S.packers = y; }).catch(function () { S.packers = null; });
+        }).catch(function () { S.snd = null; S.sndMiss = Date.now(); }) : null;
+      return Promise.all([pkP, rqP, sdP].concat(((S.jik && S.jik.ivs) || []).map(function (iv) {
         if (seen[iv.iv_no]) return null;
         seen[iv.iv_no] = 1;
         var sig = iv.photos_sig;

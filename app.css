@@ -453,3 +453,20 @@ body.c01-gdr-on #c01-main { margin-right: 416px; }
 .c01-reqst { font-weight: 600; } .c01-reqst.s-反映済 { color: var(--ok, #2a7); } .c01-reqst.s-対応しない { color: var(--text2); }
 .c01-gdr .c01-powered { margin: 6px 0 0; font-size: 10px; text-align: right; color: var(--text2); }
 @media (max-width: 1100px) { body.c01-gdr-on #c01-main { margin-right: 0; } .c01-askdr.c01-gdr { right: 0; top: var(--c01-hdr-h, 52px); width: 100vw; max-width: 420px; border-radius: 0; } }
+/* v0.3.40 (R9M Part A · #271): 「発信者未登録」 (確認・入力 の枚数とは別) · Part B: 催促 「最近7日」 · 実況表 「催促 n回目」 */
+.c01-sndtab { font-size: 11px; font-weight: 600; color: #6B4E00; margin-left: 2px; }
+.c01-chip-snd { border-color: #C9A227; color: #6B4E00; }
+.c01-chip-snd.on { background: #FFF4CC; }
+.c01-sndhead { margin: 4px 2px 6px; }
+.c01-snditem .t { font-size: 12px; }
+.c01-sndnone { display: block; width: 100%; text-align: left; margin: 6px 0 4px; }
+.c01-snddone { font-size: 12px; margin: 2px 0 6px; }
+.c01-snddrow { padding: 3px 2px; border-bottom: 1px solid #eee; }
+.c01-snddrow .k { font-weight: 700; color: #555; }
+.c01-sndpanel { padding: 4px 12px 12px; max-width: 760px; overflow: auto; }
+.c01-sndhelp { padding: 8px; }
+.c01-sndtbl { border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; }
+.c01-sndtbl th { text-align: left; color: #666; font-weight: 600; padding: 3px 12px 3px 0; white-space: nowrap; vertical-align: top; }
+.c01-sndtbl td { padding: 3px 0; }
+.c01-rrecent .k { color: #666; }
+.c01-rround { font-size: 11px; color: #555; white-space: nowrap; }

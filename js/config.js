@@ -7,8 +7,8 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.39',
-  date: '2026-11-15',
+  version: '0.3.40',
+  date: '2026-11-16',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
@@ -32,7 +32,9 @@ C01.RULES = {
   /* ⑦ v0.3.28 (R8D Part A · 決定 #227): 未分類 FAX カード = 「IVに連結」 (印刷 BKG の候補 IV · 枠を選ぶ · 終わったブッキングも候補なら選べる) — エンジン out_fax_link_iv が on の時だけ true */
   faxLinkIv: true,
   /* ⑧ v0.3.33 (R8Z Part B · #258 補足): 業者・IV 未定 カード = 「業者登録」 (送信元アドレス 1 つ → 業者 · 営業所 · 1 分で分類し直し · 元に戻す) — エンジン actions_register_sender が on の時だけ true */
-  registerSender: true
+  registerSender: true,
+  /* ⑨ v0.3.40 (R9M Part A · #271 · #272 c): 確認・入力 に 「発信者未登録」 (送信元ごと · 推定 強→弱→なし · 業者登録 · 登録しない · 元に戻す · 枚数は別) — エンジン out_sender_cards が on の時だけ true */
+  senderCards: true
 };
 
 /* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / PHOTO_V2 · v0.3.29 まで HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */

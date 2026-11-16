@@ -375,6 +375,8 @@ def main():
         (data / "remind.json").write_text(dump(ri), encoding="utf-8")
     # v0.3.39 (R9L · #273): 改善依頼 一覧 (エンジン ask_improve_request の _data/requests.json · 空)
     (data / "requests.json").write_text(dump({"schema_version": 1, "kind": "improve_requests", "today": today.isoformat(), "items": []}), encoding="utf-8")
+    # v0.3.40 (R9M Part A · #271): 発信者未登録 (エンジン out_sender_cards の _data/senders.json · 空)
+    (data / "senders.json").write_text(dump({"schema_version": 1, "kind": "sender_cards", "today": today.isoformat(), "cards": [], "counts": {}, "declined": []}), encoding="utf-8")
     for rel, text in files.items():
         p = out / rel
         p.parent.mkdir(parents=True, exist_ok=True)
