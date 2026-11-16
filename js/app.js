@@ -725,6 +725,14 @@ window.C01 = window.C01 || {};
     (iv.mail_missing || []).forEach(function (mm, i) { if (mm.slot_guid && m[mm.slot_guid] === undefined) m[mm.slot_guid] = typeof mm.seq === 'number' ? mm.seq : 1e6 + i; });
     return m;
   }
+  /* v0.3.43 (R9P Part 0-4b · #281): エンジンの 枠外 原因の推定 (jikkyou ivs[].waku.causes · 無ければ空) → 見出し 「枠外 n」 の説明に足す */
+  var WAKU_CAUSE = { packer_short: '業者の受信台数が枠より多い（COMPASS の PLANT 未入力 · 経由業者の枠?）', dup_ct: '同じ CT · シールが 2 行', non_hannyu_doc: '搬入票ではない書類（配送報告書など）から作られた行',
+    unit_price: '単価・契約の違う枠 — どの契約か不明', other_booking_ct: '他のブッキングの CT' };
+  function wakuWhy(iv) {
+    var cs = ((iv && iv.waku) || {}).causes || [];
+    return cs.length ? '\n推定: ' + cs.map(function (c) { return (WAKU_CAUSE[c.code] || c.code) + (c.text ? '（' + c.text + '）' : ''); }).join(' / ') : '';
+  }
+
   function buildGroups() {
     var ov = overlay();
     var out = [], cnt = { check: 0, compass: 0, remind: 0 }, no = 0;
@@ -741,6 +749,9 @@ window.C01 = window.C01 || {};
         var rTitle = x.st === '再確認' ? reasonTitle(reasonInfos(r, openQ)) : '';    /* v0.3.24 (R7X Part B): 説明 → やること (hover) */
         var photoMiss = (r.reasons || []).indexOf('PHOTO_SET_INCOMPLETE') >= 0 && r.photo_missing ? r.photo_missing : '';
         if (photoMiss && !(openQ.length && openQ[0].field)) short = REASON_SHORT.PHOTO_SET_INCOMPLETE + '（' + photoMiss + '）';
+        /* v0.3.43 (R9P Part 0-1b ②): 単価・契約の違う枠 (UNIT_PRICE_DIFF) = 候補の枠の数 (エンジン unit_price_cands) を出す */
+        var upd = (r.reasons || []).indexOf('UNIT_PRICE_DIFF') >= 0 && !r.slot_guid ? '単価・契約の違う枠' + (r.unit_price_cands ? ' ' + r.unit_price_cands + ' 個' : '') + ' — どの契約か不明' : '';
+        if (upd && x.st === '再確認' && !(openQ.length && openQ[0].field)) short = upd;
         var wait = '';
         if (x.st === '受信中') {
           wait = r.has_docs === false ? '搬入票待ち' : r.has_photos === false ? '写真待ち' : photoMiss ? '写真待ち（' + photoMiss + '）' : '受信待ち';
@@ -749,6 +760,7 @@ window.C01 = window.C01 || {};
         /* v0.3.10 (R7I Part D): 足りない半分が受信済みメール (保留 · 対象外 · 別の束) にありそう = 「受信中・候補あり」 (本当に未着とは分けて表示 · 催促しない) */
         var cand = x.st === '受信中' && r.cand ? r.cand : null;
         if (cand) wait = '受信中・候補あり' + (cand.level === 'bkg' ? '（BKG）' : '') + ' · ' + wait;
+        if (upd && x.st === '受信中') wait += ' · ' + upd;
         var candTitle = cand ? (cand.level === 'ct' ? '同じ CT' : '同じ BKG') + 'の' + (r.has_docs === false ? '搬入票' : '写真') + 'らしいファイルが受信済みメールにあります（' +
           (cand.where || []).join(' / ') + (cand.recv && cand.recv.length ? ' · ' + cand.recv.join(' / ') : '') + '）— 未着ではない可能性 · 催促の対象外' : '';
         var candQid = cand && cand.qid && (cand.files || []).length ? cand.qid : null;    /* v0.3.31 (R8V #254): 候補ファイルがある時だけ押せる */
@@ -788,7 +800,9 @@ window.C01 = window.C01 || {};
       };
       dupOf('ct'); dupOf('seal');
       var nSlots = (iv.slots && iv.slots.length) || iv.slots_n || 0;
-      var over = nSlots && rows.length > nSlots ? free.length : 0;
+      /* v0.3.43 (R9P Part 0-3 · 決定 #166 · #182): 表示する行 = 枠のある行 + 空き枠 (メール未着) + 枠のない行 →
+         枠のない行が 1 行でもあれば COMPASS の枠の数を超える = 枠のない行 全部 「COMPASS 枠外」 (前の 「値のある行の数 > 枠の数」 では空き枠を数えず赤にならなかった) */
+      var over = nSlots ? free.length : 0;
       if (over) free.forEach(function (x) { x.over = true; });
       var freeIn = free.filter(function (x) { return !x.over; }), freeOver = free.filter(function (x) { return x.over; });
       /* v0.3.11 (R7J Part C-2): 同じブッキングに枠の決まっていない行があれば、空き枠は「未着」ではなく「割当待ち」 (行の数まで · 枠外の行は数えない) */
@@ -900,7 +914,7 @@ window.C01 = window.C01 || {};
         '<span class="mono">' + esc(iv.iv_no) + '</span>' +
         '<span class="t2">BKG ' + esc(iv.bkg_no || '') + '</span>' +
         '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
-        (g.over ? '<span class="c01-overhead" title="行が COMPASS の枠 ' + g.total + ' より多い — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違いの可能性（赤の行）">枠外 ' + g.over + '</span>' : '') +
+        (g.over ? '<span class="c01-overhead" title="' + esc('行が COMPASS の枠 ' + g.total + ' を超える — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違い · COMPASS の入力漏れの可能性（赤の行）' + wakuWhy(g.iv)) + '">枠外 ' + g.over + '</span>' : '') +
         '<span class="c01-flex"></span>' +
         (holdOpenN(iv.iv_no, ov) ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + holdOpenN(iv.iv_no, ov) + ')</button>' : '') +
         (otherList(iv, ov).length ? '<button class="c01-btn-sub c01-otherct" data-otherct="' + esc(iv.iv_no) + '" title="「他社のコンテナ」にした行（写真・書類をこの IV から外しています · 元に戻せます）">他社のコンテナ ' + otherList(iv, ov).length + '</button>' : '') +
@@ -951,7 +965,7 @@ window.C01 = window.C01 || {};
     if (!b.groups.length) html += '<tbody><tr><td colspan="15" class="c01-empty">表示する IV がありません（担当港・絞り込みを確認してください）</td></tr></tbody>';
     html += '</table></div>';
     html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK / 確認済</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
-      (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（行が枠の数より多い時の 枠のない行）</span>' : '') +
+      (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠のない行 · 行が枠の数を超える）</span>' : '') +
       '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった行だけ差し替え (スクロール位置そのまま) */
     var root = $('c01-main');

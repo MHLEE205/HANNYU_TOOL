@@ -171,15 +171,33 @@ def h4_checks(page, jj):
     over = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
         [tb.querySelectorAll('tr.c01-row.over').length, (tb.querySelector('.c01-overhead') || {}).textContent || '',
          [...tb.querySelectorAll('tr.c01-row')].map(tr => tr.classList.contains('over') ? 'o' : tr.classList.contains('unassigned') ? 'u' : 's').join('')]]))""")
-    # v0.3.18 (R7S #15 · 결정 #182): 줄 (칸 있는 줄 + 칸 없는 줄) > COMPASS 칸 = 칸 없는 줄 (未割当) 전부 빨강 (빈 칸이 남아도) · 줄 ≤ 칸 = 枠外 없음
+    # v0.3.43 (R9P Part 0-3 · 결정 #166 · #182): 화면 줄 = 칸 있는 줄 + 빈 칸 (メール未着) + 칸 없는 줄 → 칸 없는 줄 (未割当) 이 1줄이라도 있으면
+    # COMPASS 칸 수를 넘음 = 칸 없는 줄 전부 빨강 (값 있는 줄 ≤ 칸 이어도 · 빈 칸이 남아도). 옛 셈 (값 있는 줄 > 칸) 은 빈 칸을 안 세서 빨강이 안 나왔음
     sg = lambda iv: {s["slot_guid"] for s in iv["slots"]}   # noqa: E731
-    want = {iv["iv_no"]: (sum(1 for r in iv["rows"] if r.get("slot_guid") not in sg(iv)) if len(iv["rows"]) > len(iv["slots"]) else 0) for iv in jj["ivs"]}
+    want = {iv["iv_no"]: (sum(1 for r in iv["rows"] if r.get("slot_guid") not in sg(iv)) if iv["slots"] else 0) for iv in jj["ivs"]}
     free02 = sum(1 for r in next(iv for iv in jj["ivs"] if iv["iv_no"] == "TST2611-02")["rows"] if not r.get("slot_guid"))
-    ok("#15 枠外 줄 수 = 줄 > 칸 이면 칸 없는 줄 전부 (TST2611-02 = 4줄 · 3칸 · 빈 칸 1 남음 → 未割当 2줄 모두) · 다른 부킹 0",
-       {k: v[0] for k, v in over.items()} == want and want["TST2611-02"] == 2 == free02, [over, want])
-    ok("#15 머리 「枠外 2」 (그 부킹만 · n = 칸 없는 줄 수)", over["TST2611-02"][1] == "枠外 2" and all(v[1] == "" for k, v in over.items() if k != "TST2611-02"), over)
-    ok("#15 TST2611-02 未割当 표시 0 (전부 枠外) · TST2611-04 (줄 4 ≤ 칸 4) 未割当 2줄 = 빨강 아님", "u" not in over["TST2611-02"][2] and over["TST2611-02"][2].endswith("oo")
-       and over["TST2611-04"][2].count("u") == 2 and "o" not in over["TST2611-04"][2], over)
+    ok("#15 枠外 줄 수 = 칸 없는 줄 전부 (TST2611-02 = 4줄 · 3칸 → 未割当 2줄 · TST2611-04 = 4줄 ≤ 4칸 이어도 未割当 2줄)",
+       {k: v[0] for k, v in over.items()} == want and want["TST2611-02"] == 2 == free02 and want["TST2611-04"] == 2, [over, want])
+    ok("#15 머리 「枠外 n」 (n = 칸 없는 줄 수 · 칸 없는 줄 없는 부킹 = 없음)", all(v[1] == (f"枠外 {want[k]}" if want[k] else "") for k, v in over.items()), over)
+    ok("#15 未割当 표시 0 (전부 枠外) · TST2611-04 도 빨강 2줄 (R9P 0-3)", all("u" not in v[2] for v in over.values()) and over["TST2611-02"][2].endswith("oo")
+       and over["TST2611-04"][2].count("o") == 2, over)
+    # R9P 0-3 시험 고정: 형님 화면 사례 모양 (칸 11 · 값 있는 줄 8 중 칸 1 · 칸 없는 7 → 枠外 7 · 칸 4 · 칸 없는 2 → 枠外 2) — 가명 부킹을 화면 상태에 더해 셈
+    shape = page.evaluate("""() => { const S = C01.state, keep = S.jik.ivs, b = JSON.parse(JSON.stringify(keep[0]));
+        const mk = (no, nS, nSl, nFree) => { const iv = JSON.parse(JSON.stringify(b)); iv.iv_no = no; iv.cy_cut = '2099-12-31';
+            iv.slots = Array.from({length: nS}, (_, i) => ({slot_guid: no + '-s' + i, packer: 'PK', seq: i}));
+            iv.mail_missing = iv.slots.slice(nSl).map(s => ({slot_guid: s.slot_guid, work_date: null}));
+            iv.rows = Array.from({length: nSl + nFree}, (_, i) => ({...b.rows[0], container_id: no + '-c' + i, ct: '', seal: '', status: '受信中',
+                slot_guid: i < nSl ? no + '-s' + i : null, reasons: i >= nSl ? ['UNIT_PRICE_DIFF'] : [], unit_price_cands: 6}));
+            return iv; };
+        S.jik = {...S.jik, ivs: keep.concat([mk('TSTW-A', 11, 1, 7), mk('TSTW-B', 4, 0, 2)])}; C01.app.render();
+        const n = iv => document.querySelectorAll(`tbody[data-iv='${iv}'] tr.c01-row.over`).length;
+        const h = iv => (document.querySelector(`tbody[data-iv='${iv}'] .c01-overhead`) || {}).textContent || '';
+        const w = document.querySelector(`tbody[data-iv='TSTW-A'] tr.c01-row.over`);
+        const r = [n('TSTW-A'), h('TSTW-A'), n('TSTW-B'), h('TSTW-B'), document.querySelectorAll(`tbody[data-iv='TSTW-A'] tr.c01-row`).length,
+                   [...document.querySelectorAll(`tbody[data-iv='TSTW-A'] tr`)].some(tr => tr.textContent.includes('割当待ち')), w ? w.textContent : ''];
+        S.jik = {...S.jik, ivs: keep}; C01.app.render(); return r; }""")
+    ok("R9P 0-3 칸 11 · 칸 없는 줄 7 → 枠外 7 · 칸 4 · 칸 없는 줄 2 → 枠外 2 · 「割当待ち」 없음", shape[:4] == [7, "枠外 7", 2, "枠外 2"] and shape[5] is False, shape)
+    ok("R9P 0-1b ② 単価・契約 줄 = 「単価・契約の違う枠 6 個 — どの契約か不明」", "単価・契約の違う枠 6 個 — どの契約か不明" in shape[6], shape[6])
     tr = page.locator("tbody[data-iv='TST2611-02'] tr.c01-row.over")
     ok("H-4 枠外 줄 状況 칸 = 「COMPASS 枠外」 (未割当 표시 대신)", tr.count() == 2 and tr.locator(".c01-over").all_inner_texts() == ["COMPASS 枠外"] * 2
        and tr.locator(".c01-unassigned").count() == 0, tr.all_inner_texts())
@@ -2450,11 +2468,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.42", page.title() == "LEENAI C-01 搬入票 v0.3.42", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.43", page.title() == "LEENAI C-01 搬入票 v0.3.43", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.42" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.43" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2525,8 +2543,8 @@ def main():
             want4 = [r["ct"] for r in sorted([r for r in iv4["rows"] if r.get("slot_guid")], key=lambda r: sq4[r["slot_guid"]])] +                     [r["ct"] for r in iv4["rows"] if not r.get("slot_guid")]
             got4 = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-04'] tr.c01-row")].map(tr => tr.children[4].textContent.trim())""")
             ok("C 줄 순서 = COMPASS 칸 seq (TST2611-04 칸 역순) · 未割当 맨 아래", got4 == want4 and want4 != [r["ct"] for r in iv4["rows"]], [got4, want4])
-            un4 = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-04'] tr.c01-row")].map(tr => tr.classList.contains('unassigned') && !!tr.querySelector('.c01-unassigned'))""")
-            ok("C 칸 없는 줄 = 「未割当」 표시 (TST2611-04 2줄 · 맨 아래)", un4 == [False, False, True, True], un4)
+            un4 = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-04'] tr.c01-row")].map(tr => tr.classList.contains('unassigned') && tr.classList.contains('over') && !!tr.querySelector('.c01-over'))""")
+            ok("C 칸 없는 줄 = 「COMPASS 枠外」 (R9P 0-3 · TST2611-04 2줄 · 맨 아래)", un4 == [False, False, True, True], un4)
             tot = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('tbody[data-iv]')].map(tb => [tb.dataset.iv,
                 (tb.querySelector('.c01-ivhead').textContent.match(/([0-9]+)[/]([0-9]+)台/) || [])[2]]))""")
             want_tot = {iv["iv_no"]: str(len(iv["slots"])) for iv in jj["ivs"]}
