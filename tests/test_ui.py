@@ -899,6 +899,9 @@ def r9k_fax_reason_checks(page, root, shots):
           "note": "保留", "resolved": None, "superseded": [], "cy_cut": None, "cy_open": None, "issuer": None, "field_sources": {}, "field_source_text": {},
           "received_at": "2026-11-12T11:00:00+09:00"}
     q2["items"].append(fq)
+    fq2 = json.loads(json.dumps(fq))
+    fq2["queue_id"], fq2["files"][0]["sha16"], fq2["received_at"] = "9e9e9e9e9e9e9e92", "9e9e9e9e9e9e9e92", "2026-11-12T11:05:00+09:00"
+    q2["items"].append(fq2)
     if "未分類FAX" not in q2["kinds"]:
         q2["kinds"] = list(q2["kinds"]) + ["未分類FAX"]
     qp.write_text(json.dumps(q2, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
@@ -941,6 +944,21 @@ def r9k_fax_reason_checks(page, root, shots):
         its.nth(hit).click()
     ok("R9K 未分類FAX 「搬入票ではない」 = 完了 에서 「元に戻す」 있음", hit is not None and page.locator("#q-undo").count() == 1, hit)
     page.screenshot(path=str(shots / "r9k_fax_reason.png"))
+    # v0.3.38 (R9K 0-5 d): 「搬入票ではない」 옆 이유 버튼 5개 (ひとことでOK) — 누르면 창 없이 그 이유로 바로
+    page.click(".c01-kinds [data-kind='未分類FAX']")
+    if page.locator(".c01-item[data-q='9e9e9e9e9e9e9e92']").count():
+        page.locator(".c01-item[data-q='9e9e9e9e9e9e9e92']").click()
+    qk = page.locator("[data-nhquick]")
+    ok("R9K 0-5 d 「搬入票ではない」 옆 이유 버튼 5 · 「ひとことでOK」 바로 보임", qk.count() == 1 and qk.locator("[data-nhq]").count() == 5
+       and "ひとことでOK" in qk.inner_text() and qk.is_visible(), qk.count())
+    dl3 = []
+    page.once("dialog", lambda dg: (dl3.append(dg.message), dg.accept()))
+    if qk.count():
+        qk.locator("[data-nhq='duplicate']").click()
+    page.wait_for_timeout(500)
+    rec2 = [x for x in actions(root) if x.get("action") == "not_ours" and x.get("queue_id") == "9e9e9e9e9e9e9e92"]
+    ok("R9K 0-5 d 이유 버튼 = 창 없이 not_ours (reason_code duplicate · 이유 글 없음)", len(rec2) == 1 and (rec2[0].get("value") or {}).get("reason_code") == "duplicate"
+       and "reason_text" not in (rec2[0].get("value") or {}) and not dl3 and page.locator("#c01-nhdlg").count() == 0, [rec2, dl3])
     page.click(".c01-kinds [data-kind='all']")
     qp.write_text(qt0, encoding="utf-8")
     page.evaluate("C01.app.tick()")
@@ -2016,11 +2034,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.37", page.title() == "LEENAI C-01 搬入票 v0.3.37", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.38", page.title() == "LEENAI C-01 搬入票 v0.3.38", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.37" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.38" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),

@@ -2548,6 +2548,7 @@ window.C01 = window.C01 || {};
         (q.kind === FOREIGN && !st.done ? '<button id="q-ours" class="c01-btn-ghost2" title="当社の書類です（値をもう一度使います · 元に戻せます）">当社の書類</button>' : '') +
         (q.kind === SAME && !st.done ? '<button id="q-notsame" class="c01-btn-ghost2" title="この 2 行は別のコンテナです（候補を出さなくなります · 元に戻せます）">別のコンテナ</button>' : '') +
         (canNot ? '<button id="q-notours" class="c01-btn-ghost2 danger" title="この書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
+        (canNot ? nhQuickHtml() : '') +
         (canOther ? '<button id="q-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' : '') +
         (canUndo ? '<button id="q-undo" class="c01-btn-ghost2">元に戻す</button>' : '') +
         (canKeep ? '<button id="q-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') +
@@ -2611,6 +2612,9 @@ window.C01 = window.C01 || {};
     $('q-skip').onclick = function () { S.qsel = nextQueueId(q); render(); };
     var no = $('q-notours');
     if (no) no.onclick = function () { notHannyuhyo(q, curF); };
+    document.querySelectorAll('[data-nhq]').forEach(function (b) {                /* v0.3.38 (R9K 0-5 d · #272): 理由ボタン = その理由で すぐ 「搬入票ではない」 */
+      b.onclick = function () { notHannyuhyo(q, curF, { code: b.getAttribute('data-nhq'), text: null }); };
+    });
     var oc = $('q-otherct');
     if (oc) oc.onclick = function () {
       var ivx = ivById(q.iv_no), kr = ivx && ivx.rows.filter(function (r) { return r.container_id === q.container_id; })[0];
@@ -2772,6 +2776,13 @@ window.C01 = window.C01 || {};
   var NH_REASONS = [['other_doc', '別の書類（請求書など）'], ['own_blank_form', '当社の書式（空欄）'], ['other_packer', '別の業者・別の案件'],
     ['duplicate', '重複・同じもの'], ['other', 'その他']];
   var NH_TEXT_MAX = 300;
+  /* v0.3.38 (R9K 0-5 d · 決定 #272): 「搬入票ではない」 の横に よく使う理由 5 つ (ひとことでOK) — 押すと その理由で すぐ記録。
+     本ボタン 「搬入票ではない」 = 今までどおり 理由の窓 (空でも押せる) */
+  function nhQuickHtml() {
+    return '<div class="c01-nhquick" data-nhquick><span class="t2">理由（ひとことでOK）:</span>' + NH_REASONS.map(function (x) {
+      return '<button type="button" class="c01-nhr" data-nhq="' + x[0] + '" title="この理由で 「搬入票ではない」 にします（元に戻せます）">' + esc(x[1]) + '</button>';
+    }).join('') + '</div>';
+  }
   function reasonDialog(done) {
     var old = $('c01-nhdlg');
     if (old) old.parentNode.removeChild(old);
@@ -2802,12 +2813,13 @@ window.C01 = window.C01 || {};
       done({ code: code, text: t || null });
     };
   }
-  function notHannyuhyo(q, f) {
+  function notHannyuhyo(q, f, preset) {
     if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
+    var ask = preset ? function (done) { done(preset); } : reasonDialog;             /* v0.3.38 (R9K 0-5 d): 理由ボタンから = 窓なし */
     if (q.kind === '未分類FAX') {
       /* v0.3.37 (R9K 0-5 f · 決定 #272): 未分類FAX も 理由の窓 (同じ理由ボタン · ひとことでOK · 空でも押せる)。action 名は not_ours のまま (エンジンの反映の道は同じ)
          value = 理由 + sha16 (理由も sha16 も無い = null = 今までと同じ形) → エンジンが学習の例として残す (判定には使わない) */
-      reasonDialog(function (why) {
+      ask(function (why) {
         var fh = (q.files || []).filter(function (x) { return x.sha16; }).map(function (x) { return x.sha16; });
         var v0 = {};
         if (why.code) v0.reason_code = why.code;
@@ -2820,7 +2832,7 @@ window.C01 = window.C01 || {};
     }
     var hs = f && f.sha16 ? [f.sha16] : (q.files || []).filter(function (x) { return x.sha16; }).map(function (x) { return x.sha16; });
     if (!hs.length) return;
-    reasonDialog(function (why) {
+    ask(function (why) {
       var v = { sha16: hs.filter(function (h, i) { return hs.indexOf(h) === i; }) };
       if (why.code) v.reason_code = why.code;
       if (why.text) v.reason_text = why.text;

@@ -405,6 +405,8 @@ button.st-wait.c01-candbtn { background: none; border: 1px dashed var(--warn, #c
 .c01-nhbox .b { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .c01-nhr { border: 1px solid #bbb; background: #f7f7f7; border-radius: 12px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
 .c01-nhr.on { background: #fde8e8; border-color: #c33; }
+/* v0.3.38 (R9K 0-5 d): 「搬入票ではない」 の横の理由ボタン */
+.c01-nhquick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; }
 .c01-nhbox textarea { width: 100%; box-sizing: border-box; font: inherit; }
 .c01-nhbox .f { margin-top: 8px; text-align: right; }
 .c01-nhbox .c01-foot { margin-top: 6px; color: #999; font-size: 10px; text-align: right; }
