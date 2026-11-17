@@ -91,15 +91,15 @@ def main():
             page.route(DV + "/**", dv_handler(cells, state))
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("v0.3.19 config: Compass入力 = 실제 입력 (SEND.compass · dvUrl · 試験運用中) · v0.3.22 催促 = 試験送信만 (remindTest)",
-               page.evaluate("C01.SEND.compass === true && C01.COMPASS.dvUrl === '%s' && C01.COMPASS.trial === true && C01.SEND.remind === true && C01.SEND.remindTest === true" % DV))   # v0.3.22 (R7V B): 催促 = 試験送信만
+            ok("v0.3.19 config: Compass入力 = 실제 입력 (SEND.compass · dvUrl · 試験運用中) · v0.3.22 催促 = 試験送信 만 (remindTest)",
+               page.evaluate("C01.SEND.compass === true && C01.COMPASS.dvUrl === '%s' && C01.COMPASS.trial === true && C01.COMPASS.badge === false && C01.SEND.remind === true && C01.SEND.remindTest === true" % DV))   # v0.3.22 (R7V B): 催促 = 試験送信 만
             page.evaluate(G.STUB, staff)
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; "
                           "C01.app.start(new C01.sources.Graph())")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
             page.locator('[data-compass="TST2611-01"]').first.click()
             page.wait_for_selector("#compass-table", timeout=15000)
-            ok("Compass入力 창 「試験運用中」 · 로그인한 사람 이름", page.locator("[data-trial]").inner_text() == "試験運用中"
+            ok("Compass入力 창 「試験運用中」 없음 (v0.3.48 · 입력 그대로) · 로그인한 사람 이름", page.locator("[data-trial]").count() == 0
                and "STAFF A" in page.locator(".c01-mf").inner_text(), page.locator(".c01-mf").inner_text()[:120])
             boxes = page.locator("[data-cpick]")
             n_box, n_chk = boxes.count(), page.locator("[data-cpick]:checked").count()

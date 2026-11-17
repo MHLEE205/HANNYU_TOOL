@@ -7,9 +7,9 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.47',
+  version: '0.3.48',
   date: '2026-11-17',
-  desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
+  desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
 /* D-6 → 決定 #109 (R6.8) で決まった規則。ここだけ変える (エンジン engine/actions/apply.py ACTION_RULES と同じ規則) */
@@ -103,8 +103,10 @@ C01.COMPASS = {
   type_input: false,
   /* v0.3.19 (R7T 決定 #190): COMPASS (Dataverse) の場所 — LEENAI_COMMON と同じ環境 · 読み書きは職員トークン (LEENAI.auth.token('dataverse')) */
   dvUrl: 'https://orgde512c6f.crm7.dynamics.com',
-  /* 並行期間 (#176): 職員の業務は旧方式のまま — 窓に「試験運用中」 */
-  trial: true
+  /* 並行期間 (#176): compass_done 記録の trial (記録だけ · 入力の動きは同じ) */
+  trial: true,
+  /* v0.3.48 (R10B · #298): 窓の 「試験運用中」 の印 (false = 出さない · 記録の trial とは別) */
+  badge: false
 };
 
 /* v0.3.2 (R7B): PDF を画面の中に描く pdf.js (cdnjs · 版固定 · LEENAI の他 TOOL と同じ版) */
@@ -126,7 +128,7 @@ C01.ASK = {
   enabled: true,
   base: '_actions',
   pollMs: 10000,          /* 答え待ちの間だけ 10 秒ごと */
-  trial: true,
+  trial: false,           /* v0.3.48 (R10B · #298): 「試験表示」 끔 */
   global: true,           /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (画面全体 · 改善依頼 · 依頼一覧) — エンジン ask_global が切れていれば 「準備中」 の答え */
   /* v0.3.46 (R9X Part 0 · #291 ②): 答えの 「この操作をしますか？」 (AI が準備 · 押すのは担当者 · 今のボタンと同じ記録 · 元に戻す) — エンジン ask_proposed_actions */
   propose: true,

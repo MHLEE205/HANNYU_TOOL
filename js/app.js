@@ -881,7 +881,7 @@ window.C01 = window.C01 || {};
       '</nav>' +
       '<span class="c01-sub">' + esc(t) + ' 時点 · 最終更新 <span id="c01-upd">' + upd + '</span>（自動更新）</span>' +
       '<span class="c01-flex"></span>' +
-      '<button id="help-open" class="c01-btn-sub c01-helpbtn" title="この TOOL の使い方（並行期間中の注意）">使い方</button>' +
+      '<button id="help-open" class="c01-btn-sub c01-helpbtn" title="この TOOL の使い方">使い方</button>' +
       (gaskOn() ? '<button id="gask-open" class="c01-btn-sub c01-gaskbtn' + (S.gDr ? ' on' : '') + '" aria-expanded="' + (S.gDr ? 'true' : 'false') + '" aria-controls="gask-box" title="カードと関係ない質問 · 「メールが来ているのに出ない」 などの改善依頼 (画面全体)">AI 相談</button>' : '') +   /* v0.3.39 (R9L · #273) */
       (graphMode()
         ? '<span class="c01-local c01-sp" title="SharePoint ドキュメント / ' + esc(C01.SOURCE.spLabel || C01.SOURCE.spRoot) + ' から読んでいます (ログインした人の権限)">SharePoint · ' + esc(C01.SOURCE.spLabel || C01.SOURCE.spRoot) + '</span>' +
@@ -1154,8 +1154,8 @@ window.C01 = window.C01 || {};
     getSnap.then(function (snap) {
       if (!S.modal || S.modal.iv !== ivNo) return;
       var html = '<div class="c01-mh"><b>Compass入力' + (live ? '' : ' — 比較表') + '</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(md(iv.cy_cut)) + '</span>' +
-        (live ? ((C01.COMPASS || {}).trial ? '<span class="c01-trial" data-trial>試験運用中</span>' : '')
-          : '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>') +
+        (live ? ((C01.COMPASS || {}).trial && (C01.COMPASS || {}).badge !== false ? '<span class="c01-trial" data-trial>試験運用中</span>' : '')
+          : '') +           /* v0.3.48 (R10B · #298): 比較表 だけの時の 試験表示 は出さない (入力しない動作は そのまま) */
         '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>';
       if (!snap || snap.error) {
         html += '<div class="c01-mb"><p class="c01-err">' + (snap && snap.error ? esc(snap.error) : 'COMPASS の今の値がありません（ローカルプレビュー: compass_now/' + esc(ivNo) + '.json なし）') + '</p></div>';
@@ -1617,7 +1617,7 @@ window.C01 = window.C01 || {};
     var html = '<div class="c01-mh"><b>催促メール — プレビュー</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
       (remindLive() ? '<span class="c01-trial c01-live" data-live>本番送信（押した職員のメールから業者へ送ります）</span>' :
         remindTest() ? '<span class="c01-trial" data-trial>試験送信（[test] · 試験用アドレスだけ · 業者には送りません）</span>' :
-        '<span class="c01-trial" data-trial>試験表示（並行期間中は送信・入力しません）</span>') +
+        '') +           /* v0.3.48 (R10B · #298): 送信ボタンが無い時の 試験表示 は出さない (送らない動作は そのまま) */
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">';
     var cand = ((S.remind && S.remind.cand) || {})[ivNo] || {};
     Object.keys(cand).forEach(function (pk) {
@@ -1935,7 +1935,7 @@ window.C01 = window.C01 || {};
     var xs = (iv && iv.customs_docs) || [];
     S.modal = { kind: 'customs', iv: ivNo };
     var html = '<div class="c01-mh"><b>通関書類（参考）</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
-      '<span class="c01-trial" data-trial>試験表示</span><span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
       '<p class="c01-note2">通関業者から届いた書類です。搬入票の値（seal · 重量など）には使いません。</p><ul class="c01-customs-list">' +
       xs.map(function (x, i) {
         return '<li><button class="c01-btn-sub" data-cusopen="' + i + '">開く</button> <span>' + esc(x.name) + '</span> <span class="t2">' +
@@ -1945,15 +1945,15 @@ window.C01 = window.C01 || {};
     $('c01-modal').querySelectorAll('[data-cusopen]').forEach(function (b) { b.onclick = function () { openTab(xs[+b.getAttribute('data-cusopen')].path); }; });
   }
 
-  /* ── v0.3.17 (R7P · 決定 #175 · #176): 使い方 (1 画面) — 並行期間 (2026-11-16〜11-22) の職員向け。人の名前・メールは書かない ── */
+  /* ── v0.3.17 (R7P · 決定 #175 · #176): 使い方 (1 画面) — 職員向け。人の名前・メールは書かない · v0.3.48 (R10B · #298): 期間 · 切り替えの文 · 試験表示 を外す ── */
   function openHelp() {
     S.modal = { kind: 'help' };
-    var html = '<div class="c01-mh"><b>使い方</b><span class="t2">並行期間 2026-11-16〜11-22</span>' +
+    var html = '<div class="c01-mh"><b>使い方</b>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
-      '<p class="c01-help-lead">並行期間中は <b>これまでのシステムで仕事を続けてください</b>。この TOOL で使うのは <b>「見る」（実況表）</b> と <b>「確認・入力」</b> だけです。<br>' +
+      '<p class="c01-help-lead">この TOOL の画面は <b>「見る」（実況表）</b> と <b>「確認・入力」</b> です。<br>' +
       (remindLive() ? '<span class="c01-live">本番</span> 「催促」 の 「送信」 は <b>押した職員のメールから業者へ</b> 送ります（エンジンからは送りません）。' + esc(REMIND_LIVE_NOTE) + ' ' :
-        '<span class="c01-trial">試験表示</span> 「催促」 は試験表示です — 業者には送りません（「送信（試験）」は試験用アドレスにだけ届きます · 業者への催促はこれまでどおりの方法で）。 ') +
-      '「Compass入力」 は <span class="c01-trial">試験運用中</span> — ボタンを押すと COMPASS に入力します（試験用 · 職員の業務はこれまでどおりの方法で）。</p>' +
+        (remindTest() ? '「催促」 の 「送信（試験）」 は試験用アドレスにだけ届きます（業者には送りません）。 ' : '「催促」 は下書きの表示です（この画面からは送りません）。 ')) +
+      '「Compass入力」 は ボタンを押すと COMPASS に入力します（ログインした人の権限）。</p>' +
       '<div class="c01-help-grid">' +
       '<section><h4>1. 自分の担当を見る</h4><p>実況表の 「担当港」 で <b>「自分の担当」</b> を押すと、自分の港の IV だけが出ます。「全港」 = 全部。港の名前を押すとその港だけ（複数選べます）。</p></section>' +
       '<section><h4>2. 状況の意味</h4><ul>' +

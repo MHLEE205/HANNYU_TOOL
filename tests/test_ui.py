@@ -223,9 +223,12 @@ def help_checks(page, shots):
     hb.click()
     page.wait_for_selector("#help-body")
     txt = page.locator("#help-body").inner_text()
-    need = ["並行期間", "これまでのシステム", "見る", "確認・入力", "試験表示", "催促", "Compass入力", "自分の担当", "自動OK", "再確認", "受信中",
+    need = ["見る", "確認・入力", "催促", "Compass入力", "自分の担当", "自動OK", "再確認", "受信中",
             "✎ 修正", "搬入票ではない", "元に戻す", "Ctrl+Shift+R", "気づいた点は担当の管理者へ（画面の写真と IV 番号）"]
-    ok("v0.3.17 使い方 창 열림 · 내용 (試験表示 · 상태 · 確認・入力 · Ctrl+Shift+R · 관리자)", all(w in txt for w in need), [w for w in need if w not in txt])
+    ok("v0.3.17 使い方 창 열림 · 내용 (상태 · 確認・入力 · Ctrl+Shift+R · 관리자)", all(w in txt for w in need), [w for w in need if w not in txt])
+    gone = ["並行期間", "これまでのシステム", "これまでどおり", "11-16", "11-22", "11/24", "試験表示", "試験運用中"]
+    mtxt = page.locator("#c01-modal").inner_text()
+    ok("v0.3.48 (R10B · #298) 使い方 기간 · 전환 문구 · 試験表示 0 (창 제목 포함)", not any(w in mtxt for w in gone), [w for w in gone if w in mtxt])
     ok("v0.3.34 使い方 「業者登録」 한 줄 (試験表示 와 같은 칩 · 元に戻す)", page.locator("#help-body [data-regsender-help].c01-trial").count() == 1 and "業者登録" in txt and "元に戻す" in txt)
     ok("v0.3.17 使い方 「\u78ba\u5b9a」 글자 0 · 메일·사람 이름 0", "\u78ba\u5b9a" not in txt and "@" not in txt and "\u674e" not in txt and "さんへ" not in txt)
     fit = page.evaluate("""() => { const m = document.querySelector('.c01-modal-help'), b = document.getElementById('help-body'); const r = m.getBoundingClientRect();
@@ -239,7 +242,7 @@ def help_checks(page, shots):
             return [c('.c01-help').color, c('.c01-modal-help').backgroundColor, c('.c01-help .c01-trial').color, c('.c01-help-lead').backgroundColor]; }"""))
         page.screenshot(path=str(shots / f"help_{th}.png"))
     page.evaluate("document.documentElement.setAttribute('data-theme','dark')")
-    ok("v0.3.17 使い方 4테마 글자색 ≠ 배경색 (본문 · 試験表示)", len(cols) == 4 and all(c[0] != c[1] and c[2] != c[1] and c[2] != c[3] and c[0] != c[3] for c in cols), cols)
+    ok("v0.3.17 使い方 4테마 글자색 ≠ 배경색 (본문 · 業者登録 칩)", len(cols) == 4 and all(c[0] != c[1] and c[2] != c[1] and c[2] != c[3] and c[0] != c[3] for c in cols), cols)
     page.click("[data-close]")
     ok("v0.3.17 使い方 닫기", page.locator("#c01-modal").is_hidden())
 
@@ -1795,7 +1798,7 @@ def r8b_checks(page, root, shots):
     cb.click()
     page.wait_for_selector("[data-cusopen]")
     mb = page.locator("#c01-modal").inner_text()
-    ok("E-2 通関書類 창 = 이름 · 받은 시각 · 「値には使いません」 · 試験表示", "DR_test.pdf" in mb and "2026-11-11 10:00" in mb and "には使いません" in mb and "試験表示" in mb, mb.replace(chr(10), " / ")[:300])
+    ok("E-2 通関書類 창 = 이름 · 받은 시각 · 「値には使いません」 · 試験表示 없음 (v0.3.48)", "DR_test.pdf" in mb and "2026-11-11 10:00" in mb and "には使いません" in mb and "試験表示" not in mb, mb.replace(chr(10), " / ")[:300])
     page.screenshot(path=str(shots / "r8b_customs.png"))
     page.click("[data-close]")
     page.click("tbody[data-iv='TST2611-03'] [data-remind]")
@@ -1855,8 +1858,8 @@ def r7z_checks(page, root, shots):
     page.locator(f"[data-q='{qid}']").first.click()
     page.wait_for_timeout(400)
     foot = page.locator("#ask-foot")
-    ok("R7Z 「その他（AIに相談）」 欄 있음 · 처음엔 닫힘 (드로어 0) · 試験表示 (v0.3.36: 링크)", foot.count() == 1 and page.locator("#ask-box").count() == 0
-       and "試験表示" in foot.inner_text() and "その他（AIに相談）" in foot.inner_text())
+    ok("R7Z 「その他（AIに相談）」 欄 있음 · 처음엔 닫힘 (드로어 0) · 試験表示 없음 (v0.3.48)", foot.count() == 1 and page.locator("#ask-box").count() == 0
+       and "試験表示" not in foot.inner_text() and "その他（AIに相談）" in foot.inner_text())
     page.click("#q-ask")
     page.wait_for_timeout(300)
     page.locator("[data-askq='0']").click()
@@ -2010,7 +2013,7 @@ def r9l_gask_checks(page, root, shots, engine):
     page.click("#gask-open")
     page.wait_for_timeout(300)
     box = page.locator("#gask-box")
-    ok("R9L 実況表 에서 드로어 열림 · 제목 「AI 相談（全体）」 · 試験表示 · Powered 줄", box.count() == 1 and "AI 相談（全体）" in box.inner_text()
+    ok("R9L 実況表 에서 드로어 열림 · 제목 「AI 相談（全体）」 · 試験表示 없음 (v0.3.48) · Powered 줄", box.count() == 1 and "AI 相談（全体）" in box.inner_text() and "試験表示" not in box.inner_text()
        and "✦ Powered by LEENAI Automation System" in box.inner_text() and page.locator("#gask-open").get_attribute("aria-expanded") == "true")
     before = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
     page.fill("#gask-in", "沖縄テスト紙業 から TSTBK0000001 のメール来てるのに写真がない")
@@ -2999,11 +3002,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.47", page.title() == "LEENAI C-01 搬入票 v0.3.47", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.48", page.title() == "LEENAI C-01 搬入票 v0.3.48", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.47" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.48" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -3106,7 +3109,7 @@ def main():
             sb = page.locator("#compass-send")
             ok("送信 비활성 「DRY — 送信しません」", sb.is_disabled() and "DRY" in sb.inner_text(), sb.inner_text())
             tb = page.locator(".c01-mh [data-trial]")
-            ok("v0.3.17 Compass入力 창 「試験表示（並行期間中は送信・入力しません）」", tb.count() == 1 and tb.inner_text() == "試験表示（並行期間中は送信・入力しません）")
+            ok("v0.3.48 (R10B) Compass入力 比較表 창 試験表示 없음 (送信 DRY 그대로)", tb.count() == 0 and "試験" not in page.locator(".c01-mh").first.inner_text())
             got = page.evaluate("JSON.stringify(C01.state.modal.res)")
             iv1 = next(x for x in jik["ivs"] if x["iv_no"] == "TST2611-01")
             snap = json.loads((root / "_data" / "compass_now" / "TST2611-01.json").read_text(encoding="utf-8"))
@@ -3138,7 +3141,7 @@ def main():
             ok("催促 送信 비활성 (엔진 send_mode 없음 = 「送信できません」 · 送信 버튼 0)", rs.is_disabled() and "送信できません" in rs.inner_text()
                and page.locator("[data-rsend]").count() == 0, rs.inner_text())
             tb = page.locator(".c01-mh [data-trial]")
-            ok("v0.3.17 催促 창 「試験表示（並行期間中は送信・入力しません）」", tb.count() == 1 and tb.inner_text() == "試験表示（並行期間中は送信・入力しません）")
+            ok("v0.3.48 (R10B) 催促 창 試験表示 없음 (送信できません 그대로)", tb.count() == 0 and "試験表示" not in page.locator(".c01-mh").first.inner_text())
             ok("v0.3.11 催促 미리보기 「候補書類あり — 催促前に確認」 (엔진 remind.json cand)",
                page.locator(".c01-rcand").count() == 1 and "催促前に確認" in page.locator(".c01-rcand").inner_text())
             page.screenshot(path=str(shots / "remind_preview.png"))
