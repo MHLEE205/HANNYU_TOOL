@@ -296,6 +296,8 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-row.over td { background: var(--row-over) !important; color: var(--row-over-t); font-weight: 700; border-top: 1px solid var(--row-over-b); border-bottom: 1px solid var(--row-over-b); }
 .c01-row.over td .st-wait, .c01-row.over td .st-ok { color: var(--row-over-t); }
 .c01-over, .c01-overhead { display: inline-block; padding: 1px 7px; border-radius: 4px; background: var(--over-chip); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .02em; }
+/* v0.3.47 (R9Y Part 0-1): 確認済 + 他社の疑い — 小さい赤い印 (値 · 状態はそのまま · 理由はツールチップ) */
+.c01-suspect { display: inline-block; padding: 0 6px; border-radius: 4px; border: 1px solid var(--over-chip); color: var(--over-chip); font-size: 10.5px; font-weight: 800; cursor: help; }
 .c01-overhead { font-size: 12px; }
 .lg.over { background: var(--row-over); border: 1px solid var(--row-over-b); }
 /* v0.3.15 (R7N Part G): 原本 = 行と結び付いた書類だけ · 候補 · 搬入票なし（待ち） · 向き補正 · ✎ 修正 */

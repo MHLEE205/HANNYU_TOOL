@@ -2853,6 +2853,96 @@ def r9x_checks(page, root, shots, engine):
     page.wait_for_timeout(400)
 
 
+def r9y_checks(page, root, shots, engine):
+    """v0.3.47 (R9Y Part 0 · R9W Part 2): 確認済 の行でも 他社の疑い = 小さい赤い印 「他社の疑い」 + ツールチップ (値 · 状態そのまま) ·
+    「確認済の見直し」 カード (値を選ぶカードではない · 「このまま（確認済）」 = review_keep · 「他社のコンテナ」 · 「搬入票ではない」 無し · 元に戻す)."""
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    jp, qp = d / "jikkyou.json", d / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    page.keyboard.press("Escape")
+    page.evaluate("C01.state.view = 'main'; C01.app.render()")
+    gone = {(x.get("value") or {}).get("container_id") for x in actions(root) if x.get("action") == "other_ct"}
+    j = json.loads(jt0)
+    iv1 = next(x for x in j["ivs"] if x["iv_no"] == "TST2611-01")
+    r1 = [r for r in iv1["rows"] if r.get("ct") and r.get("container_id") and r["container_id"] not in gone][-1]
+    r1["status"] = "確認済"
+    r1["human"] = {"seal": {"value": r1.get("seal") or "SL1", "source": "搬入票", "by": "user1@example.invalid", "at": "2026-11-12T08:12:00+09:00", "action_id": "r9yconf0001"}}
+    r1["confirmed_suspect"] = {"why": [], "contradict": {"fields": ["seal"], "confirmed_at": "2026-11-12T08:12:00+09:00", "excluded_at": "2026-11-12T17:09:00+09:00"}}
+    jp.write_text(dump(j), encoding="utf-8")
+    docs_dir = [p_.relative_to(root).as_posix() for p_ in sorted((root / "TST2611-01" / "搬入票").glob("*.svg"))]
+    rq = {"queue_id": "7e7e7e7e7e7e7e71", "kind": "確認済の見直し", "iv_no": "TST2611-01", "ct": r1["ct"], "field": None, "container_id": r1["container_id"], "values": {},
+          "candidates": [], "files": [{"path": docs_dir[0], "name": "r9y-doc.pdf", "page": None, "bbox": None, "sha16": "7e7e7e7e7e7e7e7e"}],
+          "note": "CONFIRMED_THEN_NOT_HANNYUHYO", "resolved": None, "superseded": [], "cy_cut": None, "cy_open": None, "issuer": None, "field_sources": {},
+          "field_source_text": {}, "review": {"why": [], "fields": ["seal"], "confirmed_at": "2026-11-12T08:12:00+09:00", "excluded_at": "2026-11-12T17:09:00+09:00"}}
+    q2 = json.loads(qt0)
+    q2["items"].append(rq)
+    qp.write_text(dump(q2), encoding="utf-8")
+    prev = page.evaluate("[!!C01.RULES.otherCt, !!C01.RULES.valueEdit]")
+    page.evaluate("C01.RULES.otherCt = true; C01.RULES.valueEdit = true; C01.app.tick()")
+    page.wait_for_timeout(800)
+    tr = page.locator("tr.c01-row[data-status='確認済']").filter(has=page.locator(".c01-suspect"))
+    tt = tr.first.locator(".c01-suspect").get_attribute("title") if tr.count() else ""
+    ok("R9Y 確認済 の行 = 「他社の疑い」 (小さい赤い印) · ツールチップ = 確認 → 後で 「搬入票ではない」 · 状態 確認済 のまま",
+       tr.count() == 1 and "搬入票ではない" in (tt or "") and "確認済のまま" in (tt or "") and tr.first.locator(".st-ok, .c01-okedit").count() >= 1, [tr.count(), tt])
+    page.screenshot(path=str(shots / "r9y_jikkyou_suspect.png"))
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qiv = null; C01.state.qsel = q; C01.app.render(); }", rq["queue_id"])
+    page.wait_for_selector(".c01-review")
+    rt = page.locator(".c01-review").inner_text()
+    ok("R9Y 「確認済の見直し」 カード = 理由 (確認 → 搬入票ではない) · 「このまま（確認済）」 · 「他社のコンテナ」 · 「搬入票ではない」 無し · 種類 チップ",
+       "搬入票ではない" in rt and "根拠が合いません" in rt and "このまま（確認済）" in page.locator("#q-submit").inner_text()
+       and page.locator("#q-otherct").count() == 1 and page.locator("#q-notours").count() == 0 and page.locator("#q-keep").count() == 0
+       and page.locator(".c01-kinds [data-kind='確認済の見直し']").count() == 1, [rt[:200], page.locator("#q-submit").inner_text()])
+    ok("R9Y 「確認済の見直し」 カード = 「AIに相談」 ボタン", page.locator("#q-ask").count() == 1)
+    for _ in range(2):                                   # ドロアーが前の試験で開いたまま = 1 回目で閉じる
+        if page.locator("#ask-in").count():
+            break
+        page.click("#q-ask")
+        page.wait_for_timeout(400)
+    before = set(p_.name for p_ in (root / "_actions" / "ask").rglob("*.json"))
+    page.fill("#ask-in", "確認したのに あとで 搬入票ではない になった。このままで良い？")
+    page.press("#ask-in", "Enter")
+    page.wait_for_timeout(500)
+    new = [p_ for p_ in (root / "_actions" / "ask").rglob("*.json") if p_.name not in before]
+    rc = (json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}).get("card") or {}
+    ok("R9Y 「確認済の見直し」 カード = AIに相談 (key = カードと同じ会話 c:{container_id} · queue_id · kind)",
+       rc.get("key") == "TST2611-01|c:" + r1["container_id"] and rc.get("container_id") == r1["container_id"] and rc.get("queue_id") == rq["queue_id"], rc)
+    if page.locator("#ask-close").count():
+        page.click("#ask-close")
+        page.wait_for_timeout(300)
+    page.evaluate("q => { C01.state.qsel = q; C01.app.render(); }", rq["queue_id"])
+    page.wait_for_selector(".c01-review")
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(100)
+        page.screenshot(path=str(shots / f"r9y_review_{th}.png"))
+    page.evaluate("document.documentElement.setAttribute('data-theme','light')")
+    ids0 = {x.get("action_id") for x in actions(root)}
+    page.click("#q-submit")
+    page.wait_for_timeout(900)
+    na = [x for x in actions(root) if x.get("action_id") not in ids0]
+    ok("R9Y 「このまま（確認済）」 = review_keep 1 (queue_id · field null · value null) · エンジン スキーマ",
+       len(na) == 1 and na[0]["action"] == "review_keep" and na[0]["queue_id"] == rq["queue_id"] and na[0]["field"] is None and na[0]["value"] is None
+       and na[0]["iv"] == "TST2611-01" and na[0]["ct"] == r1["ct"] and SC.check_obj(na[0], "action") == [], na)
+    page.evaluate("q => { C01.state.qkind = 'done'; C01.state.qsel = q; C01.app.render(); }", rq["queue_id"])
+    page.wait_for_timeout(400)
+    okmsg = page.locator(".c01-okmsg").inner_text() if page.locator(".c01-okmsg").count() else ""
+    ids1 = {x.get("action_id") for x in actions(root)}
+    if page.locator("#q-undo").count():
+        page.click("#q-undo")
+        page.wait_for_timeout(900)
+    un = [x for x in actions(root) if x.get("action_id") not in ids1 and x["action"] == "undo"]
+    ok("R9Y 完了 = 「このまま（確認済）にしました」 · 元に戻す = undo 1 (review_keep)",
+       "このまま（確認済）にしました" in okmsg and len(un) == 1 and un[0]["value"]["action_id"] == na[0]["action_id"] and SC.check_obj(un[0], "action") == [], [okmsg, un])
+    page.evaluate("p => { C01.RULES.otherCt = p[0]; C01.RULES.valueEdit = p[1]; C01.state.qkind = 'all'; C01.state.view = 'main'; }", prev)
+    jp.write_text(jt0, encoding="utf-8")
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(400)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -2909,11 +2999,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.46", page.title() == "LEENAI C-01 搬入票 v0.3.46", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.47", page.title() == "LEENAI C-01 搬入票 v0.3.47", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.46" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.47" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -3438,6 +3528,7 @@ def main():
             r9u_checks(page, root, shots, a.engine)
             r9w_checks(page, root, shots, a.engine)
             r9x_checks(page, root, shots, a.engine)
+            r9y_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
