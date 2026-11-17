@@ -1503,6 +1503,60 @@ window.C01 = window.C01 || {};
     }
     return window.confirm('このCTは' + hit.no + '行目にあります（' + (hit.r.packer || '') + ' · ' + hit.st + '）。同じコンテナの再送かもしれません。このまま保存しますか？');
   }
+  function mergeRowsOn() { return !!(C01.RULES || {}).mergeRows; }
+  /* 同じ IV (= 同じ BKG) の別の行で CT が同じ行 (まとめる先) — まとめる行 = 書類だけの行 (写真なし) の時だけ */
+  function mergeTarget(iv, row, ctv) {
+    var k = String(ctv || '').replace(/[\s-]/g, '').toUpperCase();
+    if (!k || row.photos || row.has_photos || !row.has_docs) return null;
+    var ov = overlay(), hit = null, no = 0;
+    (iv.rows || []).forEach(function (y, i) {
+      if (hit || y.container_id === row.container_id) return;
+      var x = statusOf(y, iv, ov), c = x.human.ct ? x.human.ct.value : y.ct;
+      if (String(c || '').toUpperCase() === k) { hit = y; no = y.no || (i + 1); }
+    });
+    return hit ? { r: hit, no: no } : null;
+  }
+  var MERGE_FIELDS = ['seal', 'n_w', 't_w', 'bales'];
+  function mergeAsk(iv, row, v, mt) {
+    var ov = overlay();
+    var val = function (r, fd) { var x = statusOf(r, iv, ov); var h = x.human[fd]; var y = h ? h.value : r[fd]; return y == null || y === '' ? '' : String(y); };
+    var diff = MERGE_FIELDS.filter(function (fd) { var a = val(row, fd), b = val(mt.r, fd); return a && b && a.replace(/[,\s]/g, '') !== b.replace(/[,\s]/g, ''); });
+    var td = function (r, fd) { var y = val(r, fd); return '<td class="mono' + (diff.indexOf(fd) >= 0 ? ' c01-mdiff' : '') + '">' + (y ? esc(fd === 'seal' ? y : num(y)) : '<span class="t2">—</span>') + '</td>'; };
+    var html = '<div class="c01-mh"><b>' + esc(mt.no + '番の行にまとめる') + '</b><span class="mono">' + esc(iv.iv_no) + '</span><span class="c01-flex"></span>' +
+      '<button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<p>入れた CT <b class="mono">' + esc(v.value) + '</b> は 同じ BKG の ' + esc(mt.no + '番の行') + '（' + esc(statusOf(mt.r, iv, ov).st) + '）にあります。同じ搬入票の再送なら まとめます' +
+      '（この行の書類は 参考 になり、' + esc(mt.no + '番の行') + ' の値はそのまま · 記録されます · 「⋯」 から元に戻せます）。</p>' +
+      '<table class="c01-mtable"><tr><th></th><th>この行</th><th>' + esc(mt.no + '番の行') + '</th></tr>' +
+      MERGE_FIELDS.map(function (fd) { return '<tr><th>' + esc(FIELD_LABEL[fd]) + '</th>' + td(row, fd) + td(mt.r, fd) + '</tr>'; }).join('') + '</table>' +
+      (diff.length ? '<p class="c01-warn2">値が違います（' + esc(diff.map(function (fd) { return FIELD_LABEL[fd]; }).join('・')) + '）— 本当に同じコンテナですか？</p>' +
+        '<label class="c01-mcheck"><input type="checkbox" id="merge-sure"> 値が違っても 同じコンテナです（もう一度確認しました）</label>' : '') +
+      '<div class="c01-mbtns"><button class="c01-btn-pri" id="merge-go"' + (diff.length ? ' disabled' : '') + '>' + esc(mt.no + '番の行にまとめる') + '</button>' +
+      '<button class="c01-btn-ghost2" id="merge-keep">まとめずに保存（別の行）</button><button class="c01-btn-ghost2" data-close>やめる</button></div></div>';
+    showModal(html, 'c01-modal-merge');
+    if ($('merge-sure')) $('merge-sure').onchange = function () { $('merge-go').disabled = !$('merge-sure').checked; };
+    $('merge-go').onclick = function () {
+      if (diff.length && !($('merge-sure') && $('merge-sure').checked)) return;
+      closeModal();
+      var a = mkAction('merge_rows', { iv: iv.iv_no, ct: mt.r.ct || null, field: null, source: null, queue_id: null,
+        value: { from_container_id: row.container_id, into_container_id: mt.r.container_id, into_no: mt.no, values_differ: diff } });
+      S.qedit = null;
+      writeAction(a).then(function () { render(); toast(mt.no + '番の行にまとめました（次の判定で反映 · 「⋯」 から元に戻せます）', 'success'); });
+    };
+    $('merge-keep').onclick = function () {
+      closeModal();
+      var x = statusOf(row, iv, overlay());
+      var a = mkAction('manual_input', { iv: iv.iv_no, ct: row.ct, field: 'ct', value: v.value, source: '手入力', queue_id: editQid(row, 'ct'), override: v.override,
+        mode: valueEditOn() ? 'edit' : null });
+      S.qedit = null;
+      writeAction(a).then(function () { render(); toast('CT を修正しました（別の行のまま）', 'success'); });
+      return x;
+    };
+  }
+  /* まとめた記録 (元に戻していない merge_rows) — この行が まとめ先 */
+  function mergesInto(r) {
+    var ov = overlay();
+    return allActions().filter(function (a) { return a.action === 'merge_rows' && !(ov.undone && ov.undone[a.action_id]) && a.value && a.value.into_container_id === r.container_id; });
+  }
   function saveEdit(iv, row) {
     if (!S.qedit || S.qedit.key.indexOf(row.container_id + '|') !== 0) return;
     if (!S.me) { S.qedit.err = '担当者を選んでください（右上）'; render(); return; }
@@ -1510,6 +1564,10 @@ window.C01 = window.C01 || {};
     var v = C01.validate.field(fd, S.qedit.value);
     if (!v.ok) { S.qedit.err = FIELD_LABEL[fd] + ': ' + v.error; render(); return; }
     if (v.warn && !window.confirm(v.warn)) { S.qedit.err = v.warn; render(); return; }   /* #109 ③ と同じ確認窓 */
+    if (fd === 'ct' && mergeRowsOn()) {                    /* v0.3.49 (R10H Part 1 · #305 ③): 同じ BKG の別の行と同じ CT → 「{n}番の行にまとめる」 */
+      var mt = mergeTarget(iv, row, v.value);
+      if (mt) { mergeAsk(iv, row, v, mt); return; }
+    }
     if (fd === 'ct' && !ctDupWarn(iv.iv_no, v.value, row.container_id)) { S.qedit.err = 'このCTは同じ IV の別の行にあります'; render(); return; }
     var x = statusOf(row, iv, overlay());
     var old = x.human[fd] ? x.human[fd].value : row[fd];
@@ -1557,7 +1615,21 @@ window.C01 = window.C01 || {};
     var cg = r.cancel_regroup;
     if (cg && cg.from_iv) out += ' <span class="c01-ibadge c01-cgbadge" data-info="cancel_regroup" title="' + esc('統合した日 ' + (cg.at || '?') + ' · 写真 ' + (cg.photos == null ? '?' : cg.photos) + ' 枚 — 取消になったブッキング ' + cg.from_iv + ' の写真を このブッキングの同じ CT にまとめました') + '">取消BKG（' + esc(cg.from_iv) + '）から統合</span>';
     if (ap.length) out += ' <span class="c01-ibadge" data-info="auto_sender" title="' + esc(INFO_TEXT.AUTO_SENDER) + '">自動推薦</span>';
+    var mg = mergeBadge(r);
+    if (mg) out += mg;
     return out;
+  }
+  /* v0.3.49 (R10H Part 1 · #305 ③): エンジンが 2 行を 1 行にまとめた行 (同一seal統合 · 同一搬入票(再送) · 行まとめ(人)) = 「2行→1行」 (表示だけ) */
+  var MERGE_TEXT = { '同一seal統合': '同じシールの 書類の行 と 写真の行 を 1 行にまとめました（写真の CT · 書類の CT は参考）',
+    '同一搬入票(再送)': '同じ搬入票の再送（同じ絵 · 同じ重量）— 新しい行を作らず この行に参考としてまとめました（値は変わりません）',
+    '行まとめ(人)': '担当者が 「まとめる」 で この行にまとめました（値は変わりません · 「⋯」 から元に戻せます）' };
+  function mergeBadge(r) {
+    var ks = (r.merge && r.merge.kinds) || (r.info || []).filter(function (s) { return /^(同一seal統合|同一搬入票\(再送\)|行まとめ\(人\))/.test(s); });
+    if (!ks.length) return '';
+    var tx = ks.map(function (s) { var k = Object.keys(MERGE_TEXT).filter(function (x) { return s.indexOf(x) === 0; })[0]; return k ? (k + ' — ' + MERGE_TEXT[k]) : s; });
+    var docs = (r.merge && r.merge.docs) || [];
+    if (docs.length) tx.push('まとめた書類: ' + docs.join(', '));
+    return ' <span class="c01-ibadge c01-mergebadge" data-info="merge" title="' + esc(tx.join(' / ')) + '">2行→1行</span>';
   }
   function openSlot(key) {
     var f = findRow(key);
@@ -1886,7 +1958,8 @@ window.C01 = window.C01 || {};
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
       '<div class="c01-side-btns c01-side-other">' +
       '<button id="rm-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' +
-      (pn.length ? '<button id="rm-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') + '</div>' +
+      (pn.length ? '<button id="rm-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
+      (mergeRowsOn() && mergesInto(r).length ? '<button id="rm-mergeundo" class="c01-btn-ghost2" title="「まとめる」 を取り消して 元の 2 行に戻します（次の判定で反映）">まとめを元に戻す</button>' : '') + '</div>' +
       '<p class="c01-note2">他社のコンテナ = この CT の写真と書類だけ この IV から外します（ファイルは消えません · 元に戻す = IV の 「他社のコンテナ」）。' +
       (st0 === '確認済' || st0 === '自動OK' ? '<br>確認済 / 自動OK の行です — この IV から外します（元に戻せる）' : '') + '</p></div>';
     showModal(html, 'c01-modal-rowmenu');
@@ -1896,6 +1969,14 @@ window.C01 = window.C01 || {};
       if (p) p.then(function () { closeModal(); render(); });
     };
     if ($('rm-notours')) $('rm-notours').onclick = function () { closeModal(); notHannyuhyo(pn[0], null); };
+    if ($('rm-mergeundo')) $('rm-mergeundo').onclick = function () {
+      if (!S.me) { toast('担当者を選んでください（右上）', 'warn'); return; }
+      var ms = mergesInto(r);
+      if (!window.confirm('「まとめる」 を元に戻しますか？（' + ms.length + ' 件 · 次の判定で 2 行に戻ります）')) return;
+      var chain = Promise.resolve();
+      ms.forEach(function (m) { chain = chain.then(function () { return writeAction(mkAction('undo', { iv: iv.iv_no, ct: r.ct || null, field: null, value: { action_id: m.action_id }, source: null, queue_id: null })); }); });
+      chain.then(function () { closeModal(); render(); toast('まとめを元に戻しました（次の判定で反映）', 'success'); });
+    };
   }
   function openOtherCts(ivNo) {
     var iv = ivById(ivNo), ov = overlay();

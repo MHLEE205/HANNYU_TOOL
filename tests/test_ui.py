@@ -2946,6 +2946,107 @@ def r9y_checks(page, root, shots, engine):
     page.wait_for_timeout(400)
 
 
+def r10h_checks(page, root, shots, engine):
+    """v0.3.49 (R10H Part 1 · #305 ③): 「2行→1行」 배지 (엔진 out_merge_badge merge 키) · CT 修正 = 같은 BKG 다른 줄 CT → 「{n}番の行にまとめる」 확인 창
+    (값 나란히 · 같으면 바로 · 다르면 빨강 + 체크 뒤) → merge_rows (엔진 스키마) · 「まとめずに保存」 = manual_input · 「⋯」 → 「まとめを元に戻す」 = undo."""
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    j2 = json.loads(jt0)
+    iv1 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    gone = {(x.get("value") or {}).get("container_id") for x in actions(root) if x.get("action") in ("other_ct", "merge_rows")}
+    rs = [r for r in iv1["rows"] if r.get("ct") and not r.get("human") and r["container_id"] not in gone and r.get("status") != "missing"][:2]
+    fr, to = rs
+    to.update({"status": "自動OK", "engine_status": "自動OK", "reasons": [], "info": ["同一搬入票(再送)"],
+               "merge": {"kinds": ["同一搬入票(再送)"], "docs": ["image001.png"]}})
+    fr.update({"status": "自動OK", "engine_status": "自動OK", "reasons": [], "photos": 0, "has_photos": False, "has_docs": True,
+               "seal": to.get("seal"), "n_w": to.get("n_w"), "t_w": to.get("t_w"), "bales": to.get("bales")})
+    jp.write_text(dump(j2), encoding="utf-8")
+    prev = page.evaluate("() => [C01.RULES.mergeRows, C01.RULES.valueEdit, C01.RULES.otherCt]")
+    page.evaluate("() => { C01.RULES.mergeRows = true; C01.RULES.valueEdit = true; C01.RULES.otherCt = true; }")
+    page.keyboard.press("Escape")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, picks: {}, panelInput: '', sel: null, editRow: null, filter: null, view: 'main'}); C01.app.tick(); }")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.wait_for_timeout(600)
+    trt = page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{to['ct']}')").first
+    bd = trt.locator(".c01-mergebadge")
+    ok("R10H 1 「2行→1行」 배지 · 마우스 = 同一搬入票(再送) + まとめた書類 이름", bd.count() == 1 and bd.inner_text() == "2行→1行"
+       and "同一搬入票(再送)" in (bd.get_attribute("title") or "") and "image001.png" in (bd.get_attribute("title") or ""), bd.count())
+    ids0 = {x.get("action_id") for x in actions(root)}
+
+    def open_ct_edit():
+        page.keyboard.press("Escape")
+        page.evaluate("() => { Object.assign(C01.state, {qedit: null, sel: null, editRow: null}); C01.app.render(); }")
+        page.wait_for_timeout(200)
+        page.locator(f"tbody[data-iv='TST2611-01'] tr.c01-row:has-text('{fr['ct']}')").first.locator(".c01-okedit").click()
+        page.wait_for_selector("#okedit-go")
+        page.click("#okedit-go")
+        page.wait_for_selector(".c01-side")
+        page.locator(".c01-side [data-ef='ct'] .c01-edit").click()
+        page.wait_for_selector("#edit-in")
+        page.fill("#edit-in", to["ct"])
+        page.click("#edit-save")
+        page.wait_for_selector(".c01-modal-merge")
+    open_ct_edit()
+    mt = page.locator(".c01-modal-merge").inner_text()
+    no = to.get("no") or (iv1["rows"].index(to) + 1)
+    page.screenshot(path=str(shots / "r10h_merge_same.png"))
+    ok("R10H 1 확인 창 = 「{n}番の行にまとめる」 · 값 나란히 (シール · 正味 · 風袋) · 같으면 빨강 0 · 버튼 바로 누를 수 있음",
+       f"{no}番の行にまとめる" in mt and page.locator(".c01-mtable tr").count() == 5 and page.locator(".c01-mdiff").count() == 0
+       and not page.locator("#merge-go").is_disabled() and page.locator("#merge-keep").count() == 1, mt[:200])
+    page.click("#merge-go")
+    page.wait_for_timeout(500)
+    new = [x for x in actions(root) if x.get("action_id") not in ids0]
+    ok("R10H 1 まとめる = merge_rows 1 (value from/into container_id · iv) · 엔진 스키마 통과",
+       len(new) == 1 and new[0]["action"] == "merge_rows" and new[0]["value"]["from_container_id"] == fr["container_id"]
+       and new[0]["value"]["into_container_id"] == to["container_id"] and new[0]["iv"] == "TST2611-01" and SC.check_obj(new[0], "action") == [],
+       [new, SC.check_obj(new[0], "action") if new else None])
+    mid = new[0]["action_id"] if new else None
+    # 값이 다른 경우 → 빨강 + 체크 뒤에만 · 「まとめずに保存」 = manual_input
+    j3 = json.loads(jp.read_text(encoding="utf-8"))
+    iv3 = next(x for x in j3["ivs"] if x["iv_no"] == "TST2611-01")
+    f3 = next(r for r in iv3["rows"] if r["container_id"] == fr["container_id"])
+    f3["n_w"] = (to.get("n_w") or 1000) + 50
+    jp.write_text(dump(j3), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    open_ct_edit()
+    dis0 = page.locator("#merge-go").is_disabled()
+    page.check("#merge-sure")
+    dis1 = page.locator("#merge-go").is_disabled()
+    page.screenshot(path=str(shots / "r10h_merge_diff.png"))
+    ok("R10H 1 값 다름 = 빨강 칸 · 「値が違います」 · 체크 전 버튼 막힘 → 체크 뒤 누를 수 있음",
+       page.locator(".c01-mdiff").count() == 2 and "値が違います" in page.locator(".c01-modal-merge").inner_text() and dis0 and not dis1, [dis0, dis1])
+    ids1 = {x.get("action_id") for x in actions(root)}
+    page.click("#merge-keep")
+    page.wait_for_timeout(500)
+    new2 = [x for x in actions(root) if x.get("action_id") not in ids1]
+    ok("R10H 1 「まとめずに保存（別の行）」 = manual_input ct (지금처럼 · CT重複 그대로)",
+       len(new2) == 1 and new2[0]["action"] == "manual_input" and new2[0]["field"] == "ct" and new2[0]["value"] == to["ct"] and SC.check_obj(new2[0], "action") == [], new2)
+    # 되돌리기 = 「⋯」 → 「まとめを元に戻す」
+    page.keyboard.press("Escape")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, sel: null, editRow: null}); C01.app.render(); }")
+    page.wait_for_timeout(300)
+    page.evaluate("() => { window.__cf = []; window.confirm = m => { window.__cf.push(m); return true; }; }")
+    key = page.evaluate('ct => [...document.querySelectorAll("tbody[data-iv=\'TST2611-01\'] tr.c01-row")].map(t => t.getAttribute("data-key")).find(k => k && k.includes(ct))', to["ct"])
+    page.locator(f"[data-rowmenu='{key}']").click()
+    page.wait_for_selector("#rm-mergeundo")
+    ids2 = {x.get("action_id") for x in actions(root)}
+    page.click("#rm-mergeundo")
+    page.wait_for_timeout(500)
+    un = [x for x in actions(root) if x.get("action_id") not in ids2]
+    ok("R10H 1 「⋯」 → 「まとめを元に戻す」 = undo 1 (merge_rows action_id) · 엔진 스키마",
+       len(un) == 1 and un[0]["action"] == "undo" and un[0]["value"]["action_id"] == mid and SC.check_obj(un[0], "action") == [], un)
+    page.keyboard.press("Escape")
+    page.evaluate("p => { C01.RULES.mergeRows = p[0]; C01.RULES.valueEdit = p[1]; C01.RULES.otherCt = p[2]; C01.state.view = 'main'; }", prev)
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(400)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -3002,11 +3103,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.48", page.title() == "LEENAI C-01 搬入票 v0.3.48", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.49", page.title() == "LEENAI C-01 搬入票 v0.3.49", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.48" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.49" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -3532,6 +3633,7 @@ def main():
             r9w_checks(page, root, shots, a.engine)
             r9x_checks(page, root, shots, a.engine)
             r9y_checks(page, root, shots, a.engine)
+            r10h_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

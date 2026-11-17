@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.48',
+  version: '0.3.49',
   date: '2026-11-17',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -39,7 +39,10 @@ C01.RULES = {
   senderRelay: true,
   /* ⑪ v0.3.46 (R9X Part 00-2 · #295): 未分類FAX 「IVに連結」 = 同じ画面で FAX の値 ↔ IV の行の値 を確かめて 「連結して確認（OK）」 (link_iv + 確認した値) —
         エンジン actions_fax_link_confirm · out_fax_read_rows が on の時だけ true */
-  faxLinkConfirm: true
+  faxLinkConfirm: true,
+  /* ⑫ v0.3.49 (R10H Part 1 · #305 ③): CT を修正して 同じ BKG の別の行と同じ CT → 「{n}番の行にまとめる」 確認窓 (書類だけの行 · 値を並べて 違えば赤 + もう一度確認) →
+        _actions merge_rows (エンジンが次の判定で まとめる · 元に戻す = 「⋯」) — エンジン s3_human_merge_rows が on の時だけ true */
+  mergeRows: true
 };
 
 /* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / PHOTO_V2 · v0.3.29 まで HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */
