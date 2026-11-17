@@ -2541,6 +2541,121 @@ def r9u_checks(page, root, shots, engine):
     ok("R9U 되돌림 뒤 띠 없음 · 표시 없음", page.locator("#c01-alert").is_hidden() and page.locator(".c01-cgbadge").count() == 0)
 
 
+def r9w_checks(page, root, shots, engine):
+    """v0.3.45 (R9W Part 0-3 · #290): 実況表 모든 줄 (自動OK · 確認済 · 再確認 · 受信中) 「⋯」 → 「他社のコンテナ」 · 確認済/自動OK 문구 ·
+    other_ct action = 엔진 스키마 · 元に戻す (undo) · 修正 (편집 모드) 옆 창에도 버튼 · 使い方 한 줄."""
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    j2 = json.loads(jt0)
+    iv1 = next(x for x in j2["ivs"] if x["iv_no"] == "TST2611-01")
+    rs = [r for r in iv1["rows"] if r.get("ct")][:4]
+    rs[0].update({"status": "自動OK", "engine_status": "自動OK", "reasons": [], "human": None})
+    rs[1].update({"status": "自動OK", "engine_status": "自動OK", "reasons": [], "info": ["AUTO_OK_EDITED(seal)"]})       # 確認済 (人が修正)
+    rs[2].update({"status": "再確認", "engine_status": "再確認", "reasons": ["SEAL_FORMAT"], "reason_text": ["x"], "human": None})
+    rs[3].update({"status": "受信中", "engine_status": "受信中", "reasons": [], "human": None})
+    jp.write_text(dump(j2), encoding="utf-8")
+    keyjs = 'ct => [...document.querySelectorAll("tbody[data-iv=\'TST2611-01\'] tr.c01-row")].map(t => t.getAttribute("data-key")).find(k => k && k.includes(ct))'
+
+    def key_of(ct):
+        return page.evaluate(keyjs, ct)
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, picks: {}, panelInput: '', sel: null, qvals: {}, qchoice: {}, editRow: null, filter: null}); C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    st = page.evaluate("""() => [...document.querySelectorAll("tbody[data-iv='TST2611-01'] tr.c01-row")].filter(t => !t.classList.contains('missing'))
+        .map(t => [t.getAttribute('data-status'), !!t.querySelector('[data-rowmenu]')])""")
+    kinds = {x[0] for x in st if x[1]}
+    ok("R9W 0-3 「⋯」 = 모든 줄 (自動OK · 確認済 · 再確認 · 受信中)", bool(st) and all(x[1] for x in st) and {"自動OK", "確認済", "再確認", "受信中"} <= kinds, st)
+    ids0 = {x.get("action_id") for x in actions(root)}
+    dl = []
+
+    def acc(d):
+        dl.append(d.message)
+        d.accept()
+    page.on("dialog", acc)
+    page.evaluate("() => { window.__cf = []; window.__cf0 = window.confirm; window.confirm = m => { window.__cf.push(m); return true; }; }")   # 앞 시험이 confirm 을 바꿔 두었을 수 있음 → 문구를 직접 받음
+    key0 = key_of(rs[0]["ct"])
+    page.locator(f"[data-rowmenu='{key0}']").click()
+    page.wait_for_selector("#rm-otherct")
+    mt = page.locator("#c01-modal").inner_text()
+    ok("R9W 0-3 自動OK 줄 「⋯」 창 = 他社のコンテナ 버튼 · 「確認済 / 自動OK の行です」 · 搬入票ではない 없음 (서류 카드 없음)",
+       "確認済 / 自動OK の行です" in mt and page.locator("#rm-notours").count() == 0, mt[:200])
+    page.screenshot(path=str(shots / "r9w_rowmenu.png"))
+    page.click("#rm-otherct")
+    page.wait_for_timeout(600)
+    new = [x for x in actions(root) if x.get("action_id") not in ids0]
+    dl = dl + page.evaluate("() => window.__cf")
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    ok("R9W 0-3 自動OK 줄 → other_ct (value.container_id · iv · ct) · 확인창 문구 · 엔진 스키마 통과",
+       len(new) == 1 and new[0]["action"] == "other_ct" and new[0]["value"] == {"container_id": rs[0]["container_id"]} and new[0]["iv"] == "TST2611-01"
+       and new[0]["ct"] == rs[0]["ct"] and len(dl) == 1 and dl[0].startswith("確認済 / 自動OK の行です — この IV から外します（元に戻せる）")
+       and SC.check_obj(new[0], "action") == [], [new, dl, SC.check_obj(new[0], "action") if new else None])
+    key2 = key_of(rs[2]["ct"])
+    page.locator(f"[data-rowmenu='{key2}']").click()
+    page.wait_for_selector("#rm-otherct")
+    page.click("#rm-otherct")
+    page.wait_for_timeout(600)
+    new2 = [x for x in actions(root) if x.get("action_id") not in ids0]
+    dl = [m for m in dl if m not in page.evaluate("() => window.__cf")] + page.evaluate("() => window.__cf")
+    ok("R9W 0-3 再確認 줄 → other_ct 2번째 · 확인창 = 앞 문구 없음", len(new2) == 2 and len(dl) == 2 and not dl[1].startswith("確認済 / 自動OK"), [len(new2), dl[1:]])
+    ob = page.locator("tbody[data-iv='TST2611-01'] [data-otherct]")
+    ok("R9W 0-3 줄 숨김 · IV 머리 「他社のコンテナ 2」", ob.count() == 1 and "他社のコンテナ 2" in ob.inner_text(), ob.inner_text() if ob.count() else None)
+    ob.click()
+    page.wait_for_selector("[data-othundo]")
+    page.click("[data-othundo='0']")
+    page.wait_for_timeout(500)
+    un = [x for x in actions(root) if x.get("action_id") not in ids0 and x.get("action") == "undo"]
+    ok("R9W 0-3 元に戻す = undo (other_ct) · 엔진 스키마", len(un) == 1 and un[0]["value"]["action_id"] in {x["action_id"] for x in new2}
+       and SC.check_obj(un[0], "action") == [], un)
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    key1 = key_of(rs[1]["ct"])
+    page.evaluate("k => { C01.state.sel = k; C01.state.editRow = k; C01.app.render(); }", key1)
+    page.wait_for_timeout(300)
+    ok("R9W 0-3 確認済 줄 修正 (편집 모드) 옆 창 = 「他社のコンテナ」 버튼", page.locator("#panel-otherct").count() == 1 and page.locator("#panel-notours").count() == 0,
+       page.locator(".c01-side .k").inner_text() if page.locator(".c01-side .k").count() else None)
+    page.screenshot(path=str(shots / "r9w_edit_other.png"))
+    page.evaluate("() => { C01.state.sel = null; C01.state.editRow = null; C01.app.render(); }")
+    page.remove_listener("dialog", acc)
+    page.evaluate("() => { if (window.__cf0) window.confirm = window.__cf0; }")
+    page.click("#help-open")
+    page.wait_for_selector("#help-body")
+    ht = page.locator("#help-body").inner_text()
+    ok("R9W 0-3 使い方 = 「⋯」 → 「他社のコンテナ」 · 元に戻せる · 削除はありません", "「⋯」 → 「他社のコンテナ」" in ht and "削除はありません" in ht, ht[-300:])
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(100)
+        page.screenshot(path=str(shots / f"r9w_main_{th}.png"))
+    page.evaluate("document.documentElement.setAttribute('data-theme','light')")
+    # 0-4b · 0-4a: waku_skip (CT が読めない写真の束 = 候補 · 枠外に数えない) · elim (消去法)
+    j3 = json.loads(jt0)
+    iv3 = next(x for x in j3["ivs"] if x["iv_no"] == "TST2611-01")
+    n_slots = len(iv3.get("slots") or []) or iv3.get("slots_n") or 0
+    free0 = [r for r in iv3["rows"] if not r.get("slot_guid")]
+    sk = iv3["rows"][-1]
+    sk["slot_guid"] = None
+    sk["waku_skip"] = "ct_unread_cand"
+    el = iv3["rows"][0]
+    el["elim"] = {"ct": el.get("ct"), "evidence": ["消去法", "同じメール", "seal 連番"]}
+    jp.write_text(dump(j3), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(600)
+    info = page.evaluate("""() => { const tb = document.querySelector("tbody[data-iv='TST2611-01']");
+        return {skip: tb.querySelectorAll('.c01-wakuskip').length, skipOver: [...tb.querySelectorAll('tr.c01-row')].filter(t => t.querySelector('.c01-wakuskip') && t.querySelector('.c01-over')).length,
+                head: (tb.querySelector('.c01-overhead') || {}).innerText || '', elim: tb.querySelectorAll('.c01-elim').length,
+                elimTitle: (tb.querySelector('.c01-elim') || {}).title || ''}; }""")
+    exp_over = len([r for r in free0 if r is not sk]) if n_slots else 0
+    ok("R9W 0-4b waku_skip 줄 = 「CTが読めない写真 · 候補あり」 · 赤 (COMPASS 枠外) 아님 · 枠外 수에서 뺌",
+       info["skip"] == 1 and info["skipOver"] == 0 and ((exp_over == 0 and info["head"] == "") or info["head"] == f"枠外 {exp_over}"), [info, exp_over, n_slots])
+    ok("R9W 0-4a elim 줄 = 「消去法」 표시 · 툴팁 근거", info["elim"] == 1 and "seal 連番" in info["elimTitle"], info)
+    page.screenshot(path=str(shots / "r9w_wakuskip.png"))
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -2597,11 +2712,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.44", page.title() == "LEENAI C-01 搬入票 v0.3.44", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.45", page.title() == "LEENAI C-01 搬入票 v0.3.45", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.44" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.45" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -2929,6 +3044,9 @@ def main():
             page.click(".c01-kinds [data-kind='写真のCT']")
             page.locator(".c01-item").first.click()
             page.locator("[data-choice='0']").click()
+            bm = page.locator(".c01-bundlemove")
+            ok("R9W 0-4e 写真のCT 카드 = 「この束の写真 4 枚をまとめて移します」", bm.count() == 1 and "この束の写真 4 枚をまとめて移します" in bm.inner_text(),
+               bm.inner_text() if bm.count() else None)
             page.click("#q-submit")
             page.wait_for_timeout(300)
             ok("写真のCT → assign_photos (paths 4)", any(x["action"] == "assign_photos" and len(x["value"]["paths"]) == 4 for x in actions(root)))
@@ -3121,6 +3239,7 @@ def main():
             r9m_checks(page, root, shots, a.engine)
             r9o_checks(page, root, shots, a.engine)
             r9u_checks(page, root, shots, a.engine)
+            r9w_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

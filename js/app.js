@@ -727,7 +727,8 @@ window.C01 = window.C01 || {};
   }
   /* v0.3.43 (R9P Part 0-4b · #281): エンジンの 枠外 原因の推定 (jikkyou ivs[].waku.causes · 無ければ空) → 見出し 「枠外 n」 の説明に足す */
   var WAKU_CAUSE = { packer_short: '業者の受信台数が枠より多い（COMPASS の PLANT 未入力 · 経由業者の枠?）', dup_ct: '同じ CT · シールが 2 行', non_hannyu_doc: '搬入票ではない書類（配送報告書など）から作られた行',
-    unit_price: '単価・契約の違う枠 — どの契約か不明', other_booking_ct: '他のブッキングの CT' };
+    unit_price: '単価・契約の違う枠 — どの契約か不明', other_booking_ct: '他のブッキングの CT',
+    ct_unread_photo: 'CTが読めない写真 · 候補あり' };   /* v0.3.45 (R9W 0-4b · #292): エンジン v0.5.109 の新しい原因コード */
   function wakuWhy(iv) {
     var cs = ((iv && iv.waku) || {}).causes || [];
     return cs.length ? '\n推定: ' + cs.map(function (c) { return (WAKU_CAUSE[c.code] || c.code) + (c.text ? '（' + c.text + '）' : ''); }).join(' / ') : '';
@@ -802,8 +803,11 @@ window.C01 = window.C01 || {};
       var nSlots = (iv.slots && iv.slots.length) || iv.slots_n || 0;
       /* v0.3.43 (R9P Part 0-3 · 決定 #166 · #182): 表示する行 = 枠のある行 + 空き枠 (メール未着) + 枠のない行 →
          枠のない行が 1 行でもあれば COMPASS の枠の数を超える = 枠のない行 全部 「COMPASS 枠外」 (前の 「値のある行の数 > 枠の数」 では空き枠を数えず赤にならなかった) */
-      var over = nSlots ? free.length : 0;
-      if (over) free.forEach(function (x) { x.over = true; });
+      /* v0.3.45 (R9W 0-4b · #292): エンジン waku_skip (CT が読めない写真の束の行 = 行ではなく「候補」) = 枠外の数に入れない · 赤にしない */
+      free.forEach(function (x) { if (x.r.waku_skip) x.wakuSkip = x.r.waku_skip; });
+      var freeCnt = free.filter(function (x) { return !x.wakuSkip; });
+      var over = nSlots ? freeCnt.length : 0;
+      if (over) freeCnt.forEach(function (x) { x.over = true; });
       var freeIn = free.filter(function (x) { return !x.over; }), freeOver = free.filter(function (x) { return x.over; });
       /* v0.3.11 (R7J Part C-2): 同じブッキングに枠の決まっていない行があれば、空き枠は「未着」ではなく「割当待ち」 (行の数まで · 枠外の行は数えない) */
       unarr.slice(0, freeIn.length).forEach(function (x) { x.st = '割当待ち'; x.wait = '割当待ち'; x.waitTitle = 'このブッキングに枠の決まっていない行（未割当）があります — メールは届いている可能性'; });
@@ -978,10 +982,12 @@ window.C01 = window.C01 || {};
         if (x.dup_seal) stCell = '<span class="c01-over" title="' + esc('同じシール番号の行があります（' + x.dup_seal.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 入力の間違い · 読み違いの可能性') + '">シール重複</span> ' + stCell;
         if (x.dup_ct) stCell = '<span class="c01-over" title="' + esc('同じ CT 番号の行があります（' + x.dup_ct.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 同じコンテナの再送 · 読み違いの可能性') + '">CT重複</span> ' + stCell;
         if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
+        else if (x.wakuSkip) stCell = '<span class="c01-unassigned c01-wakuskip" title="CT が読めない写真の束です（行ではなく候補 · 枠外には数えません）— 確認・入力 の 「写真の CT」 でどのコンテナか選んでください">CTが読めない写真 · 候補あり</span> ' + stCell;   /* v0.3.45 (R9W 0-4b) */
         else if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         if (r.same_cand && !sameDone(r.same_cand.pair_id, b.ov)) stCell += ' <button class="c01-samebadge" data-same="' + esc(r.same_cand.pair_id) + '" title="' +
           esc(r.same_cand.role === 'fax' ? '写真の行と同じコンテナかもしれません（FAX の CT・シールの読み違い）— クリックで確認' : 'FAX の行と同じコンテナかもしれません — クリックで確認') + '">同一候補</button>';
-        stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '');
+        stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '') +
+          (otherCtOn() && r.container_id ? ' <button class="c01-slotbtn c01-rowmenu" data-rowmenu="' + esc(x.key) + '" title="この行の操作（他社のコンテナ など）" aria-label="この行の操作">⋯</button>' : '');   /* v0.3.45 (R9W 0-3 · #290): 全ての行 (自動OK · 確認済 · 再確認 · 受信中) */
         html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over ? ' over' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
@@ -989,6 +995,7 @@ window.C01 = window.C01 || {};
           cv(rowVal(iv, r, 'incoterms'), true) + cv(rowVal(iv, r, 'packer')) + cv(rowVal(iv, r, 'plant')) + '<td' +
           (photoAlert(photos, rowVal(iv, r, 'packer').v) ? ' class="c-ph c01-ph-alert" title="' + esc(photoAlertText(photos, rowVal(iv, r, 'packer').v)) + '"' : ' class="c-ph"') + '>' +
           (photos > 0 ? '<button class="c01-phbtn" data-photos="' + esc(x.key) + '" title="新しいタブで写真を表示 (Shift+クリック = この画面で表示)">📷 ' + photos + '枚</button>' : '0枚') +
+          (r.elim ? ' <span class="c01-ibadge c01-elim" title="' + esc('消去法で付けた写真' + (r.elim.evidence ? ' — ' + (Array.isArray(r.elim.evidence) ? r.elim.evidence.join(' · ') : r.elim.evidence) : '')) + '">消去法</span>' : '') +   /* v0.3.45 (R9W 0-4a · エンジン elim) */
           docCell(r, x.key) + '</td><td class="c-st">' + stCell + '</td></tr>';
       });
       html += '</tbody>';
@@ -1027,6 +1034,7 @@ window.C01 = window.C01 || {};
       };
     });
     root.querySelectorAll('[data-slot]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openSlot(el.getAttribute('data-slot')); }; });
+    root.querySelectorAll('[data-rowmenu]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRowMenu(el.getAttribute('data-rowmenu')); }; });
     renderPanel(b);
     fitTable();
   }
@@ -1847,10 +1855,37 @@ window.C01 = window.C01 || {};
   }
   function otherCtAction(iv, r, qid) {
     if (!S.me) { toast('担当者を選んでください（右上）', 'warn'); return null; }
-    if (!window.confirm('この行（' + (r.ct || 'CT 不明') + '）を「他社のコンテナ」にしますか？\n' +
+    var st0 = statusOf(r, iv, overlay()).st;                       /* v0.3.45 (R9W 0-3): 確認済 · 自動OK の行 = 一言 */
+    if (!window.confirm((st0 === '確認済' || st0 === '自動OK' ? '確認済 / 自動OK の行です — この IV から外します（元に戻せる）\n\n' : '') +
+      'この行（' + (r.ct || 'CT 不明') + '）を「他社のコンテナ」にしますか？\n' +
       '（この CT の写真と書類だけ この IV から外します · 同じメールの他の CT はそのまま · ファイルは消しません · 次の判定で枠が空きます · 元に戻せます）')) return null;
     var a = mkAction('other_ct', { iv: iv.iv_no, ct: r.ct || null, field: null, value: { container_id: r.container_id }, source: null, queue_id: qid || null });
     return writeAction(a).then(function () { toast('「他社のコンテナ」にしました（次の判定で反映 · 元に戻す = IV の「他社のコンテナ」）', 'success'); return a; });
+  }
+  /* v0.3.45 (R9W Part 0-3 · #290): 実況表の行の 「⋯」 = この行の操作。自動OK · 確認済 の行も 「他社のコンテナ」 を押せる
+     (前は 横の窓の 編集モード でない時だけ → 確認済 · 自動OK の行では出なかった)。「搬入票ではない」 = 今まで通り この行の開いている確認カードに書類がある時だけ */
+  function openRowMenu(key) {
+    var f = findRow(key);
+    if (!f) return;
+    var iv = f.iv, r = f.r, ov = overlay();
+    var qs = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id; });
+    var pn = pnFiles(qs, ov);
+    var st0 = statusOf(r, iv, ov).st;
+    S.modal = { kind: 'rowmenu', key: key };
+    var html = '<div class="c01-mh"><b>この行の操作</b><span class="mono">' + esc((r.ct || '（CT 不明）') + ' · ' + iv.iv_no) + '</span><span class="t2">' + esc(st0) + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<div class="c01-side-btns c01-side-other">' +
+      '<button id="rm-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' +
+      (pn.length ? '<button id="rm-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') + '</div>' +
+      '<p class="c01-note2">他社のコンテナ = この CT の写真と書類だけ この IV から外します（ファイルは消えません · 元に戻す = IV の 「他社のコンテナ」）。' +
+      (st0 === '確認済' || st0 === '自動OK' ? '<br>確認済 / 自動OK の行です — この IV から外します（元に戻せる）' : '') + '</p></div>';
+    showModal(html, 'c01-modal-rowmenu');
+    $('rm-otherct').onclick = function () {
+      var oq = qs.filter(function (q) { return !queueState(q, ov).done; })[0];
+      var p = otherCtAction(iv, r, oq ? oq.queue_id : null);
+      if (p) p.then(function () { closeModal(); render(); });
+    };
+    if ($('rm-notours')) $('rm-notours').onclick = function () { closeModal(); notHannyuhyo(pn[0], null); };
   }
   function openOtherCts(ivNo) {
     var iv = ivById(ivNo), ov = overlay();
@@ -1914,6 +1949,7 @@ window.C01 = window.C01 || {};
       '<li>タブの数字 = 残りの枚数（コンテナ 1 台 = 1 枚）。原本を見て正しい値を選び 「確認して次へ」。</li>' +
       '<li>どの値も違う時は <b>「✎ 修正」</b> で入力 — 人が入れた値が優先されます。</li>' +
       '<li>搬入票でない書類は <b>「搬入票ではない」</b>（ファイルは消えません）。</li>' +
+      '<li>他の会社のコンテナが混ざった時は 実況表の行の <b>「⋯」 → 「他社のコンテナ」</b>（自動OK · 確認済 の行も · ファイルは消えません · 元に戻せる = IV の 「他社のコンテナ」）。削除はありません。</li>' +
       '<li><span class="c01-trial" data-regsender-help>業者登録</span> 「業者・IV未定」 の送信元が未登録の時は <b>「業者登録」</b> で業者（・営業所）を選ぶと、約 1 分で その送信元のメールを分類し直します（間違えた時は 「元に戻す」）。</li>' +
       '<li>間違えた時は <b>「元に戻す」</b>。わからない時は 「スキップ（あとで）」。</li></ul></section>' +
       '<section><h4>4. 更新・困った時</h4><ul>' +
@@ -1991,8 +2027,8 @@ window.C01 = window.C01 || {};
       (!editMode && statusOf(r, iv, ov).st === '再確認' ? '<button id="panel-keep" class="c01-btn-ghost2 c01-keep" title="値を変えずに 確認済 にします（記録 · 元に戻す）">このまま確認（OK）</button>' : '') +
       otherCandNote(r) +
       /* v0.3.27 (R8C Part F · #226): 実況表の横の窓にも 「搬入票ではない」 (この行の 確認 カードの書類) · 「他社のコンテナ」 */
-      ((pnFiles(qs, ov).length || otherCtOn()) && !editMode ? '<div class="c01-side-btns c01-side-other">' +
-        (pnFiles(qs, ov).length ? '<button id="panel-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
+      ((pnFiles(qs, ov).length && !editMode) || otherCtOn() ? '<div class="c01-side-btns c01-side-other">' +     /* v0.3.45 (R9W 0-3): 他社のコンテナ = 修正（編集モード）でも */
+        (pnFiles(qs, ov).length && !editMode ? '<button id="panel-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
         (otherCtOn() ? '<button id="panel-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' : '') + '</div>' : '') +
       '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + (editMode ? ' hidden' : '') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
       '<button id="panel-later" class="c01-btn-ghost2">' + (editMode ? '閉じる' : 'あとで') + '</button></div>' +
@@ -2588,7 +2624,8 @@ window.C01 = window.C01 || {};
           return '<button class="c01-choice' + (S.qchoice[q.queue_id] === i ? ' on' : '') + '" data-choice="' + i + '"><span class="mono">' + esc(ct) + '</span><span class="s">' +
             esc(r ? (r.photos ? '写真あり ' + r.photos + '枚（重複の可能性）' : '写真待ち') + (r.seal ? ' · ' + r.seal : '') + (r.work_date ? ' · ' + md(r.work_date) : '') : '') + '</span></button>';
         }).join('') + (cands.length ? '' : '<p class="c01-note2">候補がありません</p>') +
-          '<label class="c01-direct">CT 番号を入力して指定<input id="q-ct" placeholder="CT 番号" value="' + esc((S.qvals[q.queue_id] || {}).ct || '') + '"></label></fieldset>';
+          '<label class="c01-direct">CT 番号を入力して指定<input id="q-ct" placeholder="CT 番号" value="' + esc((S.qvals[q.queue_id] || {}).ct || '') + '"></label>' +
+          '<p class="c01-note2 c01-bundlemove">この束の写真 ' + (q.files || []).length + ' 枚をまとめて移します</p></fieldset>';     /* v0.3.45 (R9W 0-4e · #292): 束の写真 全部 (カードの files 全部 = paths) */
       } else if (faxLinkOn(q)) {
         /* v0.3.28 (R8D Part A · 決定 #227): 未分類 FAX = 「IVに連結」 と同じ (BKG / IV → 枠 · 印刷 BKG の候補が上 · FAX の CT と同じ枠に印) */
         html += '<div class="c01-hold">' + (q.fax_read && (q.fax_read.ct || []).length ? '<div><span class="k">FAX の CT</span> <span class="mono">' + esc(q.fax_read.ct.join(' / ')) + '</span></div>' : '') +
