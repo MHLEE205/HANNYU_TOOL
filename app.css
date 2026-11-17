@@ -495,3 +495,22 @@ body.c01-gdr-on #c01-main { margin-right: 416px; }
 .c01-alert-stop { background: #b91c1c; color: #ffffff; }
 .c01-alert-late { background: #facc15; color: #1f2937; }
 .c01-cgbadge { color: var(--text3, #888); border-color: var(--border, #8884); font-weight: 400; }
+
+/* v0.3.46 (R9X): AI の提案 「この操作をしますか？」 · 答えの評価 · FAX 値の確認 · 行の AI 相談 · 使い方 (エンジンの操作表) */
+.c01-prop { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent, #3b82f6); border-radius: 8px; background: var(--read); display: flex; flex-direction: column; gap: 4px; }
+.c01-prop .k { font-size: 11px; color: var(--text2); }
+.c01-prop .ttl { font-weight: 600; }
+.c01-fb { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.c01-auto { background: var(--c-fax, #7c3aed); color: #fff; }
+.c01-fxcmp { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.c01-fxcmp .k { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.c01-fxcmp table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.c01-fxcmp th, .c01-fxcmp td { border-bottom: 1px solid var(--border); padding: 3px 6px; text-align: left; vertical-align: top; }
+.c01-fxcmp tr.d td, .c01-fxcmp tr.d th { background: rgba(234, 179, 8, .12); }
+.c01-fxcmp tr.nw td { color: var(--text2); }
+.c01-fxcmp .c01-fxin { font-family: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--read); color: var(--text); }
+.c01-fxbtns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+body.c01-rdr-on #c01-main { margin-right: 416px; }
+@media (max-width: 1100px) { body.c01-rdr-on #c01-main { margin-right: 0; } }
+.c01-guide .t2 { font-size: 11px; }
+.c01-guide-del { list-style: none; margin-top: 6px; font-weight: 600; }

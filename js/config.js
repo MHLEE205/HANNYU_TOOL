@@ -7,8 +7,8 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.45',
-  date: '2026-11-16',
+  version: '0.3.46',
+  date: '2026-11-17',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 (試験運用中) · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
@@ -36,7 +36,10 @@ C01.RULES = {
   /* ⑨ v0.3.40 (R9M Part A · #271 · #272 c): 確認・入力 に 「発信者未登録」 (送信元ごと · 推定 強→弱→なし · 業者登録 · 登録しない · 元に戻す · 枚数は別) — エンジン out_sender_cards が on の時だけ true */
   senderCards: true,
   /* ⑩ v0.3.41 (R9O Part 00-3 · #277): 「発信者未登録」 ② 代わりに送る所 (港運 · 倉庫 · 下請 · register_sender value.relay · 催促の宛先にしない) — エンジン actions_sender_relay が on の時だけ true */
-  senderRelay: true
+  senderRelay: true,
+  /* ⑪ v0.3.46 (R9X Part 00-2 · #295): 未分類FAX 「IVに連結」 = 同じ画面で FAX の値 ↔ IV の行の値 を確かめて 「連結して確認（OK）」 (link_iv + 確認した値) —
+        エンジン actions_fax_link_confirm · out_fax_read_rows が on の時だけ true */
+  faxLinkConfirm: true
 };
 
 /* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / PHOTO_V2 · v0.3.29 まで HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */
@@ -124,5 +127,11 @@ C01.ASK = {
   base: '_actions',
   pollMs: 10000,          /* 答え待ちの間だけ 10 秒ごと */
   trial: true,
-  global: true            /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (画面全体 · 改善依頼 · 依頼一覧) — エンジン ask_global が切れていれば 「準備中」 の答え */
+  global: true,           /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (画面全体 · 改善依頼 · 依頼一覧) — エンジン ask_global が切れていれば 「準備中」 の答え */
+  /* v0.3.46 (R9X Part 0 · #291 ②): 答えの 「この操作をしますか？」 (AI が準備 · 押すのは担当者 · 今のボタンと同じ記録 · 元に戻す) — エンジン ask_proposed_actions */
+  propose: true,
+  /* v0.3.46 (R9X Part 2 · #291 ④): 答えごとに 「役に立った / 立たなかった」 (_actions ask_feedback · 立たなかった = 自動の改善依頼) — エンジン ask_feedback */
+  feedback: true,
+  /* v0.3.46 (R9W Part 1-2 · #290): 実況表の行の横の窓にも 「AIに相談」 (確認済 → 再確認 に戻した行など カードの無い行も) */
+  rowAsk: true
 };

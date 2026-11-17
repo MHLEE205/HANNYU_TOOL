@@ -551,7 +551,9 @@ window.C01 = window.C01 || {};
       var q = a.queue_id ? qById[a.queue_id] : null;
       if (a.queue_id) {
         if (!byQueue[a.queue_id]) byQueue[a.queue_id] = { win: a, later: [] };
-        else byQueue[a.queue_id].later.push(a);
+        else if (a.action === 'link_iv' && q && q.kind === '未分類FAX' && (byQueue[a.queue_id].win.action === 'confirm_value' || byQueue[a.queue_id].win.action === 'manual_input')) {
+          byQueue[a.queue_id].later.push(byQueue[a.queue_id].win); byQueue[a.queue_id].win = a;     /* v0.3.46 (R9X 00-2): 「連結して確認」 = 完了は 連結 (同じ秒) */
+        } else byQueue[a.queue_id].later.push(a);
       }
       if (a.action === 'slot_change' && a.value && a.value.slot_guid) {
         bySlot[a.iv + '|' + a.ct] = a;                 /* #109 ②: 同じ CT の後の変更が上書き */
@@ -1945,18 +1947,29 @@ window.C01 = window.C01 || {};
       '<li><span class="st-ok">確認済</span> — 人が確認した値です</li>' +
       '<li><span class="c01-help-chk">再確認</span> — 「⚠ 要確認」 を押して値を確かめてください</li>' +
       '<li><span class="st-wait">受信中</span> / <span class="st-wait">メール未着</span> — 書類・写真がまだそろっていません（待ち）</li></ul></section>' +
-      '<section><h4>3. 確認・入力</h4><ul>' +
+      (S.guide && (S.guide.items || []).length ? guideHtml() : '<section><h4>3. 確認・入力</h4><ul>' +
       '<li>タブの数字 = 残りの枚数（コンテナ 1 台 = 1 枚）。原本を見て正しい値を選び 「確認して次へ」。</li>' +
       '<li>どの値も違う時は <b>「✎ 修正」</b> で入力 — 人が入れた値が優先されます。</li>' +
       '<li>搬入票でない書類は <b>「搬入票ではない」</b>（ファイルは消えません）。</li>' +
       '<li>他の会社のコンテナが混ざった時は 実況表の行の <b>「⋯」 → 「他社のコンテナ」</b>（自動OK · 確認済 の行も · ファイルは消えません · 元に戻せる = IV の 「他社のコンテナ」）。削除はありません。</li>' +
       '<li><span class="c01-trial" data-regsender-help>業者登録</span> 「業者・IV未定」 の送信元が未登録の時は <b>「業者登録」</b> で業者（・営業所）を選ぶと、約 1 分で その送信元のメールを分類し直します（間違えた時は 「元に戻す」）。</li>' +
-      '<li>間違えた時は <b>「元に戻す」</b>。わからない時は 「スキップ（あとで）」。</li></ul></section>' +
+      '<li>間違えた時は <b>「元に戻す」</b>。わからない時は 「スキップ（あとで）」。</li></ul></section>') +
       '<section><h4>4. 更新・困った時</h4><ul>' +
       '<li>データは 30 秒ごとに自動で更新されます。TOOL が新しくなった時は <b>Ctrl+Shift+R</b> で読み直してください。</li>' +
       '<li>気づいた点は担当の管理者へ（画面の写真と IV 番号）。</li></ul></section>' +
       '</div></div>';
     showModal(html, 'c01-modal-help');
+    if (!S.guide && S.meta && S.meta.tool_guide && !(S.guideMiss && Date.now() - S.guideMiss < 300000) && S.src && S.src.getJson) {   /* エンジンが言った時だけ (無い = 404 なし) */
+      S.src.getJson(S.meta.tool_guide).then(function (x) { S.guide = x; if (S.modal && S.modal.kind === 'help') openHelp(); })
+        .catch(function () { S.guideMiss = Date.now(); });
+    }
+  }
+  /* v0.3.46 (R9W Part 1 · #290): 操作の一覧 = エンジン _data/tool_guide.json (AI 相談に渡す表と同じ原本 · ここでは書かない) */
+  function guideHtml() {
+    var g = S.guide;
+    return '<section class="c01-guide"><h4>3. 確認・入力 · 操作</h4><ul>' + (g.items || []).map(function (x) {
+      return '<li><b>「' + esc(x.button) + '」</b> — ' + esc(x.when) + '<div class="t2">場所: ' + esc(x.where) + (x.undo ? ' · 戻す: ' + esc(x.undo) : '') + '</div></li>';
+    }).join('') + (g.delete_note ? '<li class="c01-guide-del">' + esc(g.delete_note) + '</li>' : '') + '</ul></section>';
   }
 
   function findRow(key) {
@@ -2030,6 +2043,7 @@ window.C01 = window.C01 || {};
       ((pnFiles(qs, ov).length && !editMode) || otherCtOn() ? '<div class="c01-side-btns c01-side-other">' +     /* v0.3.45 (R9W 0-3): 他社のコンテナ = 修正（編集モード）でも */
         (pnFiles(qs, ov).length && !editMode ? '<button id="panel-notours" class="c01-btn-ghost2 danger" title="この行の書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
         (otherCtOn() ? '<button id="panel-otherct" class="c01-btn-ghost2 danger" title="他の会社のコンテナです — この CT の写真と書類だけ この IV から外します（ファイルは消しません · 元に戻せます）">他社のコンテナ</button>' : '') + '</div>' : '') +
+      (rowAskOn() ? '<div class="c01-side-btns"><button id="panel-ask" class="c01-btn-ghost2 c01-askbtn" title="この行について AI に質問します（右横に開きます · カードが無い行も）">AIに相談</button></div>' : '') +
       '<div class="c01-side-btns"><button id="panel-ok" class="c01-btn-big' + (ready ? ' ready' : '') + '"' + (ready ? '' : ' disabled') + (editMode ? ' hidden' : '') + '>' + (ready ? '確認する' : '正しい値を選んでください') + '</button>' +
       '<button id="panel-later" class="c01-btn-ghost2">' + (editMode ? '閉じる' : 'あとで') + '</button></div>' +
       '<p class="c01-foot">記録: ' + esc(S.me ? S.me.name : '（担当者を選んでください）') + '</p>' +
@@ -2043,6 +2057,7 @@ window.C01 = window.C01 || {};
       S.view = 'input'; S.qsel = qs[0].queue_id; S.sel = null; render();
     };
     if (firstPhoto) $('panel-photo').onclick = function (ev) { openPhotos(ev, S.sel, 0); };
+    if ($('panel-ask')) $('panel-ask').onclick = function () { S.rowAsk = { iv_no: iv.iv_no, ct: r.ct || null, container_id: r.container_id }; S.sel = null; S.gDr = false; render(); };
     if ($('panel-keep')) $('panel-keep').onclick = function () { keepRow(iv, r, function () { S.sel = null; S.picks = {}; S.panelInput = ''; render(); }); };
     if ($('panel-notours')) $('panel-notours').onclick = function () { var pq = pnFiles(qs, ov)[0]; if (pq) notHannyuhyo(pq, null); };
     if ($('panel-otherct')) $('panel-otherct').onclick = function () {
@@ -2988,7 +3003,15 @@ window.C01 = window.C01 || {};
     var st = queueState(q, overlay());
     if (!st.aid) return;
     var a = mkAction('undo', { iv: q.iv_no || null, ct: q.ct || null, field: null, value: { action_id: st.aid }, source: null, queue_id: null });
-    writeAction(a).then(function () { render(); toast('元に戻しました', 'success'); });
+    /* v0.3.46 (R9X Part 00-2): 「連結して確認」 = 同じ queue の値の確認も 元に戻す (両方) */
+    var ov0 = overlay(), more = st.act === 'link_iv' ? allActions().filter(function (x) {
+      return x.queue_id === q.queue_id && (x.action === 'confirm_value' || x.action === 'manual_input') && !(ov0.undone && ov0.undone[x.action_id]);
+    }) : [];
+    var chain = writeAction(a);
+    more.forEach(function (x) {
+      chain = chain.then(function () { return writeAction(mkAction('undo', { iv: x.iv || null, ct: x.ct || null, field: null, value: { action_id: x.action_id }, source: null, queue_id: null })); });
+    });
+    chain.then(function () { render(); toast(more.length ? '元に戻しました（連結 + 確認した値 ' + more.length + '）' : '元に戻しました', 'success'); });
   }
   /* ── v0.3.23 (R7W Part D · 決定 #206): 業者・IV 未定 = 「IVに連結」 — 担当者が BKG / IV を入れ (候補 · 前に連結した IV が上) → そのブッキングの枠を選ぶ (必須)
      安全: 無い BKG / IV = 選べない · 書類の業者 ≠ 枠の業者 = 確認窓 · もう行がある枠 = 確認窓 · 元に戻す · 人が選んだ枠 = エンジンが固定 (s2_human_link_iv) ── */
@@ -3378,6 +3401,7 @@ window.C01 = window.C01 || {};
       var sel = sl.filter(function (s) { return s.slot_guid === v.slot; })[0];
       if (sel && q.packer_guess && sel.packer && q.packer_guess.split('・').indexOf(sel.packer) < 0) h += '<p class="c01-warn2">書類の業者（' + esc(q.packer_guess) + '）と枠の業者（' + esc(sel.packer) + '）が違います</p>';
       if (sel && used[sel.slot_guid]) h += '<p class="c01-warn2">この枠にはもう行があります（' + esc(used[sel.slot_guid].ct || 'CT 不明') + '）</p>';
+      if (faxCmpOn(q)) h += faxCmpHtml(q, iv);
     }
     return h + '<p class="c01-note2">連結すると この書類は選んだ IV · 枠のものとして次の判定（10 分ほど）で読みます。元に戻せます。</p></div>';
   }
@@ -3392,12 +3416,94 @@ window.C01 = window.C01 || {};
     };
     inp.onchange = function () { setIv(inp.value); };
     inp.onkeydown = function (e) { if (e.key === 'Enter') setIv(inp.value); };
+    if (faxCmpOn(q)) bindFaxCmp(q);                                /* v0.3.46 (R9X Part 00-2) */
     document.querySelectorAll('[data-linkiv]').forEach(function (b) { b.onclick = function () { setIv(b.getAttribute('data-linkiv')); }; });
     document.querySelectorAll('input[name="link-slot"]').forEach(function (r) {
       r.onchange = function () { (S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {})).slot = r.value; render(); };
     });
   }
-  function linkIvAction(q) {
+  /* ── v0.3.46 (R9X Part 00-2 · #295 · 형님 「IV 連結 をすると 同じ画面で値まで」): FAX で読んだ値 ↔ 選んだ IV の同じ CT の行の値 ──
+     同じ = ✓ (確認する) · 違う = FAX / 行 / 直接入力 を選ぶ · 「連結して確認（OK）」 = link_iv + 確認した値 (confirm_value · 同じ queue_id) · 元に戻す = 両方。
+     その IV にその CT の行が無い = 「新しい行（次の判定で）」 だけ。搬入票ではない · 他社 · スキップ は今まで通り */
+  var FXF = ['seal', 'n_w', 't_w', 'bales', 'work_date'];
+  function faxCmpOn(q) { return !!(q && q.kind === '未分類FAX' && (C01.RULES || {}).faxLinkConfirm && q.fax_read && (q.fax_read.pages || []).length); }
+  function nz(f, v) {
+    if (v == null || v === '') return '';
+    var t = String(v).trim().toUpperCase().replace(/\s/g, '');
+    if (f === 'n_w' || f === 't_w' || f === 'bales') t = t.replace(/[,，]/g, '').replace(/KG$/, '').replace(/\.0+$/, '');
+    if (f === 'work_date') t = t.replace(/[\/.]/g, '-');
+    return t;
+  }
+  function faxRows(q) {
+    var out = [], seen = {};
+    (q.fax_read.pages || []).forEach(function (p) {
+      (p.rows || []).forEach(function (r) {
+        var ct = nz('ct', r.ct);
+        if (!ct || seen[ct]) return;
+        seen[ct] = 1;
+        out.push({ ct: ct, page: p.page, v: r });
+      });
+    });
+    return out;
+  }
+  function faxCmp(q, iv) {
+    var rows = (iv.rows || []);
+    var fx = S.fxc[q.queue_id] || (S.fxc[q.queue_id] = {});
+    return faxRows(q).map(function (x) {
+      var r = rows.filter(function (y) { return nz('ct', y.ct) === x.ct; })[0] || null;
+      var cells = r ? FXF.filter(function (f) { return nz(f, x.v[f]) !== ''; }).map(function (f) {
+        var k = x.ct + '|' + f, fv = x.v[f], rv = r[f], same = nz(f, fv) === nz(f, rv);
+        var c = fx[k] || (fx[k] = same ? { pick: 'fax' } : { pick: null });
+        return { f: f, k: k, fv: fv, rv: rv, same: same, c: c };
+      }) : [];
+      return { ct: x.ct, page: x.page, r: r, cells: cells };
+    });
+  }
+  function faxCmpHtml(q, iv) {
+    var cm = faxCmp(q, iv);
+    if (!cm.length) return '';
+    var h = '<div class="c01-fxcmp"><div class="k">FAX の値 ↔ ' + esc(iv.iv_no) + ' の行の値</div><table><thead><tr><th>CT</th><th>項目</th><th>FAX</th><th>行</th><th>確認</th></tr></thead><tbody>';
+    cm.forEach(function (x) {
+      if (!x.r) { h += '<tr class="nw"><td class="mono">' + esc(x.ct) + '</td><td colspan="4">この IV にこの CT の行はありません — 新しい行（次の判定で）</td></tr>'; return; }
+      if (!x.cells.length) { h += '<tr><td class="mono">' + esc(x.ct) + '</td><td colspan="4" class="t2">FAX で読めた値がありません</td></tr>'; return; }
+      x.cells.forEach(function (c, i) {
+        h += '<tr' + (c.same ? '' : ' class="d"') + '>' + (i === 0 ? '<td class="mono" rowspan="' + x.cells.length + '">' + esc(x.ct) + (x.page ? '<div class="t2">p' + esc(String(x.page)) + '</div>' : '') + '</td>' : '') +
+          '<th>' + FIELD_LABEL[c.f] + '</th><td class="mono">' + esc(String(c.fv)) + '</td><td class="mono">' + esc(c.rv == null || c.rv === '' ? '—' : String(c.rv)) + '</td><td>' +
+          (c.same ? '<label class="c01-fxok"><input type="checkbox" data-fxchk="' + esc(c.k) + '"' + (c.c.pick ? ' checked' : '') + '> ✓ 同じ</label>' :
+            '<label><input type="radio" name="fx-' + esc(c.k) + '" data-fxpick="' + esc(c.k) + '" value="fax"' + (c.c.pick === 'fax' ? ' checked' : '') + '> FAX</label> ' +
+            (c.rv == null || c.rv === '' ? '' : '<label><input type="radio" name="fx-' + esc(c.k) + '" data-fxpick="' + esc(c.k) + '" value="row"' + (c.c.pick === 'row' ? ' checked' : '') + '> 行</label> ') +
+            '<label><input type="radio" name="fx-' + esc(c.k) + '" data-fxpick="' + esc(c.k) + '" value="in"' + (c.c.pick === 'in' ? ' checked' : '') + '> 入力</label>' +
+            (c.c.pick === 'in' ? ' <input class="c01-fxin" data-fxin="' + esc(c.k) + '" value="' + esc(c.c.val || '') + '" size="10">' : '')) + '</td></tr>';
+      });
+    });
+    return h + '</tbody></table><div class="c01-fxbtns"><button id="q-linkok" class="c01-btn-ghost2 c01-keep" title="IV に連結して 確かめた値を 確認済 にします（記録 · 元に戻す = 両方）">連結して確認（OK）</button>' +
+      '<span class="t2">「IVに連結」 だけ = 下の大きいボタン（値は 次の判定のあと 確認・入力 で）</span></div></div>';
+  }
+  function bindFaxCmp(q) {
+    var fx = S.fxc[q.queue_id] || (S.fxc[q.queue_id] = {});
+    document.querySelectorAll('[data-fxchk]').forEach(function (el) { el.onchange = function () { fx[el.getAttribute('data-fxchk')] = { pick: el.checked ? 'fax' : null }; }; });
+    document.querySelectorAll('[data-fxpick]').forEach(function (el) {
+      el.onchange = function () { var k = el.getAttribute('data-fxpick'); fx[k] = { pick: el.value, val: (fx[k] || {}).val }; render(); };
+    });
+    document.querySelectorAll('[data-fxin]').forEach(function (el) { el.oninput = function () { var k = el.getAttribute('data-fxin'); fx[k] = { pick: 'in', val: el.value }; }; });
+    if ($('q-linkok')) $('q-linkok').onclick = function () { linkIvAction(q, true); };
+  }
+  /* 「連結して確認」 の値 → confirm_value (検査 · 違う値は選んだ時だけ) — 戻り = {acts, err} */
+  function faxConfirmActs(q, iv) {
+    var acts = [], miss = 0;
+    faxCmp(q, iv).forEach(function (x) {
+      x.cells.forEach(function (c) {
+        if (!c.c.pick) { if (!c.same) miss++; return; }
+        var raw = c.c.pick === 'fax' ? c.fv : c.c.pick === 'row' ? c.rv : c.c.val;
+        var v = C01.validate.field(c.f, raw);
+        if (!v.ok) { acts.err = FIELD_LABEL[c.f] + ' (' + x.ct + '): ' + v.error; return; }
+        acts.push(mkAction('confirm_value', { iv: iv.iv_no, ct: x.r.ct, field: c.f, value: v.value, source: c.c.pick === 'fax' ? '搬入票' : '手入力', queue_id: q.queue_id }));
+      });
+    });
+    acts.miss = miss;
+    return acts;
+  }
+  function linkIvAction(q, withConfirm) {
     var v = S.qvals[q.queue_id] || {};
     var iv = linkIvOf(q);
     if (!iv) { S.qmsg[q.queue_id] = 'この BKG / IV は進行中のブッキングにありません'; render(); return; }
@@ -3418,7 +3524,18 @@ window.C01 = window.C01 || {};
       value: { sha16: hs, slot_guid: sl.slot_guid, bkg: iv.bkg_no || null, names: (q.files || []).map(function (f) { return f.name; }).filter(Boolean),
         packer_guess: q.packer_guess || null, warn: warn,
         fax: q.kind === '未分類FAX' ? { issuer: q.issuer || null, ct: (q.fax_read && q.fax_read.ct) || [], engine_cand: (q.candidates || []).indexOf(iv.iv_no) >= 0, past: !!iv.fromTarget } : null } });
-    writeAction(a).then(function () { toast('IV に連結しました（次の判定で反映）', 'success'); S.qsel = nextQueueId(q); render(); });
+    var cacts = [];
+    if (withConfirm) {
+      cacts = faxConfirmActs(q, iv);
+      if (cacts.err) { S.qmsg[q.queue_id] = cacts.err; render(); return; }
+      if (cacts.miss && !window.confirm('値が違う項目のうち 選んでいないものが ' + cacts.miss + ' つあります（その項目は確認しません）。連結して確認しますか？')) return;
+    }
+    var chain = writeAction(a);
+    cacts.forEach(function (x) { chain = chain.then(function () { return writeAction(x); }); });
+    chain.then(function () {
+      toast(cacts.length ? 'IV に連結して 値を ' + cacts.length + ' つ確認しました（元に戻す = 両方）' : 'IV に連結しました（次の判定で反映）', 'success');
+      S.qsel = nextQueueId(q); render();
+    });
   }
   function submitQueue(q, special) {
     if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
@@ -3479,6 +3596,101 @@ window.C01 = window.C01 || {};
      Compass入力 · 催促 送信 = 案内の文だけ · 業者 · 別名 · 連絡先の登録 = 「管理者の承認依頼」 だけ · 削除 · 原本の移動 = できない */
   var ASK_QUICK = ['どの値が正しい？', 'この書類は違う', '写真が見えない'];
   var ASK_ACT = { pick_value: 1, fix_value: 1, merge_same: 1, not_same: 1, link_iv: 1, not_hannyuhyo: 1, not_ours: 1, reload_view: 1 };
+  /* v0.3.46 (R9X Part 0 · #291 ②): AI が準備した操作 (エンジンが 調べて確かめたものだけ) — 「この操作をしますか？」 → 実行 = 担当者 (今のボタンと同じ記録 · 元に戻す) */
+  var PROP_ACT = { other_ct: 1, not_hannyuhyo: 1, link_iv: 1, register_sender: 1 };
+  function propOn() { return !!(C01.ASK && C01.ASK.propose); }
+  function propList(r) { return propOn() ? (r.proposed_actions || []).filter(function (p) { return PROP_ACT[p.action] && p.key; }) : []; }
+  function propState(p) {
+    var ov = overlay();
+    if (p.action === 'other_ct' && p.container_id && ov.other && ov.other[p.container_id]) return 'done';
+    if (S.propDone && S.propDone[p.key]) return 'done';
+    if ((S.actions || []).concat(S.mine || []).some(function (x) { var a = x.action || x; return a.origin && a.origin.key === p.key && !(ov.undone && ov.undone[a.action_id]); })) return 'done';
+    return S.propDrop && S.propDrop[p.key] ? 'drop' : '';
+  }
+  function propCan(p, q) {
+    if (p.action === 'other_ct') return otherCtOn() && !!p.container_id;
+    if (!q || q.queue_id !== p.queue_id) return false;
+    if (p.action === 'not_hannyuhyo') return !!$('q-notours');
+    if (p.action === 'link_iv') return !!$('link-iv') || !!$('q-iv');
+    return p.action === 'register_sender' && regSenderOn() && !!$('reg-packer');
+  }
+  function propTarget(p) {
+    return p.action === 'other_ct' ? (p.ct || '') + (p.iv ? '（' + p.iv + '）' : '') : p.action === 'link_iv' ? p.iv : p.action === 'register_sender' ? p.packer : '';
+  }
+  function propBox(a, r, q) {
+    return propList(r).map(function (p, i) {
+      var st = propState(p), t = propTarget(p);
+      var h = '<div class="c01-prop"><div class="k">この操作をしますか？</div><div class="ttl">' + esc(p.label || p.action) + (t ? ' — <span class="mono">' + esc(t) + '</span>' : '') + '</div>' +
+        (p.reason ? '<div class="t2">' + esc(p.reason) + '</div>' : '');
+      if (st === 'done') h += '<div class="c01-imp-ok">実行しました（元に戻せます）</div>';
+      else if (st === 'drop') h += '<div class="t2">やめました</div>';
+      else h += '<div class="c01-imp-b"><button class="c01-btn-ghost2" data-propgo="' + esc(a.ask_id) + '|' + i + '"' + (propCan(p, q) ? '' : ' disabled title="この画面では使えません（その カードを開いてください）"') + '>実行</button>' +
+        '<button class="c01-btn-sub" data-propdrop="' + esc(p.key) + '">やめる</button></div>';
+      return h + '</div>';
+    }).join('');
+  }
+  function propGo(p, aid, q) {
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    if (propState(p) === 'done') return;                                    /* 同じ提案を 2 回 = 1 回 */
+    S.propOrigin = { action: p.action, ask_id: aid, key: p.key, until: Date.now() + 120000 };
+    if (p.action === 'other_ct') {
+      var f = null;
+      ((S.jik && S.jik.ivs) || []).forEach(function (iv) { (iv.rows || []).forEach(function (r) { if (r.container_id === p.container_id) f = { iv: iv, r: r }; }); });
+      if (!f) { S.propOrigin = null; toast('この行は もう実況表にありません', 'warn'); return; }
+      var pr = otherCtAction(f.iv, f.r, null);
+      if (!pr) S.propOrigin = null; else pr.then(function () { render(); });
+      return;
+    }
+    if (p.action === 'not_hannyuhyo') { $('q-notours').click(); return; }
+    if (p.action === 'link_iv') {
+      var el = $('link-iv') || $('q-iv');
+      if (el) { el.value = p.iv; el.dispatchEvent(new Event('change')); el.dispatchEvent(new Event('input')); toast('IV を入れました — 枠を選んで 「IVに連結」', 'success'); }
+      return;
+    }
+    if (p.action === 'register_sender') {
+      var pk = $('reg-packer');
+      if (pk) { pk.value = p.packer; pk.dispatchEvent(new Event('input')); pk.dispatchEvent(new Event('change')); toast('業者を入れました — 確かめて 「業者登録」', 'success'); }
+    }
+  }
+  function propBind(box, q) {
+    box.querySelectorAll('[data-propgo]').forEach(function (el) {
+      el.onclick = function () {
+        var pr = el.getAttribute('data-propgo').split('|');
+        var x = (S.asks || []).filter(function (y) { return y.ask.ask_id === pr[0]; })[0];
+        var p = x && x.reply && propList(x.reply)[+pr[1]];
+        if (p) propGo(p, pr[0], q);
+      };
+    });
+    box.querySelectorAll('[data-propdrop]').forEach(function (el) {
+      el.onclick = function () { S.propDrop = S.propDrop || {}; S.propDrop[el.getAttribute('data-propdrop')] = 1; render(); };
+    });
+    box.querySelectorAll('[data-fb]').forEach(function (el) {
+      el.onclick = function () { var pr = el.getAttribute('data-fb').split('|'); fbSend(pr[0], pr[1] === '1'); };
+    });
+  }
+  /* v0.3.46 (R9X Part 2 · #291 ④): 答えの評価 — 「立たなかった」 = エンジンが 自動の改善依頼 (依頼一覧 「自動」) */
+  function fbOn() { return !!(C01.ASK && C01.ASK.feedback); }
+  function fbState(aid) {
+    var me = ((S.me && S.me.email) || '').toLowerCase(), v = null;
+    (S.actions || []).concat(S.mine || []).forEach(function (x) {
+      var a = x.action || x;
+      if (a.action === 'ask_feedback' && a.value && a.value.ask_id === aid && String(a.by || '').toLowerCase() === me) v = a.value.good;
+    });
+    return v;
+  }
+  function fbBox(a, r) {
+    if (!fbOn() || !r || r.status !== 'ok') return '';
+    var v = fbState(a.ask_id);
+    if (v === true) return '<div class="c01-fb t2">評価: 役に立った</div>';
+    if (v === false) return '<div class="c01-fb t2">評価: 役に立たなかった（改善依頼として受け付けます）</div>';
+    return '<div class="c01-fb"><button class="c01-chip" data-fb="' + esc(a.ask_id) + '|1">役に立った</button><button class="c01-chip" data-fb="' + esc(a.ask_id) + '|0">役に立たなかった</button></div>';
+  }
+  function fbSend(aid, good) {
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    if (fbState(aid) !== null) return;
+    writeAction(mkAction('ask_feedback', { value: { ask_id: aid, good: !!good } }))
+      .then(function () { toast(good ? 'ありがとうございます' : '改善依頼として受け付けます（依頼一覧 「自動」）', 'success'); render(); }).catch(function () {});
+  }
   function askOn() { return !!(C01.ASK && C01.ASK.enabled && S.src && typeof S.src.listAsks === 'function'); }
   function askKey(q) { return (q.iv_no || '') + '|' + cardKey(q); }
   function askId() { return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
@@ -3513,6 +3725,7 @@ window.C01 = window.C01 || {};
       (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') + (th.length ? ' <span class="t2">' + th.length + '件</span>' : '') + '</div>';
   }
   function askToggle(on) {
+    if (!on && S.rowAsk) { S.rowAsk = null; render(); return; }     /* v0.3.46: 行の AI 相談を閉じる */
     S.askDr = !!on;
     if (S.askDr) S.gDr = false;                                    /* v0.3.39 (R9L): 右横は 1 つ (全体の AI 相談を閉じる) */
     render();
@@ -3537,7 +3750,7 @@ window.C01 = window.C01 || {};
           var ok = askCan(q, s);
           return '<button class="c01-btn-ghost2" data-asksug="' + esc(a.ask_id) + '|' + i + '"' + (ok ? '' : ' disabled title="この画面では使えません"') + '>' +
             esc(s.label || s.action) + (s.value ? ' <span class="mono">' + esc(s.value) + '</span>' : '') + (s.iv ? ' <span class="mono">' + esc(s.iv) + '</span>' : '') + '</button>';
-        }).join('') + '<span class="t2">押すと この画面の今のボタンと同じ (記録 · 元に戻す)</span></div>' : '') + '</div>';
+        }).join('') + '<span class="t2">押すと この画面の今のボタンと同じ (記録 · 元に戻す)</span></div>' : '') + propBox(a, r, q) + fbBox(a, r) + '</div>';
     }).join('') + '</div>';
     h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + ASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-askq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
     h += '<div class="c01-ask-in"><input id="ask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.askDraft[k] || '') + '" aria-label="AI への質問">' +
@@ -3607,6 +3820,7 @@ window.C01 = window.C01 || {};
     }
     if ($('ask-send')) $('ask-send').onclick = function () { askSend(q, inp && inp.value); };
     box.querySelectorAll('[data-askq]').forEach(function (el) { el.onclick = function () { askSend(q, ASK_QUICK[+el.getAttribute('data-askq')]); }; });
+    propBind(box, q);                                              /* v0.3.46 (R9X Part 0 · 2) */
     box.querySelectorAll('[data-asksug]').forEach(function (el) {
       el.onclick = function () {
         var pr = el.getAttribute('data-asksug').split('|');
@@ -3680,7 +3894,8 @@ window.C01 = window.C01 || {};
     if (!mine.length) return h + '<p class="t2 c01-ask-empty">依頼はまだありません。</p>';
     return h + '<table class="c01-reqs"><thead><tr><th>No</th><th>日付</th><th>内容</th><th>状態</th></tr></thead><tbody>' + mine.map(function (x) {
       return '<tr><td class="mono">' + esc(String(x.no)) + '</td><td class="mono">' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + '</td>' +
-        '<td>' + esc(x.title || '') + (S.gReqAll && x.by_name ? ' <span class="t2">(' + esc(x.by_name) + ')</span>' : '') +
+        '<td>' + (x.source === 'auto' ? '<span class="c01-trialtag c01-auto" title="AI 相談で解決できなかった質問を 自動で受け付けました">自動</span> ' : '') +
+        esc(x.title || '') + (S.gReqAll && x.by_name ? ' <span class="t2">(' + esc(x.by_name) + ')</span>' : '') +
         (x.memo ? '<div class="t2">' + esc(x.memo) + '</div>' : '') + '</td>' +
         '<td><span class="c01-reqst s-' + esc(x.status || '') + '">' + esc(x.status || '') + '</span><div class="t2">' + esc(x.plan || '') + '</div></td></tr>';
     }).join('') + '</tbody></table>';
@@ -3700,7 +3915,7 @@ window.C01 = window.C01 || {};
       var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
       if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
       return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
-        (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') + impBox(a, r) + '</div>';
+        (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') + impBox(a, r) + propBox(a, r, null) + fbBox(a, r) + '</div>';
     }).join('') + '</div>';
     h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + GASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-gaskq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
     h += '<div class="c01-ask-in"><input id="gask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.gDraft || '') + '" aria-label="AI への質問（全体）">' +
@@ -3760,6 +3975,7 @@ window.C01 = window.C01 || {};
     if ($('gask-send')) $('gask-send').onclick = function () { gaskSend(inp && inp.value); };
     box.querySelectorAll('[data-gaskq]').forEach(function (el) { el.onclick = function () { S.gDraft = GASK_QUICK[+el.getAttribute('data-gaskq')] + ' : '; render(); var i2 = $('gask-in'); if (i2) i2.focus(); }; });
     box.querySelectorAll('[data-impsend]').forEach(function (el) { el.onclick = function () { impSend(el.getAttribute('data-impsend')); }; });
+    propBind(box, null);                                           /* v0.3.46 (R9X Part 0 · 2) */
     box.querySelectorAll('[data-impdrop]').forEach(function (el) {
       el.onclick = function () { S.impDrop = S.impDrop || {}; S.impDrop[el.getAttribute('data-impdrop')] = 1; render(); };
     });
@@ -3774,6 +3990,23 @@ window.C01 = window.C01 || {};
   }
   C01.gask = { key: gaskKey, thread: gaskThread, imp: impState };
 
+  /* ── v0.3.46 (R9W Part 1-2 · #290): 実況表の行の 「AIに相談」 — カードの無い行 (確認済 → 再確認 に戻した行 など) も 行の会話 (カードと同じ c:{container_id}) ── */
+  function rowAskOn() { return askOn() && !!(C01.ASK && C01.ASK.rowAsk); }
+  function rowAskQ() {
+    var x = S.rowAsk;
+    return x ? { queue_id: null, kind: '行', iv_no: x.iv_no, ct: x.ct, container_id: x.container_id, field: null, files: [] } : null;
+  }
+  function renderRowAsk() {
+    var el = $('c01-rask');
+    if (!el) { el = document.createElement('div'); el.id = 'c01-rask'; ($('app') || document.body).appendChild(el); }
+    var on = rowAskOn() && S.rowAsk && S.view !== 'input' && !S.gDr;
+    document.body.classList.toggle('c01-rdr-on', !!on);
+    if (!on) { if (el.innerHTML) el.innerHTML = ''; return; }
+    var q = rowAskQ();
+    setHtml(el, askDrawer(q).replace('class="c01-askdr"', 'class="c01-askdr c01-gdr c01-rdr"'), 6);
+    askBind(q);
+  }
+
   /* ── _actions 書き込み (設計 §5 の形) ── */
   function mkAction(action, f) {
     var a = { schema_version: 1, action_id: actionId(), action: action, iv: f.iv == null ? null : f.iv, ct: f.ct == null ? null : f.ct,
@@ -3781,6 +4014,13 @@ window.C01 = window.C01 || {};
       by: S.me.email, at: jstNow(), queue_id: f.queue_id || null };
     if (f.override) a.override = [f.override];                 /* #109 ③ CT_CHECKDIGIT_OVERRIDE */
     if (f.mode) a.mode = f.mode;                               /* v0.3.23 (R7W Part A): 'edit' = 人の値があっても新しい値 (エンジン actions_value_edit) */
+    var po = S.propOrigin;                                     /* v0.3.46 (R9X Part 0): AI の提案から開いた操作 = 記録に origin (誰が押したかは by のまま) */
+    if (po && po.action === action && Date.now() < po.until) {
+      a.origin = { kind: 'ai_proposal', ask_id: po.ask_id, key: po.key };
+      S.propDone = S.propDone || {};
+      S.propDone[po.key] = 1;
+      S.propOrigin = null;
+    }
     return a;
   }
   function writeAction(a) {
@@ -3798,6 +4038,7 @@ window.C01 = window.C01 || {};
   /* v0.3.24 (R7X Part E · 형님 17:4x): 写真の一覧 — 読めなかった時は 前の一覧をそのまま (前は空にして 「0枚」 が一瞬出た) · 失敗コードはコンソール ·
      エンジンの指紋 (iv.photos_sig) が前と同じ IV は読まない (30 秒ごとの GET ≈ 0) */
   S.photoSig = {}; S.photoStat = { get: 0, fail: 0, codes: {} };
+  S.fxc = {};                                                      /* v0.3.46 (R9X Part 00-2): FAX 値の確認の選択 (queue_id → CT|項目 → {pick, val}) */
   function loadPhotos(iv, sig) {
     S.photoStat.get++;
     return S.src.getJson('photos/' + iv + '.json').then(function (p) { S.photos[iv] = p; if (sig !== undefined) S.photoSig[iv] = sig; }).catch(function (e) {
@@ -3913,6 +4154,7 @@ window.C01 = window.C01 || {};
     renderNav();
     if (S.view === 'main') renderMain(); else { $('c01-panel').hidden = true; renderInput(); }
     renderGask();                                                  /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (全体) — どの画面でも */
+    renderRowAsk();                                                /* v0.3.46 (R9W Part 1-2): 実況表の行の AI 相談 */
     impToasts();
     /* 差し替えで箱が新しくなった時も 同じ画面ならスクロール位置を戻す */
     if (view0 === S.view) {

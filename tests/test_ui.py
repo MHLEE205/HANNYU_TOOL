@@ -2656,6 +2656,203 @@ def r9w_checks(page, root, shots, engine):
     page.wait_for_timeout(300)
 
 
+def r9x_checks(page, root, shots, engine):
+    """v0.3.46 (R9X · #291 · #295 · R9W Part 1): 使い方 = エンジン tool_guide.json (AI と同じ表) · 全体 AI 相談 「この操作をしますか？」 → 実行 = other_ct (origin ai_proposal) ·
+    同じ提案 2 回 = 1 回 · 評価 (ask_feedback) · 依頼一覧 「自動」 · 実況表の行の 「AIに相談」 (カードの無い行も) · 未分類FAX 「連結して確認（OK）」 (link_iv + confirm_value · 元に戻す = 両方)."""
+    sys.path.insert(0, engine)
+    from engine.ask import tool_guide as TG  # noqa: E402
+    from engine.output import schema_check as SC  # noqa: E402
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    mp, jp, qp = d / "meta.json", d / "jikkyou.json", d / "queue.json"
+    mt0, jt0, qt0 = mp.read_text(encoding="utf-8"), jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    rq_p = d / "requests.json"
+    rq0 = rq_p.read_text(encoding="utf-8") if rq_p.exists() else None
+    page.keyboard.press("Escape")
+    page.click("#tab-main")
+    # ① 使い方 = tool_guide.json
+    (d / "tool_guide.json").write_text(dump({"schema_version": 1, "kind": "tool_guide", **TG.output()}), encoding="utf-8")
+    m = json.loads(mt0)
+    m["tool_guide"] = "tool_guide.json"
+    mp.write_text(dump(m), encoding="utf-8")
+    page.evaluate("() => { C01.state.guide = null; C01.state.guideMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    page.click("#help-open")
+    page.wait_for_timeout(600)
+    ht = page.locator("#help-body").inner_text()
+    ok("R9X 使い方 = エンジンの操作表 (tool_guide.json · AI と同じ原本) · 他社のコンテナ · 削除はありません",
+       page.locator(".c01-guide").count() == 1 and "「他社のコンテナ」" in ht and "「IVに連結」" in ht and "削除はありません" in ht and "場所:" in ht, ht[-400:])
+    page.screenshot(path=str(shots / "r9x_help_guide.png"))
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    # ② 全体 AI 相談 → 提案 → 実行
+    j = json.loads(jt0)
+    iv1 = next(x for x in j["ivs"] if x["iv_no"] == "TST2611-01")
+    r0 = next(r for r in iv1["rows"] if r.get("ct") and r.get("container_id"))
+    page.click("#gask-open")
+    page.wait_for_timeout(300)
+    before = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
+    page.fill("#gask-in", "TST2611-01 の " + r0["ct"] + " は他社の案件。削除したい")
+    page.press("#gask-in", "Enter")
+    page.wait_for_timeout(500)
+    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
+    key = "a1b2c3d4e5f6"
+    rep = {"ask_id": g.get("ask_id"), "scope": "global", "status": "ok", "kind": "guide", "suggestions": [], "approval_request": "", "improve": None,
+           "answer": "削除はありません。実況表の行の 「⋯」 → 「他社のコンテナ」 です（ファイルは消えない · 元に戻せる）。\n調べた内容: IV 一覧 TST2611-01",
+           "proposed_actions": [{"action": "other_ct", "label": "他社のコンテナ", "reason": "IV 一覧 で この CT の行を確認", "iv": "TST2611-01", "ct": r0["ct"],
+                                 "container_id": r0["container_id"], "queue_id": "", "packer": "", "key": key}]}
+    (root / "_actions" / "ask_reply").mkdir(parents=True, exist_ok=True)
+    (root / "_actions" / "ask_reply" / f"{g.get('ask_id')}.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    pb = page.locator("#gask-box .c01-prop")
+    ok("R9X 答えの下 「この操作をしますか？ — 他社のコンテナ — CT（IV）」 · 実行 / やめる · 評価ボタン 2",
+       pb.count() == 1 and "この操作をしますか？" in pb.inner_text() and r0["ct"] in pb.inner_text() and "TST2611-01" in pb.inner_text()
+       and page.locator("#gask-box [data-propgo]").count() == 1 and page.locator("#gask-box [data-propdrop]").count() == 1
+       and page.locator("#gask-box [data-fb^='" + str(g.get("ask_id")) + "|']").count() == 2, pb.inner_text() if pb.count() else None)
+    page.screenshot(path=str(shots / "r9x_prop.png"))
+    ids0 = {x.get("action_id") for x in actions(root)}
+    page.evaluate("() => { window.__cf = []; window.__cf0 = window.confirm; window.confirm = m => { window.__cf.push(m); return true; }; }")
+    page.click("#gask-box [data-propgo]")
+    page.wait_for_timeout(600)
+    na = [x for x in actions(root) if x.get("action_id") not in ids0]
+    ok("R9X 実行 = other_ct (今のボタンと同じ · 確認窓 1 · by = 担当者 · origin = ai_proposal · ask_id · key) · エンジン スキーマ",
+       len(na) == 1 and na[0]["action"] == "other_ct" and na[0]["value"] == {"container_id": r0["container_id"]}
+       and na[0].get("origin") == {"kind": "ai_proposal", "ask_id": g.get("ask_id"), "key": key} and len(page.evaluate("() => window.__cf")) == 1
+       and SC.check_obj(na[0], "action") == [], [na, page.evaluate("() => window.__cf")])
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    ok("R9X 実行のあと = 「実行しました」 · 実行ボタン無し (2 回押せない)", "実行しました" in page.locator("#gask-box .c01-prop").inner_text()
+       and page.locator("#gask-box [data-propgo]").count() == 0)
+    # ③ 評価
+    page.click("#gask-box [data-fb='" + str(g.get("ask_id")) + "|0']")
+    page.wait_for_timeout(500)
+    fb = [x for x in actions(root) if x.get("action") == "ask_feedback"]
+    ok("R9X 「役に立たなかった」 = ask_feedback (ask_id · good false) · エンジン スキーマ · 評価の表示", len(fb) == 1 and fb[0]["value"] == {"ask_id": g.get("ask_id"), "good": False}
+       and SC.check_obj(fb[0], "action") == [] and "評価: 役に立たなかった" in page.locator("#gask-box").inner_text(), fb)
+    page.evaluate("() => { if (window.__cf0) window.confirm = window.__cf0; }")
+    # ④ 依頼一覧 「自動」
+    rq = {"schema_version": 1, "kind": "improve_requests", "today": "2026-11-17", "items": [
+        {"no": 7, "at": "2026-11-17T11:00:00+09:00", "by": page.evaluate("() => (C01.state.me || {}).email"), "title": "AI 相談で解決できなかった質問", "status": "受付",
+         "plan": "予定: 次のラウンド (〜13:13)", "source": "auto", "reasons": ["cant"], "summary": "x", "question": "q", "ask_id": "kX"}]}
+    assert SC.check_obj(rq, "requests") == []
+    rq_p.write_text(dump(rq), encoding="utf-8")
+    page.evaluate("() => { C01.state.reqsMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(700)
+    page.click("#gask-box [data-gtab='reqs']")
+    page.wait_for_timeout(300)
+    ok("R9X 依頼一覧 = 自動で受け付けた依頼に 「自動」", page.locator("#gask-box .c01-auto").count() == 1, page.locator("#gask-box").inner_text()[:200])
+    page.click("#gask-box [data-gtab='chat']")
+    page.click("#gask-close")
+    page.wait_for_timeout(300)
+    # ⑤ 行の AI 相談 (カードの無い行) — ②で 他社 にした行 (r0) とは別の行
+    r0 = next(r for r in iv1["rows"] if r.get("ct") and r.get("container_id") and r["container_id"] != r0["container_id"])
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(500)
+    rk = page.evaluate("ct => [...document.querySelectorAll(\"tbody[data-iv='TST2611-01'] tr.c01-row\")].map(t => t.getAttribute('data-key')).find(k => k && k.includes(ct))", r0["ct"])
+    page.evaluate("k => { C01.state.sel = k; C01.state.editRow = null; C01.app.render(); }", rk)
+    page.wait_for_timeout(300)
+    ok("R9X 行の横の窓 = 「AIに相談」", page.locator("#panel-ask").count() == 1)
+    page.click("#panel-ask")
+    page.wait_for_timeout(400)
+    rb = page.locator("#ask-box.c01-rdr")
+    ok("R9X 行の AI 相談 = 右横のドロアー (行の CT · IV) · 横の窓は閉じる", rb.count() == 1 and r0["ct"] in rb.inner_text() and page.locator(".c01-side").count() == 0,
+       rb.inner_text()[:120] if rb.count() else None)
+    page.screenshot(path=str(shots / "r9x_rowask.png"))
+    before = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
+    page.fill("#ask-in", "この行は 確認済 を戻した行。シールは合っている？")
+    page.press("#ask-in", "Enter")
+    page.wait_for_timeout(500)
+    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    ra = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
+    rc = ra.get("card") or {}
+    ok("R9X 行の質問 = card.container_id · iv · ct · key = カードと同じ会話 (c:{container_id})", rc.get("container_id") == r0["container_id"] and rc.get("iv") == "TST2611-01"
+       and rc.get("ct") == r0["ct"] and rc.get("key") == "TST2611-01|c:" + r0["container_id"] and rc.get("queue_id") is None, rc)
+    page.click("#ask-close")
+    page.wait_for_timeout(300)
+    ok("R9X 行の AI 相談 閉じる", page.locator("#ask-box").count() == 0)
+    # ⑥ 未分類FAX 「連結して確認（OK）」 (⑤ の行 = 実況表に残っている行)
+    docs_dir = [p_.relative_to(root).as_posix() for p_ in sorted((root / "TST2611-01" / "搬入票").glob("*.svg"))]
+    nw = (r0.get("n_w") or 20000)
+    fq = {"queue_id": "9a9a9a9a9a9a9a91", "kind": "未分類FAX", "iv_no": None, "ct": None, "field": None, "container_id": None, "values": {},
+          "candidates": ["TST2611-01"], "files": [{"path": docs_dir[0], "name": "fax-r9x.pdf", "page": None, "bbox": None, "sha16": "9a9a9a9a9a9a9a9a"}],
+          "note": "保留", "resolved": None, "superseded": [], "cy_cut": None, "cy_open": None, "issuer": None, "field_sources": {}, "field_source_text": {},
+          "received_at": "2026-11-17T10:20:00+09:00", "link_iv": True,
+          "fax_read": {"ct": [r0["ct"], "TSTU9999990"], "pages": [{"file": None, "page": 1, "rotation": 180, "doc_type": "hannyuhyo", "issuer": "x", "fax_from": None, "bkg": [],
+                                                                    "rows": [{"ct": r0["ct"], "seal": r0.get("seal") or "SL1", "n_w": nw + 10, "t_w": None, "bales": None, "work_date": None},
+                                                                             {"ct": "TSTU9999990", "seal": "SL9", "n_w": 1, "t_w": None, "bales": None, "work_date": None}]}]}}
+    q2 = json.loads(qt0)
+    q2["items"].append(fq)
+    if "未分類FAX" not in q2["kinds"]:
+        q2["kinds"] = list(q2["kinds"]) + ["未分類FAX"]
+    qp.write_text(dump(q2), encoding="utf-8")
+    page.evaluate("C01.RULES.linkIv = true; C01.RULES.faxLinkIv = true; C01.RULES.faxLinkConfirm = true; C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qiv = null; C01.state.showOldFax = true; C01.state.qsel = q; C01.app.render(); }", fq["queue_id"])
+    page.wait_for_selector("#link-iv")
+    page.click(".c01-linkiv [data-linkiv='TST2611-01']")
+    page.wait_for_timeout(300)
+    tb = page.locator(".c01-fxcmp")
+    txt = tb.inner_text() if tb.count() else ""
+    ok("R9X FAX の値 ↔ IV の行の値 表 · 同じ = ✓ · 違う = 選ぶ · 行の無い CT = 「新しい行（次の判定で）」 · 「連結して確認（OK）」",
+       tb.count() == 1 and "✓ 同じ" in txt and "新しい行（次の判定で）" in txt and page.locator("#q-linkok").count() == 1
+       and page.locator(".c01-fxcmp tr.d").count() == 1, txt[:300])
+    page.screenshot(path=str(shots / "r9x_fax_cmp.png"))
+    page.locator("input[name='link-slot']").first.check()
+    page.wait_for_timeout(200)
+    page.locator(".c01-fxcmp [data-fxpick][value='fax']").first.check()
+    page.wait_for_timeout(200)
+    ids0 = {x.get("action_id") for x in actions(root)}
+    dl = []
+
+    def acc(d_):
+        dl.append(d_.message)
+        d_.accept()
+    page.on("dialog", acc)
+    page.click("#q-linkok")
+    page.wait_for_timeout(900)
+    na = [x for x in actions(root) if x.get("action_id") not in ids0]
+    cv = [x for x in na if x["action"] == "confirm_value"]
+    ok("R9X 「連結して確認」 = link_iv 1 + confirm_value 2 (seal 同じ · n_w FAX) · 同じ queue_id · source 搬入票 · エンジン スキーマ",
+       sorted(x["action"] for x in na) == ["confirm_value", "confirm_value", "link_iv"] and len(cv) == 2 and {x["field"] for x in cv} == {"seal", "n_w"}
+       and all(x["queue_id"] == fq["queue_id"] and x["source"] == "搬入票" and x["ct"] == r0["ct"] and x["iv"] == "TST2611-01" for x in cv)
+       and next(x for x in cv if x["field"] == "n_w")["value"] in (nw + 10, str(nw + 10)) and all(SC.check_obj(x, "action") == [] for x in na), [na, dl])
+    page.click(".c01-kinds [data-kind='done']")
+    page.wait_for_timeout(300)
+    its = page.locator(".c01-item.done")
+    for i_ in range(its.count()):
+        if "fax-r9x.pdf" in its.nth(i_).inner_text():
+            its.nth(i_).click()
+            break
+    page.wait_for_timeout(300)
+    ids1 = {x.get("action_id") for x in actions(root)}
+    if page.locator("#q-undo").count():
+        page.click("#q-undo")
+        page.wait_for_timeout(900)
+    un = [x for x in actions(root) if x.get("action_id") not in ids1 and x["action"] == "undo"]
+    tgt = {x["value"]["action_id"] for x in un}
+    ok("R9X 元に戻す = 連結 + 確認した値 (undo 3)", len(un) == 3 and tgt == {x["action_id"] for x in na}, [len(un), page.locator("#q-undo").count()])
+    page.remove_listener("dialog", acc)
+    for th in ("dark", "light", "leenai", "focus"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(100)
+        page.screenshot(path=str(shots / f"r9x_fax_{th}.png"))
+    page.evaluate("document.documentElement.setAttribute('data-theme','light')")
+    page.evaluate("C01.RULES.linkIv = false; C01.RULES.faxLinkIv = true; C01.state.qkind = 'all'; C01.state.showOldFax = false; C01.state.view = 'main'")
+    mp.write_text(mt0, encoding="utf-8")
+    qp.write_text(qt0, encoding="utf-8")
+    (d / "tool_guide.json").unlink()
+    if rq0 is None:
+        rq_p.unlink()
+    else:
+        rq_p.write_text(rq0, encoding="utf-8")
+    page.evaluate("() => { C01.state.guide = null; C01.app.tick(); }")
+    page.wait_for_timeout(400)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -2712,11 +2909,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.45", page.title() == "LEENAI C-01 搬入票 v0.3.45", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.46", page.title() == "LEENAI C-01 搬入票 v0.3.46", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.45" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.46" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -3240,6 +3437,7 @@ def main():
             r9o_checks(page, root, shots, a.engine)
             r9u_checks(page, root, shots, a.engine)
             r9w_checks(page, root, shots, a.engine)
+            r9x_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
