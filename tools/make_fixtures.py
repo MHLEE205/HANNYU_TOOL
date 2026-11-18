@@ -3,7 +3,7 @@ r"""시험·스크린샷용 가명 `_data` 세트 (실제 IV·CT·seal·메일·
 구조는 엔진 출력 (engine/output/schema/*.schema.json) 과 같다. 사진·서류는 SVG 그림 (글자만).
 v0.2.0 (R6): queue field_sources · field_source_text · _data/compass_now/{IV}.json (COMPASS 칸 가명 스냅샷) ·
 _data/remind.json (엔진 engine/notify/remind.py 로 만든 催促 초안 — 엔진 폴더가 없으면 건너뜀) 추가.
-사용: python tools/make_fixtures.py [--out fixtures] [--today 2026-11-08] [--engine C:\LEENAI_C01_V2\engine_r68]"""
+사용: python tools/make_fixtures.py [--out fixtures] [--today 2026-11-08] [--engine C:\LEENAI_C01_PROD\code]"""
 import argparse
 import datetime as dt
 import hashlib
@@ -94,7 +94,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "fixtures"))
     ap.add_argument("--today", default="2026-11-08")
-    ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r68")
+    ap.add_argument("--engine", default=r"C:\LEENAI_C01_PROD\code")
     a = ap.parse_args()
     out = Path(a.out)
     today = dt.date.fromisoformat(a.today)

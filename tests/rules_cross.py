@@ -4,7 +4,7 @@ r"""TOOL (js/config.js · js/validate.js · js/app.js) 과 엔진 (engine/action
 - ② CT 입력: 같은 입력 (가명) 을 JS validate.field('ct') 와 엔진 norm_value('ct', v, override) 에 넣어 받음/거부·값·override 가 같은지
 - ③ 문구: 체크디짓 확인창 · 催促 서명 자리표시자 · 슬롯 입れ替え 확인창 형식
 node = Playwright 에 들어 있는 node.exe (따로 설치 없음). 데이터 없음 (가명 CT 만).
-사용: python tests/rules_cross.py [--engine C:\LEENAI_C01_V2\engine_r68]"""
+사용: python tests/rules_cross.py [--engine C:\LEENAI_C01_PROD\code]"""
 import argparse
 import json
 import subprocess
@@ -33,7 +33,7 @@ process.stdout.write(JSON.stringify(out));
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r68")
+    ap.add_argument("--engine", default=r"C:\LEENAI_C01_PROD\code")
     a = ap.parse_args()
     sys.path.insert(0, a.engine)
     from engine.actions import apply as AP  # noqa: E402

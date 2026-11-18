@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.55',
+  version: '0.3.56',
   date: '2026-11-18',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -42,7 +42,10 @@ C01.RULES = {
   faxLinkConfirm: true,
   /* ⑫ v0.3.49 (R10H Part 1 · #305 ③): CT を修正して 同じ BKG の別の行と同じ CT → 「{n}番の行にまとめる」 確認窓 (書類だけの行 · 値を並べて 違えば赤 + もう一度確認) →
         _actions merge_rows (エンジンが次の判定で まとめる · 元に戻す = 「⋯」) — エンジン s3_human_merge_rows が on の時だけ true */
-  mergeRows: true
+  mergeRows: true,
+  /* ⑬ v0.3.56 (R10Z Part 3): 「入力後の差異」 の 「入力値のまま」 · 「COMPASSの配置を正とする」 · 「新しい値でCompass再入力」 を 完了 から 「元に戻す」 (押す前の状態へ) —
+        エンジン actions_input_undo が on の時だけ true (off のエンジンは 元に戻す を受け付けない) */
+  inputUndo: true
 };
 
 /* データの読み先: 'graph' (R7A — Microsoft 365 ログイン → SharePoint ドキュメント / PHOTO_V2 · v0.3.29 まで HANNYU_TOOL) / 'local' (127.0.0.1 サーバー or フォルダ選択 · プレビュー) */

@@ -3,7 +3,7 @@ r"""TOOL 로 値の違い 2 · 手入力 1 · 写真のCT 1 · 未分類FAX 1 ·
 사본 DB 반영 · _data 다시 쓰기 → TOOL 다시 읽어 상태 확인 → 되돌림 (apply.revert) → 판정 표 해시 = 처리 전.
 이 스크립트에는 데이터가 없다 (대상은 실행 때 queue.json 에서 고름). 결과·스크린샷은 --out (레포 밖) 에만.
 사용: python tests/e2e_local.py --db <사본 engine.db> --root <사본 photo_v2_local> --data <사본 C01_DATA> --out <폴더>
-      [--engine C:\LEENAI_C01_V2\engine_r68] [--staff fixtures/_masters/pol_staff.json]"""
+      [--engine C:\LEENAI_C01_PROD\code] [--staff fixtures/_masters/pol_staff.json]"""
 import argparse
 import json
 import os
@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--root", required=True)
     ap.add_argument("--data", required=True, help="사본 C01_DATA (run_actions_tick 의 잠금·정답 파일 위치)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r68")
+    ap.add_argument("--engine", default=r"C:\LEENAI_C01_PROD\code")
     ap.add_argument("--staff", default=str(TOOL / "fixtures" / "_masters" / "pol_staff.json"))
     ap.add_argument("--today", default="2026-11-08")
     a = ap.parse_args()

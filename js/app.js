@@ -2863,7 +2863,8 @@ window.C01 = window.C01 || {};
       var ready = readyOf(q);
       /* v0.3.27 (R8C Part F · #226): 「搬入票ではない」 = 書類ファイルのある全てのカード (値の確認 · 写真不足 なども) */
       var canNot = !st.done && (q.kind === '未分類FAX' || (curF && curF.sha16) || (q.files || []).some(function (x) { return x.sha16; }));
-      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv' || st.act === 'other_ct' || st.act === 'register_sender' || st.act === 'review_keep') && st.aid;
+      var canUndo = st.done && !st.mineLost && (st.act === 'not_hannyuhyo' || st.act === 'not_ours' || st.act === 'merge_same' || st.act === 'not_same' || st.act === 'ours_doc' || st.act === 'link_iv' || st.act === 'other_ct' || st.act === 'register_sender' || st.act === 'review_keep'
+        || (inputUndoOn() && (st.act === 'input_keep' || st.act === 'input_slot_take' || st.act === 'input_diff_take'))) && st.aid;   /* v0.3.56 (R10Z Part 3): 入力後の差異 の 3 つも 元に戻す */
       if (q.kind === FOREIGN || q.kind === REVIEW || q.kind === IDIFF) canNot = false;     /* v0.3.47: 確認済の見直し の書類は もう 「搬入票ではない」 */              /* v0.3.20: 他社搬入票候補 = 「他社の書類」 · 「当社の書類」 の 2 つだけ */
       var krow = q.container_id && iv ? iv.rows.filter(function (r) { return r.container_id === q.container_id; })[0] : null;
       var canOther = otherCtOn() && !st.done && krow && q.kind !== SAME && q.kind !== IDIFF;    /* v0.3.27 (R8C Part F): 他社のコンテナ = 行のある全てのカード */
@@ -3241,6 +3242,7 @@ window.C01 = window.C01 || {};
   /* ── v0.3.23 (R7W Part D · 決定 #206): 業者・IV 未定 = 「IVに連結」 — 担当者が BKG / IV を入れ (候補 · 前に連結した IV が上) → そのブッキングの枠を選ぶ (必須)
      安全: 無い BKG / IV = 選べない · 書類の業者 ≠ 枠の業者 = 確認窓 · もう行がある枠 = 確認窓 · 元に戻す · 人が選んだ枠 = エンジンが固定 (s2_human_link_iv) ── */
   function linkIvOn() { return !!(C01.RULES || {}).linkIv; }
+  function inputUndoOn() { return !!(C01.RULES || {}).inputUndo; }   /* v0.3.56 (R10Z Part 3): エンジン actions_input_undo */
   function ivByAny(t) {
     t = String(t || '').trim().toUpperCase().replace(/\s/g, '');
     if (!t) return null;

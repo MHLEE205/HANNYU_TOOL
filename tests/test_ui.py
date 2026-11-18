@@ -3382,7 +3382,26 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
     page.evaluate("q => { C01.state.qkind = 'done'; C01.state.qsel = q; C01.app.render(); }", qa["queue_id"])
     page.wait_for_timeout(400)
     okmsg = page.locator(".c01-okmsg").inner_text() if page.locator(".c01-okmsg").count() else ""
-    ok("R10W 완료 = 「入力値のままにしました」 · 元に戻す 없음 (엔진에 되돌리기 없음)", "入力値のままにしました" in okmsg and page.locator("#q-undo").count() == 0, okmsg)
+    ok("R10W 완료 = 「入力値のままにしました」", "入力値のままにしました" in okmsg, okmsg)
+    # v0.3.56 (R10Z Part 3 · 엔진 actions_input_undo): 완료 카드 = 「元に戻す」 → undo 1 (value.action_id = input_keep) · 끔 (RULES.inputUndo false) = 버튼 없음
+    ok("R10Z 「入力値のまま」 완료 = 「元に戻す」 있음 (RULES.inputUndo)", page.locator("#q-undo").count() == 1, page.locator("#q-undo").count())
+    page.evaluate("() => { C01.RULES.inputUndo = false; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    n_off = page.locator("#q-undo").count()
+    page.evaluate("() => { C01.RULES.inputUndo = true; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    ok("R10Z RULES.inputUndo 끔 = 「元に戻す」 없음 (엔진 설정 끔과 같이)", n_off == 0, n_off)
+    ids_u = {x.get("action_id") for x in actions(root)}
+    page.click("#q-undo")
+    page.wait_for_timeout(900)
+    nu = [x for x in actions(root) if x.get("action_id") not in ids_u]
+    ue = SC.errors(nu[0], sch["action"]) if nu and "action" in sch else ["no"]
+    ok("R10Z 「元に戻す」 = undo 1 (value.action_id = 그 input_keep · queue_id null) · 엔진 스키마",
+       len(nu) == 1 and nu[0]["action"] == "undo" and (nu[0].get("value") or {}).get("action_id") == na[0]["action_id"] and nu[0].get("queue_id") is None and not ue, [nu, ue])
+    page.evaluate("q => { C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", qa["queue_id"])
+    page.wait_for_timeout(400)
+    ok("R10Z 되돌린 뒤 카드 = 다시 열림 (「入力値のまま」 버튼 · 완료 표시 없음)",
+       page.locator("#q-submit").inner_text() == "入力値のまま" and page.locator(".c01-okmsg").count() == 0, page.locator("#q-submit").inner_text())
     # ④ 새 값으로 다시 입력 (new_doc seal · 칸) → input_diff_take → Compass入力 창 · 비교 = 새 값 · 새 칸 · 줄 고정 표시 풀림
     page.evaluate("q => { C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", qb["queue_id"])
     page.wait_for_selector("#q-idtab")
@@ -3526,11 +3545,11 @@ def r10x_checks(page, root, shots, engine_frz):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
-    ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r68")
+    ap.add_argument("--engine", default=r"C:\LEENAI_C01_PROD\code")          # R10Z Part 4: 지운 워크트리 대신 PROD code (실전 스키마)
     ap.add_argument("--no-wait30", action="store_true")
-    ap.add_argument("--engine-r10u", default=r"C:\LEENAI_C01_V2\engine_r10u")   # v0.3.52 (R10W): 엔진 v0.5.122 스키마 (input_keep · 入力後の差異)
-    ap.add_argument("--engine-box", default=r"C:\LEENAI_C01_V2\engine_r10x")   # R10X: 엔진 v0.5.124 photos.schema (box)
-    ap.add_argument("--engine-frz", default=r"C:\LEENAI_C01_V2\engine_r10xf")   # R10X: 엔진 v0.5.125 스키마 (input_slot_take · why compass_slot)
+    ap.add_argument("--engine-r10u", default=r"C:\LEENAI_C01_PROD\code")   # v0.3.52 (R10W): 엔진 v0.5.122 스키마 (input_keep · 入力後の差異)
+    ap.add_argument("--engine-box", default=r"C:\LEENAI_C01_PROD\code")   # R10X: 엔진 v0.5.124 photos.schema (box)
+    ap.add_argument("--engine-frz", default=r"C:\LEENAI_C01_PROD\code")   # R10X: 엔진 v0.5.125 스키마 (input_slot_take · why compass_slot)
     a = ap.parse_args()
     if not (TOOL / "fixtures" / "_data" / "jikkyou.json").is_file():
         sys.exit("fixtures/_data 없음 — 먼저 python tools/make_test_data.py (레포에 넣지 않는 가명 시험 데이터)")
@@ -3595,11 +3614,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.55", page.title() == "LEENAI C-01 搬入票 v0.3.55", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.56", page.title() == "LEENAI C-01 搬入票 v0.3.56", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.55" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.56" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),

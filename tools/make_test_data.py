@@ -4,7 +4,7 @@ r"""공개 레포에 넣지 않는 가명 시험 데이터 2가지를 같은 결
   ② tests/compass_cases.json                            ← 엔진 tests/make_compass_cases.py 의 사례 (CASES · CASES_V058) 를
                                                            엔진 Python 규칙 (engine/compass_input/rules.py) 으로 계산
 엔진 폴더는 읽기만 한다 (import 만 · 엔진 쪽 파일을 쓰지 않음 · .pyc 도 만들지 않음).
-사용: python tools/make_test_data.py [--engine C:\LEENAI_C01_V2\engine_r68] [--today 2026-11-08] [--check]
+사용: python tools/make_test_data.py [--engine C:\LEENAI_C01_PROD\code] [--today 2026-11-08] [--check]
       --check = 만들지 않고 지금 파일이 다시 만든 것과 같은지만 확인 (다르면 종료 코드 1)"""
 import argparse
 import json
@@ -29,7 +29,7 @@ def compass_cases_text(engine):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r68")
+    ap.add_argument("--engine", default=r"C:\LEENAI_C01_PROD\code")
     ap.add_argument("--today", default="2026-11-08")
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args()
