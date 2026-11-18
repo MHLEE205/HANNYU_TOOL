@@ -248,6 +248,15 @@
       });
     });
   };
+  /* v0.3.50 (R10Q · #176): compass_done 記録の trial — cfg.trialUntil (JST の日時 · 例 '2026-11-24T00:00:00+09:00') から false。
+     nowMs = Date.now() (端末の時間帯に関係なし)。trial が false · trialUntil が読めない時 = cfg.trial のまま (記録だけ · 入力の動きは同じ) */
+  function trialAt(cfg, nowMs) {
+    cfg = cfg || {};
+    if (!cfg.trial) return false;
+    var until = Date.parse(cfg.trialUntil || '');
+    if (isNaN(until) || typeof nowMs !== 'number' || isNaN(nowMs)) return true;
+    return nowMs < until;
+  }
   function compassDoneAction(actionId, iv, by, at, cells) {
     return { schema_version: 1, action_id: actionId, action: 'compass_done', iv: iv, ct: null, field: null,
       value: { cells: cells, rules_version: RULES_VERSION, mode: 'graph' }, source: null, by: by, at: at, queue_id: null };
@@ -255,7 +264,7 @@
 
   var api = { RULES_VERSION: RULES_VERSION, FIELDS: FIELDS, STATES: STATES, WARN_CODES: WARN_CODES, toInt: toInt, normText: normText,
     putText: putText, normCode: normCode, nowValue: nowValue, targetType: targetType, compareRow: compareRow, ivAllOk: ivAllOk,
-    compareIv: compareIv, followTarget: followTarget, sameCond: sameCond, FOLLOW_OPT: FOLLOW_OPT, Writer: Writer, compassDoneAction: compassDoneAction, NumInvalid: NumInvalid };
+    compareIv: compareIv, followTarget: followTarget, sameCond: sameCond, FOLLOW_OPT: FOLLOW_OPT, Writer: Writer, compassDoneAction: compassDoneAction, trialAt: trialAt, NumInvalid: NumInvalid };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.C01 = root.C01 || {};
   root.C01.compass = api;

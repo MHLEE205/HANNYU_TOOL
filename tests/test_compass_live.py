@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -24,6 +25,8 @@ import test_graph as G  # noqa: E402  (가짜 Graph · 로그인 흉내 · ok() 
 TOOL = G.TOOL
 DV = "https://orgde512c6f.crm7.dynamics.com"
 REQ = []
+JST = timezone(timedelta(hours=9))
+TRIAL_UNTIL = datetime(2026, 11, 24, tzinfo=JST)   # v0.3.50 (R10Q · #176): config.js trialUntil
 
 
 def dv_handler(cells, state):
@@ -139,7 +142,7 @@ def main():
             ok("_actions compass_done 기록: 누가 · 언제 · 성공 행 (전 값 · 후 값) · 실패 1행 · 試験運用",
                a.get("action") == "compass_done" and a.get("iv") == "TST2611-01" and a.get("by") == "staff.a@example.invalid" and a.get("at")
                and len(v.get("cells") or []) == len(okids) and all(set(c) >= {"ct_id", "fields", "before", "after"} for c in v["cells"])
-               and [f["ct_id"] for f in v.get("failed") or []] == [conflict] and v.get("trial") is True, {k: a.get(k) for k in ("action", "iv", "by")})
+               and [f["ct_id"] for f in v.get("failed") or []] == [conflict] and v.get("trial") is (datetime.now(JST) < TRIAL_UNTIL), {k: a.get(k) for k in ("action", "iv", "by")})
             ok("_actions 쓰기 = HANNYU_TOOL/_actions/{날짜}/ 만", all(x.relative_to(root).parts[0] == "_actions" and len(x.relative_to(root).parts) == 3 for x in acts), [str(x.relative_to(root)) for x in acts])
             page.locator("[data-close]").first.click()
             page.wait_for_timeout(300)
@@ -172,6 +175,25 @@ def main():
             ok("実況表 = 다시 「Compass入力」 (入力済 아님)", "入力済" not in hdr2 and "Compass入力" in hdr2, hdr2[:200])
             errs = [e for e in G.RES["console_errors"] if not ("Failed to load resource" in e and ("404" in e or "409" in e or "ERR_FAILED" in e))]
             ok("콘솔 오류 0 (가짜 서버 404 빼고)", not errs, errs[:3])
+            # v0.3.50 (R10Q · #176): compass_done 기록 trial = trialUntil (JST 2026-11-24 00:00) 까지 true · 그 뒤 false — 기기 시간대 무관 (LA · UTC · 도쿄)
+            tr = {}
+            for tz in ("America/Los_Angeles", "UTC", "Asia/Tokyo"):
+                for at, exp in (("2026-11-23T23:59:59+09:00", True), ("2026-11-24T00:00:00+09:00", False), ("2026-11-16T09:00:00+09:00", True), ("2026-12-01T09:00:00+09:00", False)):
+                    ctx = br.new_context(timezone_id=tz)
+                    pg = ctx.new_page()
+                    pg.clock.set_fixed_time(at)
+                    pg.goto(f"http://127.0.0.1:{port}/")
+                    pg.wait_for_function("window.C01 && C01.compass && C01.COMPASS")
+                    got = pg.evaluate("C01.compass.trialAt(C01.COMPASS, Date.now())")
+                    tr[f"{tz} {at}"] = (got, exp)
+                    ctx.close()
+            ok("trial 날짜 끄기: 11/23 23:59:59 JST → true · 11/24 00:00 JST → false (기기 시간대 LA · UTC · 도쿄 같음)", all(g is e for g, e in tr.values()),
+               {k: v for k, v in tr.items() if v[0] is not v[1]})
+            ok("trialAt: trial false = 늘 false · trialUntil 없음/못 읽음 = trial 그대로 (true)",
+               page.evaluate("[C01.compass.trialAt({trial: false, trialUntil: '2030-01-01T00:00:00+09:00'}, 0), C01.compass.trialAt({trial: true}, Date.parse('2030-01-01T00:00:00Z')),"
+                             " C01.compass.trialAt({trial: true, trialUntil: 'x'}, Date.parse('2030-01-01T00:00:00Z')), C01.compass.trialAt(null, 0)]") == [False, True, True, False])
+            ok("config: trialUntil = 2026-11-24T00:00:00+09:00 · badge false (화면 배지 그대로 꺼짐)",
+               page.evaluate("C01.COMPASS.trialUntil === '2026-11-24T00:00:00+09:00' && C01.COMPASS.badge === false"))
             br.close()
     finally:
         srv.terminate()

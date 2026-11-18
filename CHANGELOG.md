@@ -2,6 +2,12 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.50 (2026-11-18) — R10Q: Compass入力 の `compass_done` 記録の trial を 日付で自動に切る (#176)
+- `C01.COMPASS.trialUntil = '2026-11-24T00:00:00+09:00'` — この時刻 (JST) より前の入力 = 記録の `trial: true` (今までどおり) · この時刻から = `trial: false` (11/24 単独運用 · TOOL を出し直さなくてよい)。
+- 判定 = `C01.compass.trialAt(cfg, Date.now())` (端末の時間帯に関係なし)。`trial: false` なら いつも false · `trialUntil` が無い / 読めない時は `trial` のまま。
+- 画面は変わらない: 「試験運用中」 の印は `badge: false` のまま出ない · 入力の動き (PATCH · 確認窓) も同じ。記録の印だけ。
+- 試験 compass_live 25 (+3: 11/23 23:59:59 → true · 11/24 00:00 → false を LA · UTC · 東京の時間帯で · 関数の端 · 設定) · ui 431 · graph 47 (版の文字)。
+
 ## 0.3.49 (2026-11-17) — R10H: 「{n}番の行にまとめる」 確認窓 · 「2行→1行」 (#305 ③)
 - 実況表 の CT を修正して 同じ BKG の別の行と同じ CT になった時 (書類だけの行) = 確認窓 「{n}番の行にまとめる」 — 2 行の シール · 正味 · 風袋 · ベール数 を並べて表示 · 違う値は赤 + 「値が違っても 同じコンテナです」 にチェックした後だけ押せる → `_actions` `merge_rows` (エンジンが次の判定で まとめる · まとめる行の書類は参考) · 「まとめずに保存（別の行）」 = 今までどおり。エンジン `s3_human_merge_rows` が on の時だけ (`C01.RULES.mergeRows`)。
 - 元に戻す = まとめ先の行の 「⋯」 → 「まとめを元に戻す」 (undo)。

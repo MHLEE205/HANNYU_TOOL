@@ -1128,6 +1128,8 @@ window.C01 = window.C01 || {};
       return { cells: cells, dups: dups, live: true };
     });
   }
+  /* v0.3.50 (R10Q · #176): compass_done 記録の trial — C01.COMPASS.trialUntil (JST) まで true · その後 false */
+  function compassTrial() { return C01.compass.trialAt(C01.COMPASS, Date.now()); }
   function compassWriter() {
     return new C01.compass.Writer({ baseUrl: dvBase(), enabled: true, fetchFn: function (url, opt) { return dvFetch(url, opt); } });
   }
@@ -1154,7 +1156,7 @@ window.C01 = window.C01 || {};
     getSnap.then(function (snap) {
       if (!S.modal || S.modal.iv !== ivNo) return;
       var html = '<div class="c01-mh"><b>Compass入力' + (live ? '' : ' — 比較表') + '</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(md(iv.cy_cut)) + '</span>' +
-        (live ? ((C01.COMPASS || {}).trial && (C01.COMPASS || {}).badge !== false ? '<span class="c01-trial" data-trial>試験運用中</span>' : '')
+        (live ? (compassTrial() && (C01.COMPASS || {}).badge !== false ? '<span class="c01-trial" data-trial>試験運用中</span>' : '')
           : '') +           /* v0.3.48 (R10B · #298): 比較表 だけの時の 試験表示 は出さない (入力しない動作は そのまま) */
         '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>';
       if (!snap || snap.error) {
@@ -1267,7 +1269,7 @@ window.C01 = window.C01 || {};
       if (!ok.length && !bad.length) return;
       var a = C01.compass.compassDoneAction(actionId(), ivNo, S.me.email, jstNow(), ok.map(function (r) { return r.cell; }));
       a.value.failed = bad;
-      a.value.trial = !!(C01.COMPASS || {}).trial;
+      a.value.trial = compassTrial();               /* v0.3.50 (R10Q · #176): trialUntil (JST) から false */
       return (ok.length ? writeAction(a) : Promise.resolve()).then(function () {
         m.busy = false;
         toast('COMPASS 入力: 成功 ' + ok.length + '行' + (bad.length ? ' · 失敗 ' + bad.length + '行（赤の行）' : ''), bad.length ? 'warn' : 'success');

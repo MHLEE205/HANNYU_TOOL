@@ -7,8 +7,8 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.49',
-  date: '2026-11-17',
+  version: '0.3.50',
+  date: '2026-11-18',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
@@ -108,6 +108,8 @@ C01.COMPASS = {
   dvUrl: 'https://orgde512c6f.crm7.dynamics.com',
   /* 並行期間 (#176): compass_done 記録の trial (記録だけ · 入力の動きは同じ) */
   trial: true,
+  /* v0.3.50 (R10Q): trialUntil (JST) から 記録の trial = false (11/24 単独運用 · 端末の時間帯に関係なし · C01.compass.trialAt) */
+  trialUntil: '2026-11-24T00:00:00+09:00',
   /* v0.3.48 (R10B · #298): 窓の 「試験運用中」 の印 (false = 出さない · 記録の trial とは別) */
   badge: false
 };
