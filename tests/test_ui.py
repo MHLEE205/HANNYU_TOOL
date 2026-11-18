@@ -170,6 +170,9 @@ def photo_tab_checks(page, ctx, shots):
     ok("E 要確認 옆 창 写真 = 새 탭 (라이트박스 아님)", got and got[0].startswith("c01-photo-") and got[1] == 0, got)
 
 
+BOX_INJ = None
+
+
 def enh_checks(page, tab, shots):
     """v0.3.51 (R10V · #308): 写真 「拡大・補正」 = 押した時だけ canvas 로 만든 확인용 그림 · 원본 나란히 · 표시 문구 · 값 나란히 (다른 글자만 빨강) · 기존 동작 그대로."""
     root_n = page.evaluate("document.querySelectorAll('.c01-pv-enh').length")
@@ -220,6 +223,23 @@ def enh_checks(page, tab, shots):
     tab.keyboard.press("ArrowRight")
     ok("R10V 다른 사진으로 가면 닫힘 (그 사진 원본부터)", tab.locator("#pv-enhbox").count() == 0)
     tab.keyboard.press("ArrowLeft")
+    # R10X (엔진 v0.5.124 out_photo_box): 엔진 box 가 있는 사진 = 그 칸 (여백 25% · 최소 12px · 3배까지) 만 · 머리에 box 그대로 넘어옴
+    hb = tab.evaluate("C01.photoPage.head.photos.map(p => p.box || null)")
+    ok("R10X 엔진 box → 사진 탭 머리 그대로 (6번째만)", hb[5] == BOX_INJ and sum(1 for x in hb if x) == 1, hb)
+    tab.click(".c01-pv-th[data-go='5']")
+    tab.wait_for_function("() => { const e = document.querySelector('.c01-pv-img'); return e && e.complete && e.naturalWidth > 0; }", timeout=5000)
+    tab.click("#pv-enh")
+    tab.wait_for_selector("#pv-enhbox[data-done='1']", timeout=10000)
+    got = tab.evaluate("""() => { const i = document.querySelector('.c01-pv-img'), b = C01.photoPage.head.photos[5].box;
+        const r = C01.photoEnhance.cropRect(i.naturalWidth, i.naturalHeight, b), sc = Math.min(3, 1600 / Math.max(r.w, r.h));
+        const o = document.getElementById('pv-enh-out'), a = document.getElementById('pv-enh-orig');
+        return { whole: document.getElementById('pv-enhbox').dataset.whole, want: [Math.round(r.w * sc), Math.round(r.h * sc)], out: [o.width, o.height], orig: [a.width, a.height],
+                 img: [i.naturalWidth, i.naturalHeight], r: r }; }""")
+    ok("R10X 상자 있는 사진 = 그 칸만 자름 (data-whole 0) · 원본 · 보정 같은 크기 = 자른 칸 × 배율 (3배까지)",
+       got["whole"] == "0" and got["out"] == got["orig"] == got["want"] and got["want"][0] < got["img"][0] * 3 + 1 and not got["r"]["whole"], got)
+    tab.screenshot(path=str(shots / "photo_enh_box.png"))
+    tab.click("#pv-enh")
+    tab.click(".c01-pv-th[data-go='2']")
 
 
 def h4_checks(page, jj):
@@ -3268,12 +3288,83 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
     page.wait_for_timeout(400)
 
 
+def r10x_checks(page, root, shots, engine_frz):
+    """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
+    「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
+    sys.path.insert(0, engine_frz)
+    from engine.output import schema_check as SC  # noqa: E402
+    sch = {nm: json.loads((Path(engine_frz) / "engine" / "output" / "schema" / f"{nm}.schema.json").read_text(encoding="utf-8")) for nm in ("action", "queue")}
+    ok("R10X 엔진 v0.5.125 스키마 = input_slot_take · why compass_slot 있음", "input_slot_take" in json.dumps(sch["action"]) and "compass_slot" in json.dumps(sch["queue"]))
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    jp, qp = d / "jikkyou.json", d / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    gone = {(x.get("value") or {}).get(k) for x in actions(root) if x.get("action") in ("other_ct", "merge_rows") for k in ("container_id", "from_container_id")}
+    j = json.loads(jt0)
+    qcid = {x.get("container_id") for x in json.loads(qt0)["items"]}
+    elig = lambda iv_: [r for r in iv_["rows"] if r.get("ct") and r.get("slot_guid") and r["container_id"] not in gone and r["container_id"] not in qcid and not r.get("human")]   # noqa: E731
+    iv1 = next(x for x in j["ivs"] if len(elig(x)) >= 1 and len(x.get("slots") or []) >= 2)
+    ivn, ra = iv1["iv_no"], elig(iv1)[0]
+    comp_slot = next(s_["slot_guid"] for s_ in iv1["slots"] if s_["slot_guid"] != ra["slot_guid"])
+    ra.update({"status": "確認済", "engine_status": "自動OK", "reasons": [], "info": list(ra.get("info") or []) + ["INPUT_FROZEN"],
+               "input_frozen": {"at": "2026-11-08T10:00:00+09:00", "done_at": "2026-11-08T09:58:00+09:00", "action_id": "r10xcd000001", "src": "apply"}})
+    iv1["compass_input"] = [{"action_id": "r10xcd000001", "by": "staff.a@example.invalid", "at": "2026-11-08T09:58:00+09:00", "value": {"cells": [], "failed": []}}]
+    jp.write_text(dump(j), encoding="utf-8")
+    qa = {"queue_id": "7e7e7e7e7e7e7ec3", "kind": "入力後の差異", "iv_no": ivn, "ct": ra["ct"], "field": None, "container_id": ra["container_id"], "values": {},
+          "candidates": [], "files": [], "note": "slot", "resolved": None, "superseded": [], "cy_cut": iv1.get("cy_cut"), "cy_open": iv1.get("cy_open"), "issuer": None,
+          "field_sources": {}, "field_source_text": {}, "input_diff": {"slot": {"input": ra["slot_guid"], "new": comp_slot, "why": "compass_slot"}}}
+    q2 = json.loads(qt0)
+    q2["items"] += [qa]
+    q2["kinds"] = list(q2.get("kinds") or []) + ["入力後の差異"]
+    q2.setdefault("count", {})["入力後の差異"] = 1
+    qp.write_text(dump(q2), encoding="utf-8")
+    qe = SC.errors({**q2, "items": [qa]}, sch["queue"])
+    ok("R10X 시험 카드 = 엔진 v0.5.125 queue 스키마 (오류 0)", not qe, qe[:3])
+    page.keyboard.press("Escape")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, sel: null, editRow: null, filter: 'all', view: 'main', qkind: 'all'}); C01.app.tick(); }")
+    page.wait_for_timeout(800)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qiv = null; C01.state.qsel = q; C01.app.render(); }", qa["queue_id"])
+    page.wait_for_selector("#q-idtab")
+    it = page.locator(".c01-idiff").inner_text()
+    ok("R10X 카드 까닭 = 「COMPASS ではこの CT が別の枠」 · 빨강 = 枠 1",
+       "COMPASS ではこの CT が別の枠" in it and page.locator("#q-idtab tr.d[data-idf='slot']").count() == 1 and page.locator("#q-idtab tr.d").count() == 1, it[:200])
+    ok("R10X 버튼 = 「入力値のまま」 · 「COMPASSの配置を正とする」 · 「新しい値でCompass再入力」 없음",
+       page.locator("#q-submit").inner_text() == "入力値のまま" and page.locator("#q-idslot").count() == 1 and page.locator("#q-idslot").inner_text() == "COMPASSの配置を正とする"
+       and page.locator("#q-idtake").count() == 0, [page.locator("#q-idslot").count(), page.locator("#q-idtake").count()])
+    page.screenshot(path=str(shots / "r10x_idiff_compass_slot.png"))
+    ids1 = {x.get("action_id") for x in actions(root)}
+    page.evaluate("() => { window.__cfX = window.confirm; window.__cf = []; window.confirm = m => { window.__cf.push(m); return false; }; }")
+    page.click("#q-idslot")
+    page.wait_for_timeout(300)
+    n_cancel = len([x for x in actions(root) if x.get("action_id") not in ids1])
+    page.evaluate("() => { window.confirm = m => { window.__cf.push(m); return true; }; }")
+    page.click("#q-idslot")
+    page.wait_for_timeout(1200)
+    dl = page.evaluate("() => window.__cf")
+    nt = [x for x in actions(root) if x.get("action_id") not in ids1]
+    te = SC.errors(nt[0], sch["action"]) if nt else ["no"]
+    ok("R10X 「COMPASSの配置を正とする」 = 확인 창 (취소 = 기록 0) → input_slot_take 1 (queue_id · field null · value null) · 엔진 v0.5.125 스키마",
+       n_cancel == 0 and len(dl) == 2 and "COMPASS で今入っている枠" in dl[0] and len(nt) == 1 and nt[0]["action"] == "input_slot_take"
+       and nt[0]["queue_id"] == qa["queue_id"] and nt[0]["field"] is None and nt[0]["value"] is None and nt[0]["iv"] == ivn and not te, [dl[:1], nt, te])
+    page.evaluate("q => { C01.state.qkind = 'done'; C01.state.qsel = q; C01.app.render(); }", qa["queue_id"])
+    page.wait_for_timeout(400)
+    okmsg = page.locator(".c01-okmsg").inner_text() if page.locator(".c01-okmsg").count() else ""
+    ok("R10X 완료 = 「COMPASS の枠を正としました」", "COMPASS の枠を正としました" in okmsg, okmsg)
+    page.evaluate("() => { if (window.__cfX) window.confirm = window.__cfX; C01.state.qkind = 'all'; C01.state.view = 'main'; C01.state.filter = 'all'; }")
+    jp.write_text(jt0, encoding="utf-8")
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(400)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
     ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r68")
     ap.add_argument("--no-wait30", action="store_true")
     ap.add_argument("--engine-r10u", default=r"C:\LEENAI_C01_V2\engine_r10u")   # v0.3.52 (R10W): 엔진 v0.5.122 스키마 (input_keep · 入力後の差異)
+    ap.add_argument("--engine-box", default=r"C:\LEENAI_C01_V2\engine_r10x")   # R10X: 엔진 v0.5.124 photos.schema (box)
+    ap.add_argument("--engine-frz", default=r"C:\LEENAI_C01_V2\engine_r10xf")   # R10X: 엔진 v0.5.125 스키마 (input_slot_take · why compass_slot)
     a = ap.parse_args()
     if not (TOOL / "fixtures" / "_data" / "jikkyou.json").is_file():
         sys.exit("fixtures/_data 없음 — 먼저 python tools/make_test_data.py (레포에 넣지 않는 가명 시험 데이터)")
@@ -3282,6 +3373,19 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="c01tool_"))
     root = tmp / "data"
     shutil.copytree(TOOL / "fixtures", root)
+    # R10X (엔진 v0.5.124 · out_photo_box): 가명 사진 1장 (TST2611-01 · 9장 줄의 6번째) 에 엔진 칸 상자 — 받는 쪽 대조 (엔진 photos.schema box 키)
+    global BOX_INJ
+    pp_ = root / "_data" / "photos" / "TST2611-01.json"
+    pj_ = json.loads(pp_.read_text(encoding="utf-8"))
+    c9_ = next(c for c in pj_["containers"] if len(c["photos"]) == 9)
+    BOX_INJ = {"x0": 300, "y0": 400, "x1": 700, "y1": 520, "text_rotation": 0, "field": "seal"}
+    c9_["photos"][5]["box"] = dict(BOX_INJ)
+    pp_.write_text(json.dumps(pj_, ensure_ascii=False, indent=1) + chr(10), encoding="utf-8")
+    bsp_ = Path(a.engine_box) / "engine" / "output" / "schema" / "photos.schema.json"
+    bs_ = json.loads(bsp_.read_text(encoding="utf-8"))["properties"]["containers"]["items"]["properties"]["photos"]["items"]["properties"].get("box") if bsp_.is_file() else None
+    ok("R10X 받는 쪽 대조: 엔진 photos.schema box 키 = TOOL 이 읽는 키 (x0 · y0 · x1 · y1 · text_rotation)",
+       bool(bs_) and set(BOX_INJ) <= set(bs_["properties"]) and {"x0", "y0", "x1", "y1", "text_rotation"} <= set(bs_["required"])
+       and all(("box." + k) in (TOOL / "js" / "photo.js").read_text(encoding="utf-8") for k in ("x0", "y0", "x1", "y1", "text_rotation")), bs_ and sorted(bs_["properties"]))
     # v0.2.2 (#109 ①): 사본 _data 에 「다시 판정 값이 사람 값과 다름」 정보를 넣음 (엔진 data_json 의 info 형식 그대로)
     global HUMAN_SEAL
     jp = root / "_data" / "jikkyou.json"
@@ -3325,11 +3429,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.52", page.title() == "LEENAI C-01 搬入票 v0.3.52", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.53", page.title() == "LEENAI C-01 搬入票 v0.3.53", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.52" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.53" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -3857,6 +3961,7 @@ def main():
             r9y_checks(page, root, shots, a.engine)
             r10h_checks(page, root, shots, a.engine)
             r10w_checks(page, root, shots, a.engine, a.engine_r10u)
+            r10x_checks(page, root, shots, a.engine_frz)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
