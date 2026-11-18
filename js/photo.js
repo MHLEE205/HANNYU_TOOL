@@ -2,7 +2,11 @@
    - 実況表 · 確認・入力 で 写真 を押す → 同じウィンドウの新しいタブ (名前 = 'c01-photo-' + 行キーのハッシュ · アドレスは ?k=ハッシュ だけ)
    - ログインしない · Graph を呼ばない: 元の画面 (window.opener = 同じオリジンの TOOL) に postMessage で頼み、見出しと写真 (Blob) を受け取る
      (LEENAI_COMMON のトークンは元のタブのメモリだけ — 新しいタブとは共有されないため)
-   - 見出し = IV · CT · 業者 · 枚数 / 写真を大きく + サムネイル帯 + ← → キー · 写真の種類 · 4 テーマ (leenai_theme) */
+   - 見出し = IV · CT · 業者 · 枚数 / 写真を大きく + サムネイル帯 + ← → キー · 写真の種類 · 4 テーマ (leenai_theme)
+   - v0.3.51 (R10V · #308): 「拡大・補正」 = 押した時だけ この画面 (canvas) で作る確認用の画像。番号の枠 (エンジン box · 無ければ写真全体) を切って
+     まっすぐにし、明るさ · コントラスト (CLAHE · clip 1.5) だけ。数字の形を変える処理 (生成 AI · 超解像 · ぼけ戻し) はしない。
+     鮮明化は 0 (R10V 20 枚の測定: clip 2.0 + 鮮明化 0.5 = 刻印の地の模様が強まり 読み取りが 3 枚で変わった · clip 1.5 + 鮮明化 0 = 数字の違い 0)
+     原本は常に横に並べる · 「補正画像 · 判断は原本と搬入票で」 · 元のファイルは変えない · AI 費用 0 */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -38,7 +42,7 @@ window.C01 = window.C01 || {};
   }
   C01.photoKind = photoKind;
 
-  var P = { k: '', idx: 0, head: null, imgs: {}, errs: {}, tries: 0, timer: null, scale: 1, gone: false };
+  var P = { k: '', idx: 0, head: null, imgs: {}, errs: {}, tries: 0, timer: null, scale: 1, gone: false, enh: -1, enhMs: 0 };
   C01.photoPage = P;
 
   function $(id) { return document.getElementById(id); }
@@ -84,9 +88,15 @@ window.C01 = window.C01 || {};
     var ph = h.photos[i], k = photoKind(ph);
     $('pv-main').innerHTML =
       '<div class="c01-pv-bar"><span class="c01-pv-pos" id="pv-pos">' + (i + 1) + ' / ' + n + '</span>' + chip(k, 'big') +
-      '<span class="c01-pv-name">' + esc(ph.label && !k.text ? ph.label : '') + '</span></div>' +
+      '<span class="c01-pv-name">' + esc(ph.label && !k.text ? ph.label : '') + '</span>' +
+      '<button class="c01-pv-enhbtn' + (P.enh === i ? ' on' : '') + '" id="pv-enh"' + (P.imgs[i] ? '' : ' disabled') + ' title="番号の所を切って明るさ・コントラストだけ整えた確認用の画像（原本と並べて表示 · 元のファイルは変えない）">拡大・補正</button></div>' +
       '<div class="c01-pv-stage-row"><button class="c01-pv-nav" id="pv-prev" aria-label="前の写真">‹</button>' +
-      '<div class="c01-pv-stage" id="pv-stage">' + imgOrMsg(i, 'c01-pv-img') + '</div>' +
+      (P.enh === i ? '<div class="c01-pv-stage enh" id="pv-stage">' + imgOrMsg(i, 'c01-pv-img c01-pv-src0') +       /* 拡大・補正 中 = 大きい写真の所に 原本 · 補正 を並べる (元の img は隠して canvas の元に使う) */
+        '<div class="c01-pv-enh" id="pv-enhbox"><div class="c01-pv-enhpair">' +
+        '<figure class="c01-pv-enhfig"><figcaption>原本</figcaption><canvas id="pv-enh-orig"></canvas></figure>' +
+        '<figure class="c01-pv-enhfig enh"><figcaption>補正画像 · 判断は原本と搬入票で</figcaption><div class="c01-pv-enhwrap"><canvas id="pv-enh-out"></canvas>' +
+        '<span class="c01-pv-enhmark">補正画像 · 判断は原本と搬入票で</span></div></figure></div>' + valsTable(h.vals) + '</div></div>'
+        : '<div class="c01-pv-stage" id="pv-stage">' + imgOrMsg(i, 'c01-pv-img') + '</div>') +
       '<button class="c01-pv-nav" id="pv-next" aria-label="次の写真">›</button></div>' +
       '<div class="c01-pv-strip">' + h.photos.map(function (q, j) {
         var kk = photoKind(q);
@@ -94,15 +104,117 @@ window.C01 = window.C01 || {};
           imgOrMsg(j, 'c01-pv-thimg') + chip(kk) + '</button>';
       }).join('') + '</div>';
     P.scale = 1;
+    $('pv-enh').onclick = function () { P.enh = P.enh === P.idx ? -1 : P.idx; render(); };
+    if (P.enh === i) drawEnh(i);
     $('pv-prev').onclick = function () { go(P.idx - 1); };
     $('pv-next').onclick = function () { go(P.idx + 1); };
     document.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { go(+b.getAttribute('data-go')); }; });
     var img = document.querySelector('.c01-pv-img');
-    $('pv-stage').onwheel = function (e) { e.preventDefault(); P.scale = Math.max(1, Math.min(4, P.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (img) img.style.transform = 'scale(' + P.scale + ')'; };
+    if (P.enh !== i) $('pv-stage').onwheel = function (e) { e.preventDefault(); P.scale = Math.max(1, Math.min(4, P.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (img) img.style.transform = 'scale(' + P.scale + ')'; };
     var on = document.querySelector('.c01-pv-th.on');
     if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
-  function go(i) { P.idx = i; render(); }
+  function go(i) { P.idx = i; P.enh = -1; render(); }
+
+  /* ── v0.3.51 (R10V · #308) 拡大・補正 ── */
+  var ENH = { MAX_EDGE: 1600, ZOOM_MAX: 3, MARGIN: 0.25, MIN_PAD: 12, TILES: 8, CLIP: 1.5, SHARP: 0 };
+  /* 切る範囲 (エンジン field_box と同じ 千分率 x0..x1 · y0..y1 · 余白 25%) · 無ければ全体 */
+  function cropRect(w, h, box) {
+    if (!box || box.found === false) return { x: 0, y: 0, w: w, h: h, rot: 0, whole: true };
+    var c = function (v) { return Math.max(0, Math.min(1000, +v || 0)); };
+    var x0 = c(box.x0) * w / 1000, x1 = c(box.x1) * w / 1000, y0 = c(box.y0) * h / 1000, y1 = c(box.y1) * h / 1000;
+    if (x1 - x0 < 3 || y1 - y0 < 3) return { x: 0, y: 0, w: w, h: h, rot: 0, whole: true };
+    var px = Math.max(ENH.MIN_PAD, (x1 - x0) * ENH.MARGIN), py = Math.max(ENH.MIN_PAD, (y1 - y0) * ENH.MARGIN);
+    var a = Math.max(0, Math.floor(x0 - px)), b = Math.max(0, Math.floor(y0 - py));
+    var rr = +box.text_rotation || +box.rot || 0, rot = [0, 90, 180, 270].indexOf(rr) >= 0 ? rr : 0;
+    return { x: a, y: b, w: Math.min(w, Math.ceil(x1 + px)) - a, h: Math.min(h, Math.ceil(y1 + py)) - b, rot: rot, whole: false };
+  }
+  /* 切った範囲 → canvas (まっすぐに · 大きさ = 長い辺 MAX_EDGE まで · 切った時は 3 倍まで拡大) */
+  function drawCrop(cv, img, r) {
+    var sc = Math.min(r.whole ? 1 : ENH.ZOOM_MAX, ENH.MAX_EDGE / Math.max(r.w, r.h));
+    var dw = Math.max(1, Math.round(r.w * sc)), dh = Math.max(1, Math.round(r.h * sc));
+    var turn = r.rot % 180 !== 0;
+    cv.width = turn ? dh : dw; cv.height = turn ? dw : dh;
+    var g = cv.getContext('2d');
+    g.save();
+    g.translate(cv.width / 2, cv.height / 2);
+    g.rotate(-r.rot * Math.PI / 180);                /* 文字の回り (text_rotation) を戻す */
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    g.drawImage(img, r.x, r.y, r.w, r.h, -dw / 2, -dh / 2, dw, dh);
+    g.restore();
+    return g;
+  }
+  /* 明るさ (Y) だけ: CLAHE (タイル 8×8 · clip 1.5 · 双線形) → 鮮明化 (3×3 ぼかしとの差 × SHARP · 今は 0 = しない) · 色は Y の比で戻す。形を作る処理なし */
+  function enhanceData(d, w, h) {
+    var n = w * h, Y = new Float32Array(n), i, j;
+    for (i = 0; i < n; i++) Y[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    var T = ENH.TILES, tw = w / T, th = h / T, maps = [];
+    for (var ty = 0; ty < T; ty++) for (var tx = 0; tx < T; tx++) {
+      var xa = Math.floor(tx * tw), xb = Math.max(xa + 1, Math.floor((tx + 1) * tw)), ya = Math.floor(ty * th), yb = Math.max(ya + 1, Math.floor((ty + 1) * th));
+      var hist = new Float32Array(256), cnt = 0;
+      for (j = ya; j < Math.min(yb, h); j++) for (i = xa; i < Math.min(xb, w); i++) { hist[Math.min(255, Y[j * w + i] | 0)]++; cnt++; }
+      var lim = Math.max(1, ENH.CLIP * cnt / 256), ex = 0;
+      for (i = 0; i < 256; i++) if (hist[i] > lim) { ex += hist[i] - lim; hist[i] = lim; }
+      var add = ex / 256, m = new Float32Array(256), acc = 0;
+      for (i = 0; i < 256; i++) { acc += hist[i] + add; m[i] = cnt ? acc * 255 / cnt : i; }
+      maps.push(m);
+    }
+    var Z = new Float32Array(n);
+    for (j = 0; j < h; j++) {
+      var gy = Math.min(T - 1, Math.max(0, j / th - 0.5)), y0 = Math.floor(gy), y1 = Math.min(T - 1, y0 + 1), fy = gy - y0;
+      for (i = 0; i < w; i++) {
+        var gx = Math.min(T - 1, Math.max(0, i / tw - 0.5)), x0 = Math.floor(gx), x1 = Math.min(T - 1, x0 + 1), fx = gx - x0, v = Math.min(255, Y[j * w + i] | 0);
+        Z[j * w + i] = (maps[y0 * T + x0][v] * (1 - fx) + maps[y0 * T + x1][v] * fx) * (1 - fy) + (maps[y1 * T + x0][v] * (1 - fx) + maps[y1 * T + x1][v] * fx) * fy;
+      }
+    }
+    for (j = 0; j < h; j++) for (i = 0; i < w; i++) {
+      var s = 0, c = 0;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+        var yy = j + dy, xx = i + dx;
+        if (yy >= 0 && yy < h && xx >= 0 && xx < w) { s += Z[yy * w + xx]; c++; }
+      }
+      var k = j * w + i, o = Math.max(0, Math.min(255, Z[k] + ENH.SHARP * (Z[k] - s / c))), f = Y[k] > 0.5 ? o / Y[k] : 0;
+      for (var ch = 0; ch < 3; ch++) d[k * 4 + ch] = Y[k] > 0.5 ? Math.max(0, Math.min(255, d[k * 4 + ch] * f)) : o;
+    }
+    return d;
+  }
+  C01.photoEnhance = { cropRect: cropRect, enhanceData: enhanceData, drawCrop: drawCrop, ENH: ENH };
+  function drawEnh(i) {
+    var src = document.querySelector('.c01-pv-img'), a = $('pv-enh-orig'), b = $('pv-enh-out');
+    if (!src || !a || !b) return;
+    var run = function () {
+      var now = function () { return (window.performance && performance.now) ? performance.now() : Date.now(); };
+      var t0 = now();
+      var ph = (P.head.photos || [])[i] || {}, r = cropRect(src.naturalWidth, src.naturalHeight, ph.box);
+      drawCrop(a, src, r);
+      var g = drawCrop(b, src, r), im = g.getImageData(0, 0, b.width, b.height);
+      enhanceData(im.data, b.width, b.height);
+      g.putImageData(im, 0, 0);
+      P.enhMs = Math.round(now() - t0);
+      var bx = $('pv-enhbox');
+      if (bx) { bx.setAttribute('data-ms', P.enhMs); bx.setAttribute('data-whole', r.whole ? '1' : '0'); bx.setAttribute('data-done', '1'); }
+    };
+    if (src.complete && src.naturalWidth) run(); else src.onload = run;
+  }
+  /* 値の並び: エンジンの値 · 出処 (搬入票 · 写真 …) — エンジンの値と違う文字だけ赤 */
+  function diffHtml(v, base) {
+    v = String(v || ''); base = String(base || '');
+    if (!base) return esc(v);
+    var out = '';
+    for (var q = 0; q < v.length; q++) out += v[q] === base[q] ? esc(v[q]) : '<b class="c01-pv-dif">' + esc(v[q]) + '</b>';
+    return out;
+  }
+  function valsTable(vals) {
+    if (!vals) return '';
+    var rows = [['ct', 'CT'], ['seal', 'シール']].filter(function (x) { return vals[x[0]] && (vals[x[0]].engine || (vals[x[0]].srcs || []).length); });
+    if (!rows.length) return '<p class="c01-pv-enhnote">値の比較はありません（エンジンの値なし）</p>';
+    return '<table class="c01-pv-vals"><tbody>' + rows.map(function (x) {
+      var v = vals[x[0]];
+      return '<tr><th>' + x[1] + '</th><td><span class="c01-pv-src">エンジン</span><span class="mono">' + esc(v.engine || '—') + '</span></td>' +
+        (v.srcs || []).map(function (s) { return '<td><span class="c01-pv-src">' + esc(s.src) + '</span><span class="mono">' + diffHtml(s.value, v.engine) + '</span></td>'; }).join('') + '</tr>';
+    }).join('') + '</tbody></table>';
+  }
+  C01.photoValsTable = valsTable;
 
   document.addEventListener('keydown', function (e) {
     if (!P.head) return;

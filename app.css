@@ -49,6 +49,9 @@
 .c01-f { background: none; border: none; padding: 4px 2px; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; }
 .c01-f.on { text-decoration: underline; }
 .c01-f-check { color: var(--c-diff); } .c01-f-compass { color: var(--accent); } .c01-f-remind { color: var(--text2); }
+.c01-f-frozen { color: var(--ok); }   /* v0.3.52 (R10W · #307): 確認済(入力済) の絞り込み */
+.st-ok.c01-frozen { white-space: nowrap; }
+.c01-idiff .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .c01-chk { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text2); }
 
 /* 実況表 */
@@ -276,6 +279,18 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-pv-main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 10px 18px 0; }
 .c01-pv-bar { display: flex; align-items: center; gap: 10px; min-height: 30px; } .c01-pv-pos { font-weight: 600; } .c01-pv-name { color: var(--text2); }
 .c01-pv-stage-row { flex: 1 1 auto; display: flex; align-items: center; gap: 12px; min-height: 0; }
+/* v0.3.51 (R10V · #308) 拡大・補正 */
+.c01-pv-enhbtn { margin-left: auto; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; }
+.c01-pv-enhbtn.on { border-color: var(--accent, #4a8); font-weight: 600; } .c01-pv-enhbtn:disabled { opacity: .5; cursor: default; }
+.c01-pv-enh { border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.c01-pv-enhpair { display: flex; gap: 10px; align-items: flex-start; } .c01-pv-enhfig { flex: 1 1 0; margin: 0; min-width: 0; }
+.c01-pv-enhfig figcaption { font-size: 12px; color: var(--text2); margin-bottom: 4px; } .c01-pv-enhfig.enh figcaption { color: #d08a00; font-weight: 600; }
+.c01-pv-enhfig canvas { max-width: 100%; max-height: calc(100vh - 330px); display: block; border-radius: 6px; background: #000; }
+.c01-pv-stage.enh { display: block; overflow: auto; padding: 8px; } .c01-pv-stage.enh .c01-pv-src0 { display: none; } .c01-pv-stage.enh .c01-pv-enh { border: 0; padding: 0; }
+.c01-pv-enhwrap { position: relative; display: inline-block; max-width: 100%; }
+.c01-pv-enhmark { position: absolute; left: 6px; top: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(208, 138, 0, .85); color: #fff; font-size: 12px; font-weight: 600; pointer-events: none; }
+.c01-pv-vals { border-collapse: collapse; font-size: 13px; align-self: flex-start; width: auto; } .c01-pv-vals th, .c01-pv-vals td { padding: 3px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.c01-pv-src { display: inline-block; min-width: 48px; color: var(--text2); font-size: 11px; margin-right: 6px; } .c01-pv-dif { color: #e5484d; } .c01-pv-enhnote { font-size: 12px; color: var(--text2); margin: 0; }
 .c01-pv-stage { flex: 1 1 auto; height: calc(100vh - 250px); min-height: 240px; border-radius: 10px; background: var(--surface2, var(--surface)); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .c01-pv-img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .1s; }
 .c01-pv-nav { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 26px; line-height: 1; }
