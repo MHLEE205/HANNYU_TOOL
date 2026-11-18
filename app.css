@@ -49,7 +49,7 @@
 .c01-f { background: none; border: none; padding: 4px 2px; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; }
 .c01-f.on { text-decoration: underline; }
 .c01-f-check { color: var(--c-diff); } .c01-f-compass { color: var(--accent); } .c01-f-remind { color: var(--text2); }
-.c01-f-frozen { color: var(--ok); }   /* v0.3.52 (R10W · #307): 確認済(入力済) の絞り込み */
+.c01-f-frozen { color: var(--ok); }   /* v0.3.52 (R10W · #307): 確認済（入力済） の絞り込み */
 .st-ok.c01-frozen { white-space: nowrap; }
 .c01-idiff .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .c01-chk { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text2); }
@@ -541,3 +541,10 @@ body.c01-rdr-on #c01-main { margin-right: 416px; }
 .c01-mergebadge { background: #e8f0fe; }
 .c01-modal-merge { max-width: 680px; }
 .c01-modal-merge .c01-mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
+/* v0.3.55 (R10Y · #313): 写真の拡大 · 移動 (js/zoompan.js) — 枠の中だけ (指の操作も枠の中だけ · 外のスクロールはそのまま) */
+.c01-zp { touch-action: none; user-select: none; -webkit-user-select: none; } .c01-zp img, .c01-zp canvas { -webkit-user-drag: none; }
+.c01-zp.c01-zp-on { cursor: grab; } .c01-zp.c01-zp-drag { cursor: grabbing; }
+.c01-zp-bar { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; }
+.c01-zp-b { min-width: 30px; height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border, #555); background: var(--surface, #2A2A26); color: var(--text, #F2F2EE); cursor: pointer; font-size: 14px; }
+.c01-zp-fit { font-size: 12px; } .c01-zp-v { min-width: 44px; text-align: center; font-size: 12px; color: var(--text2, #bbb); font-variant-numeric: tabular-nums; }
+.c01-pv-enhfig { overflow: hidden; } .c01-pv-enhwrap { overflow: hidden; }

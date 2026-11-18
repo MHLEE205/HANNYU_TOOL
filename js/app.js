@@ -123,7 +123,7 @@ window.C01 = window.C01 || {};
   var IDIFF_WHY = { record: 'Compass入力の記録と、今の行の値・枠が違います', new_doc: 'Compass入力の後で届いた書類・写真の値が、入力した値と違います',
     compass_slot: 'Compass入力の後で、COMPASS ではこの CT が別の枠に入っています' };
   var IDIFF_FIELDS = [['slot', '枠'], ['ct', 'CT番号'], ['seal', 'シール番号'], ['n_w', '正味重量'], ['t_w', '風袋重量'], ['bales', 'ベール数']];
-  var FROZEN_LABEL = '確認済(入力済)';
+  var FROZEN_LABEL = '確認済（入力済）';
   function idiffSlotText(iv, g) {
     if (!g) return '（なし）';
     var s = ((iv && iv.slots) || []).filter(function (x) { return x.slot_guid === g; })[0];
@@ -812,7 +812,7 @@ window.C01 = window.C01 || {};
         var candTitle = cand ? (cand.level === 'ct' ? '同じ CT' : '同じ BKG') + 'の' + (r.has_docs === false ? '搬入票' : '写真') + 'らしいファイルが受信済みメールにあります（' +
           (cand.where || []).join(' / ') + (cand.recv && cand.recv.length ? ' · ' + cand.recv.join(' / ') : '') + '）— 未着ではない可能性 · 催促の対象外' : '';
         var candQid = cand && cand.qid && (cand.files || []).length ? cand.qid : null;    /* v0.3.31 (R8V #254): 候補ファイルがある時だけ押せる */
-        var frozen = !!r.input_frozen && x.st === '確認済' && !ivUndo && !(ov.take && ov.take[r.container_id]);   /* v0.3.52 (R10W · #307): エンジン input_frozen = 確認済(入力済) */
+        var frozen = !!r.input_frozen && x.st === '確認済' && !ivUndo && !(ov.take && ov.take[r.container_id]);   /* v0.3.52 (R10W · #307): エンジン input_frozen = 確認済（入力済） */
         return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, rTitle: rTitle, wait: wait, openQ: openQ, candTitle: candTitle, candQid: candQid, frozen: frozen };
       });
       var unarr = (iv.mail_missing || []).map(function (m) {
@@ -2419,7 +2419,7 @@ window.C01 = window.C01 || {};
     el.hidden = false;
     el.innerHTML = '<div class="c01-lb" role="dialog" aria-label="写真">' +
       '<div class="c01-lb-h"><span class="mono">' + esc(d.title) + '</span><span class="c">' + (i + 1) + ' / ' + n + ' · ' + esc(p.label || ('写真 ' + (i + 1))) + '</span>' +
-      '<span class="c01-flex"></span><button class="c01-lb-x" id="lb-close" aria-label="閉じる">✕</button></div>' +
+      '<span class="c01-flex"></span>' + (C01.zoomBar ? C01.zoomBar('lb-z') : '') + '<button class="c01-lb-x" id="lb-close" aria-label="閉じる">✕</button></div>' +
       '<div class="c01-lb-m"><button class="c01-lb-nav" id="lb-prev" aria-label="前の写真">‹</button>' +
       '<div class="c01-lb-img" id="lb-stage">' + imgTag(p.path, 'c01-lbimg', p.label) + '</div>' +
       '<button class="c01-lb-nav" id="lb-next" aria-label="次の写真">›</button></div>' +
@@ -2431,13 +2431,16 @@ window.C01 = window.C01 || {};
     $('lb-prev').onclick = function () { S.lb.idx -= 1; renderLightbox(); };
     $('lb-next').onclick = function () { S.lb.idx += 1; renderLightbox(); };
     el.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { S.lb.idx = +b.getAttribute('data-go'); renderLightbox(); }; });
-    var img = el.querySelector('.c01-lbimg'), scale = 1;
-    $('lb-stage').onwheel = function (e) { e.preventDefault(); scale = Math.max(1, Math.min(4, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (img) img.style.transform = 'scale(' + scale + ')'; };
+    /* v0.3.55 (R10Y · ZHAN 提案 · #313): 写真タブと同じ 拡大 · 移動 (js/zoompan.js) — 次の写真 · 閉じる = 元の大きさ (描き直すたびに 1 倍) */
+    var img = el.querySelector('.c01-lbimg');
+    S.lbzp = null;
+    if (C01.ZoomPan && img) S.lbzp = C01.zoomBind(new C01.ZoomPan($('lb-stage'), [img], { onSwipe: function (d) { S.lb.idx += d; renderLightbox(); } }), 'lb-z');
   }
   document.addEventListener('keydown', function (e) {
     if (!S.lb && e.key === 'Escape' && S.askDr && S.view === 'input' && !S.qedit) { askToggle(false); return; }   /* v0.3.36 (R9F · #267): Esc = ドロアーを閉じる */
     if (!S.lb && e.key === 'Escape' && S.gDr && !S.modal) { gaskToggle(false); return; }                              /* v0.3.39 (R9L): 全体の AI 相談も Esc で閉じる */
     if (!S.lb) return;
+    if (S.lbzp && S.lbzp.keyHandled(e)) return;                                                                        /* v0.3.55: 拡大中の矢印 = 移動 */
     if (e.key === 'ArrowLeft') { S.lb.idx -= 1; renderLightbox(); }
     if (e.key === 'ArrowRight') { S.lb.idx += 1; renderLightbox(); }
     if (e.key === 'Escape') { S.lb = null; renderLightbox(); }

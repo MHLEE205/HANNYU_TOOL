@@ -6,7 +6,9 @@
    - v0.3.51 (R10V · #308): 「拡大・補正」 = 押した時だけ この画面 (canvas) で作る確認用の画像。番号の枠 (エンジン box · 無ければ写真全体) を切って
      まっすぐにし、明るさ · コントラスト (CLAHE · clip 1.5) だけ。数字の形を変える処理 (生成 AI · 超解像 · ぼけ戻し) はしない。
      鮮明化は 0 (R10V 20 枚の測定: clip 2.0 + 鮮明化 0.5 = 刻印の地の模様が強まり 読み取りが 3 枚で変わった · clip 1.5 + 鮮明化 0 = 数字の違い 0)
-     原本は常に横に並べる · 「補正画像 · 判断は原本と搬入票で」 · 元のファイルは変えない · AI 費用 0 */
+     原本は常に横に並べる · 「補正画像 · 判断は原本と搬入票で」 · 元のファイルは変えない · AI 費用 0
+   - v0.3.55 (R10Y · ZHAN 提案 · #313): 大きい写真 · 拡大・補正 の 2 枚 = 拡大 (ホイール · ＋− · ダブルクリック 2.5 倍 · 指 2 本 · 1〜6 倍) + 引っ張って移動 ·
+     矢印キー (拡大中 = 移動 · 1 倍 = 前へ / 次へ) · 「全体表示」 · 次の写真へ = 元の大きさ (js/zoompan.js · CSS transform だけ)。2 枚は同じ倍率 · 同じ位置 */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -42,7 +44,7 @@ window.C01 = window.C01 || {};
   }
   C01.photoKind = photoKind;
 
-  var P = { k: '', idx: 0, head: null, imgs: {}, errs: {}, tries: 0, timer: null, scale: 1, gone: false, enh: -1, enhMs: 0 };
+  var P = { k: '', idx: 0, head: null, imgs: {}, errs: {}, tries: 0, timer: null, scale: 1, gone: false, enh: -1, enhMs: 0, zp: null, zs: null };
   C01.photoPage = P;
 
   function $(id) { return document.getElementById(id); }
@@ -89,6 +91,7 @@ window.C01 = window.C01 || {};
     $('pv-main').innerHTML =
       '<div class="c01-pv-bar"><span class="c01-pv-pos" id="pv-pos">' + (i + 1) + ' / ' + n + '</span>' + chip(k, 'big') +
       '<span class="c01-pv-name">' + esc(ph.label && !k.text ? ph.label : '') + '</span>' +
+      (C01.zoomBar ? C01.zoomBar('pv-z') : '') +
       '<button class="c01-pv-enhbtn' + (P.enh === i ? ' on' : '') + '" id="pv-enh"' + (P.imgs[i] ? '' : ' disabled') + ' title="番号の所を切って明るさ・コントラストだけ整えた確認用の画像（原本と並べて表示 · 元のファイルは変えない）">拡大・補正</button></div>' +
       '<div class="c01-pv-stage-row"><button class="c01-pv-nav" id="pv-prev" aria-label="前の写真">‹</button>' +
       (P.enh === i ? '<div class="c01-pv-stage enh" id="pv-stage">' + imgOrMsg(i, 'c01-pv-img c01-pv-src0') +       /* 拡大・補正 中 = 大きい写真の所に 原本 · 補正 を並べる (元の img は隠して canvas の元に使う) */
@@ -104,17 +107,26 @@ window.C01 = window.C01 || {};
           imgOrMsg(j, 'c01-pv-thimg') + chip(kk) + '</button>';
       }).join('') + '</div>';
     P.scale = 1;
-    $('pv-enh').onclick = function () { P.enh = P.enh === P.idx ? -1 : P.idx; render(); };
+    $('pv-enh').onclick = function () { P.enh = P.enh === P.idx ? -1 : P.idx; P.zs = null; render(); };
     if (P.enh === i) drawEnh(i);
     $('pv-prev').onclick = function () { go(P.idx - 1); };
     $('pv-next').onclick = function () { go(P.idx + 1); };
     document.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { go(+b.getAttribute('data-go')); }; });
-    var img = document.querySelector('.c01-pv-img');
-    if (P.enh !== i) $('pv-stage').onwheel = function (e) { e.preventDefault(); P.scale = Math.max(1, Math.min(4, P.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (img) img.style.transform = 'scale(' + P.scale + ')'; };
+    /* v0.3.55 (R10Y · #313): 拡大 · 移動 — 写真が届いて描き直しても 同じ写真 · 同じ表示なら倍率 · 位置を保つ (次の写真 · 閉じる = 元の大きさ) */
+    var img = document.querySelector('.c01-pv-img'), zkey = (P.enh === i ? 'e' : 'p') + i;
+    var zst = P.enh === i ? document.querySelector('#pv-enhbox .c01-pv-enhpair') : $('pv-stage');
+    var ztg = P.enh === i ? [$('pv-enh-orig'), $('pv-enh-out')] : [img];
+    var keep = P.zs && P.zs.key === zkey ? P.zs : null;
+    P.zp = null;
+    if (C01.ZoomPan && zst && ztg.filter(Boolean).length) {
+      P.zp = new C01.ZoomPan(zst, ztg, { onSwipe: function (d) { go(P.idx + d); }, onChange: function (s) { P.zs = { key: zkey, s: s, fx: P.zp ? P.zp.fx : 0, fy: P.zp ? P.zp.fy : 0 }; } });
+      if (keep) { P.zp.s = keep.s; P.zp.fx = keep.fx; P.zp.fy = keep.fy; }
+      C01.zoomBind(P.zp, 'pv-z');
+    }
     var on = document.querySelector('.c01-pv-th.on');
     if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
-  function go(i) { P.idx = i; P.enh = -1; render(); }
+  function go(i) { P.idx = i; P.enh = -1; P.zs = null; render(); }
 
   /* ── v0.3.51 (R10V · #308) 拡大・補正 ── */
   var ENH = { MAX_EDGE: 1600, ZOOM_MAX: 3, MARGIN: 0.25, MIN_PAD: 12, TILES: 8, CLIP: 1.5, SHARP: 0 };
@@ -218,6 +230,7 @@ window.C01 = window.C01 || {};
 
   document.addEventListener('keydown', function (e) {
     if (!P.head) return;
+    if (P.zp && P.zp.keyHandled(e)) return;                            /* v0.3.55: 拡大中の矢印 = 移動 */
     if (e.key === 'ArrowLeft') { go(P.idx - 1); e.preventDefault(); }
     if (e.key === 'ArrowRight') { go(P.idx + 1); e.preventDefault(); }
   });

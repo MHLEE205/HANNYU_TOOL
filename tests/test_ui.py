@@ -21,7 +21,7 @@ ALLOWED = ("http://127.0.0.1", "https://mhlee205.github.io/LEENAI_COMMON/")
 RES = {"checks": [], "console_errors": [], "external_requests": []}
 
 
-FROZEN_TXT = "確認済(入力済)"   # v0.3.52 (R10W · #307)
+FROZEN_TXT = "確認済（入力済）"   # v0.3.52 (R10W · #307)
 
 
 def ok(name, cond, detail=""):
@@ -116,6 +116,7 @@ def photo_tab_checks(page, ctx, shots):
     ok("E 종류 = 엔진 kind (interior 空 · cargo 積込中 · fill full FULL · door_closed 扉閉め · door 扉 · SEAL · COTECNA · 없음 = 표시 없음)",
        km == ["空コンテナ", "積込中", "FULL", "扉閉め", "扉", "SEAL", "COTECNA", "", ""], km)
     enh_checks(page, tab, shots)
+    zoom_checks(page, tab, shots)
     th = []
     for i in range(4):
         th.append(tab.evaluate("document.documentElement.getAttribute('data-theme')"))
@@ -168,6 +169,151 @@ def photo_tab_checks(page, ctx, shots):
             break
         page.evaluate("C01.state.sel = null; C01.app.render()")
     ok("E 要確認 옆 창 写真 = 새 탭 (라이트박스 아님)", got and got[0].startswith("c01-photo-") and got[1] == 0, got)
+
+ZP_STATE = "() => { const z = C01.photoPage.zp; return z ? [Math.round(z.s * 1000) / 1000, Math.round(z.fx * 1000) / 1000, Math.round(z.fy * 1000) / 1000] : null; }"
+IMG_READY = "() => { const e = document.querySelector('.c01-pv-img'); return e && e.complete && e.naturalWidth > 0 && C01.photoPage.zp; }"
+RECT = "() => { const b = document.querySelector('.c01-pv-img').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; }"
+TOUCH = """(a) => { const s = document.getElementById('pv-stage'), r = s.getBoundingClientRect(), x0 = r.left + r.width / 2, y0 = r.top + r.height / 2;
+    const ev = (t, id, x, y) => s.dispatchEvent(new PointerEvent(t, {pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0}));
+    if (a === 'swipe') { ev('pointerdown', 1, x0, y0); ev('pointermove', 1, x0 - 50, y0); ev('pointerup', 1, x0 - 120, y0 + 5); }
+    if (a === 'pinch') { ev('pointerdown', 1, x0 - 20, y0); ev('pointerdown', 2, x0 + 20, y0); ev('pointermove', 1, x0 - 50, y0); ev('pointermove', 2, x0 + 50, y0); ev('pointerup', 1, x0 - 50, y0); ev('pointerup', 2, x0 + 50, y0); }
+    if (a === 'pan') { ev('pointerdown', 1, x0, y0); ev('pointermove', 1, x0 - 120, y0); ev('pointerup', 1, x0 - 120, y0); }
+    return document.getElementById('pv-pos').textContent; }"""
+PERF = """async () => { const c = document.createElement('canvas'); c.width = 4000; c.height = 3000; const g = c.getContext('2d');
+    for (let i = 0; i < 300; i++) { g.fillStyle = 'hsl(' + (i * 37 % 360) + ',60%,50%)'; g.fillRect((i * 131) % 4000, (i * 71) % 3000, 200, 150); }
+    const b = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9)); const img = document.querySelector('.c01-pv-img');
+    await new Promise(r => { img.onload = r; img.src = URL.createObjectURL(b); });
+    const z = C01.photoPage.zp, raf = () => new Promise(r => requestAnimationFrame(r)); await raf();
+    const t0 = performance.now(); z.zoomBy(4);
+    for (let i = 0; i < 60; i++) { z.panPx(i % 2 ? 30 : -25, i % 3 ? 12 : -10); await raf(); }
+    const ms = (performance.now() - t0) / 60; z.reset(); return [img.naturalWidth, img.naturalHeight, Math.round(ms * 10) / 10]; }"""
+
+
+def zoom_checks(page, tab, shots):
+    """v0.3.55 (R10Y · ZHAN 제안 · #313): 사진 크게 보기 안 확대 · 이동 — 휠 (커서 기준 · 1~6배) · 끌기 · 화살표 · 더블클릭 2.5배 ↔ 원래 · 全体表示 · 다음 사진 = 원래 크기 ·
+    拡大・補正 두 그림 같이 · 1배일 때만 밀어 넘기기 · 두 손가락 · Ctrl+휠 = 브라우저 몫 (막지 않음) · 큰 사진 (12MP) 실측."""
+    tab.click(".c01-pv-th[data-go='2']")
+    tab.wait_for_function(IMG_READY, timeout=5000)
+    st = lambda: tab.evaluate(ZP_STATE)  # noqa: E731
+    pos0 = tab.locator("#pv-pos").inner_text()
+    bar = [tab.locator(x).count() for x in ("#pv-z-out", "#pv-z-v", "#pv-z-in", "#pv-z-fit")]
+    ok("R10Y 버튼 − · 배율 · ＋ · 全体表示 · 처음 100%", bar == [1, 1, 1, 1] and tab.locator("#pv-z-v").inner_text() == "100%" and st() == [1, 0, 0], [bar, st()])
+    r = tab.evaluate(RECT)
+    cx, cy = r[0] + r[2] * 0.3, r[1] + r[3] * 0.4                       # 사진 안 (30%, 40%) 위에서 휠
+    tab.mouse.move(cx, cy)
+    for _ in range(3):
+        tab.mouse.wheel(0, -100)
+        tab.wait_for_timeout(30)
+    s1 = st()
+    r1 = tab.evaluate(RECT)
+    fx, fy = (cx - r1[0]) / r1[2], (cy - r1[1]) / r1[3]
+    ok("R10Y 휠 3번 = 1.15³ 배 · 커서 아래 점 그대로 (사진 안 30% · 40%)", abs(s1[0] - 1.521) < 0.01 and abs(fx - 0.3) < 0.01 and abs(fy - 0.4) < 0.01
+       and tab.locator("#pv-z-v").inner_text() == "152%", [s1, round(fx, 3), round(fy, 3)])
+    tab.mouse.down()
+    tab.mouse.move(cx - 40, cy - 30, steps=4)
+    tab.mouse.up()
+    r2 = tab.evaluate(RECT)
+    ok("R10Y 끌어서 이동 (−40, −30 px) · 배율 그대로", abs(r2[0] - (r1[0] - 40)) < 1.5 and abs(r2[1] - (r1[1] - 30)) < 1.5 and abs(st()[0] - s1[0]) < 1e-6, [r1[:2], r2[:2]])
+    a0 = st()
+    tab.keyboard.press("ArrowRight")
+    tab.keyboard.press("ArrowDown")
+    a1 = st()
+    ok("R10Y 확대 중 화살표 = 이동 (사진 안 바뀜)", tab.locator("#pv-pos").inner_text() == pos0 and a1[1] < a0[1] and a1[2] < a0[2] and a1[0] == a0[0], [a0, a1])
+    for _ in range(40):
+        tab.mouse.wheel(0, -100)
+    tab.wait_for_timeout(150)
+    hi = st()
+    cover = tab.evaluate("""() => { const b = document.querySelector('.c01-pv-img').getBoundingClientRect(), z = C01.photoPage.zp, w = b.width / z.s, h = b.height / z.s,
+        l0 = b.left - z.fx * w, t0 = b.top - z.fy * h; return [b.left <= l0 + 0.5, b.top <= t0 + 0.5, b.right >= l0 + w - 0.5, b.bottom >= t0 + h - 0.5]; }""")
+    ok("R10Y 최대 6배 · 확대한 사진이 원래 자리를 늘 덮음 (빈칸으로 밀려나지 않음)", hi[0] == 6 and all(cover), [hi, cover])
+    tab.click("#pv-z-fit")
+    ok("R10Y 「全体表示」 = 100% · 위치 처음", st() == [1, 0, 0] and tab.locator("#pv-z-v").inner_text() == "100%", st())
+    tab.mouse.dblclick(cx, cy)
+    d1 = st()
+    tab.mouse.dblclick(cx, cy)
+    d2 = st()
+    ok("R10Y 더블클릭 = 2.5배 ↔ 원래 크기", d1[0] == 2.5 and d2 == [1, 0, 0], [d1, d2])
+    tab.click("#pv-z-in")
+    tab.click("#pv-z-in")
+    b1 = st()
+    tab.click("#pv-z-out")
+    ok("R10Y ＋ 2번 = 2.25배 · − = 1.5배", b1[0] == 2.25 and st()[0] == 1.5, [b1, st()])
+    cw = tab.evaluate("""() => { const s = document.getElementById('pv-stage'), z0 = C01.photoPage.zp.s;
+        const e = new WheelEvent('wheel', {deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10});
+        const notPrevented = s.dispatchEvent(e);
+        const o = new WheelEvent('wheel', {deltaY: 100, bubbles: true, cancelable: true});
+        const outside = document.querySelector('.c01-pv-top').dispatchEvent(o);
+        return [notPrevented, C01.photoPage.zp.s === z0, outside]; }""")
+    ok("R10Y Ctrl+휠 = 막지 않음 (브라우저 확대 그대로 · 배율 안 바뀜) · 틀 밖 휠 = 막지 않음", cw == [True, True, True], cw)
+    tab.click("#pv-next")
+    tab.wait_for_function(IMG_READY, timeout=5000)
+    ok("R10Y 다음 사진 = 원래 크기 (100%)", st()[0] == 1 and tab.locator("#pv-z-v").inner_text() == "100%", st())
+    tab.click("#pv-prev")
+    tab.wait_for_function(IMG_READY, timeout=5000)
+    p0 = tab.locator("#pv-pos").inner_text()
+    p1 = tab.evaluate(TOUCH, "swipe")
+    tab.wait_for_function(IMG_READY, timeout=5000)
+    tab.evaluate(TOUCH, "pinch")
+    pz = st()
+    p2 = tab.evaluate(TOUCH, "pan")
+    pp = st()
+    ok("R10Y 터치: 1배 밀기 = 다음 사진 · 두 손가락 = 확대 (거리 2.5배) · 확대 중 밀기 = 이동 (넘기지 않음)",
+       p1 != p0 and abs(pz[0] - 2.5) < 0.01 and p2 == p1 and pp[1] < pz[1] and pp[0] == pz[0], [p0, p1, p2, pz, pp])
+    tab.click("#pv-prev")
+    tab.wait_for_function(IMG_READY, timeout=5000)
+    tab.click("#pv-enh")
+    tab.wait_for_selector("#pv-enhbox[data-done='1']", timeout=10000)
+    eo = tab.evaluate("() => { const b = document.getElementById('pv-enh-out').getBoundingClientRect(); return [b.left + b.width * 0.5, b.top + b.height * 0.5]; }")
+    tab.mouse.move(eo[0], eo[1])
+    for _ in range(4):
+        tab.mouse.wheel(0, -100)
+        tab.wait_for_timeout(30)
+    tab.mouse.down()
+    tab.mouse.move(eo[0] + 25, eo[1] + 15, steps=3)
+    tab.mouse.up()
+    tf = tab.evaluate("() => ['pv-enh-orig', 'pv-enh-out'].map(id => document.getElementById(id).style.transform)")
+    ok("R10Y 拡大・補正 두 그림 = 같은 확대 · 같은 위치 (같은 곳 비교)", bool(tf[0]) and tf[0] == tf[1] and "scale(1.749" in tf[0], tf)
+    tab.screenshot(path=str(shots / "photo_zoom_enh.png"))
+    tab.click("#pv-enh")
+    tab.wait_for_function(IMG_READY, timeout=5000)
+    ok("R10Y 拡大・補正 닫으면 원래 크기", st()[0] == 1, st())
+    perf = tab.evaluate(PERF)
+    ok("R10Y 12MP 사진 (4000×3000) 확대 · 이동 60번 = 한 번 평균 < 40ms (rAF 기준 · CSS transform 만)", perf[0] == 4000 and perf[1] == 3000 and perf[2] < 40, perf)
+    print("   R10Y 12MP 실측:", perf)
+    tab.click(".c01-pv-th[data-go='2']")
+
+
+def lb_zoom_checks(page, shots):
+    """v0.3.55 (R10Y · #313): 화면 안 사진 (라이트박스 · Shift+클릭 · 팝업 막힘 · CT 不明 카드) = 같은 확대 · 이동."""
+    zs = lambda: page.evaluate("() => C01.state.lbzp ? [Math.round(C01.state.lbzp.s * 1000) / 1000, C01.state.lbzp.fx, C01.state.lbzp.fy] : null")  # noqa: E731
+    pos = lambda: page.locator(".c01-lb-h .c").inner_text()  # noqa: E731
+    page.wait_for_function("() => { const e = document.querySelector('.c01-lbimg'); return e && e.complete && e.naturalWidth > 0; }", timeout=5000)
+    bar = [page.locator(x).count() for x in ("#lb-z-out", "#lb-z-v", "#lb-z-in", "#lb-z-fit")]
+    r = page.evaluate("() => { const b = document.querySelector('.c01-lbimg').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }")
+    page.mouse.move(r[0], r[1])
+    for _ in range(5):
+        page.mouse.wheel(0, -100)
+        page.wait_for_timeout(30)
+    z1 = zs()
+    p0 = pos()
+    page.keyboard.press("ArrowRight")
+    p1 = pos()
+    page.mouse.dblclick(r[0], r[1])
+    z2 = zs()
+    page.mouse.dblclick(r[0], r[1])
+    z3 = zs()
+    ok("R10Y 라이트박스 = 버튼 4 · 휠 확대 · 확대 중 → = 이동 (사진 그대로) · 더블클릭 = 원래 ↔ 2.5배",
+       bar == [1, 1, 1, 1] and abs(z1[0] - 2.011) < 0.01 and p1 == p0 and z2 == [1, 0, 0] and z3[0] == 2.5, [bar, z1, p0, p1, z2, z3])
+    page.click("#lb-z-fit")
+    page.keyboard.press("ArrowRight")
+    p3 = pos()
+    page.mouse.dblclick(r[0], r[1])
+    page.click("#lb-next")
+    z4 = zs()
+    ok("R10Y 라이트박스 全体表示 → 1배 → = 다음 · 다음 사진 = 원래 크기", p3 != p0 and z4 == [1, 0, 0], [p0, p3, z4])
+    page.keyboard.press("Escape")
+    ok("R10Y 라이트박스 닫기 = 창 없음", page.locator(".c01-lb").count() == 0)
+
 
 
 BOX_INJ = None
@@ -3125,7 +3271,7 @@ def r10h_checks(page, root, shots, engine):
 
 def r10w_checks(page, root, shots, engine, engine_r10u=None):
     """v0.3.52 (R10W · #307): 「入力後の差異」 카드 (Compass入力値 · 新しい値 나란히 · 다른 칸만 빨강 · 까닭 · 원본 · 「入力値のまま」 = input_keep ·
-    「新しい値でCompass再入力」 = input_diff_take → Compass入力 창) · 줄 「確認済(入力済)」 · 필터 · 수 · 엔진 설정 끔 (固定 줄 · 카드 없음) = 화면 변화 0.
+    「新しい値でCompass再入力」 = input_diff_take → Compass入力 창) · 줄 「確認済（入力済）」 · 필터 · 수 · 엔진 설정 끔 (固定 줄 · 카드 없음) = 화면 변화 0.
     action 스키마 = 엔진 v0.5.122 (가지 r10u) 의 action.schema.json — --engine 에 input_keep 이 없으면 --engine-r10u 의 스키마 파일."""
     sys.path.insert(0, engine)
     from engine.output import schema_check as SC  # noqa: E402
@@ -3147,13 +3293,13 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
     page.click("#tab-main")
     page.click("[data-port='all']")
     page.wait_for_timeout(500)
-    # ① 엔진 설정 끔 (지금 실전) = 고정 줄 · 카드 없음 → 「確認済(入力済)」 · 필터 · 종류 0
+    # ① 엔진 설정 끔 (지금 실전) = 고정 줄 · 카드 없음 → 「確認済（入力済）」 · 필터 · 종류 0
     page.click("#tab-input")
     page.wait_for_timeout(300)
     k0 = page.locator(".c01-kinds [data-kind='入力後の差異']").count()
     page.click("#tab-main")
     page.wait_for_timeout(300)
-    ok("R10W 끔 = 「確認済(入力済)」 0 · 필터 0 · 「入力後の差異」 종류 0",
+    ok("R10W 끔 = 「確認済（入力済）」 0 · 필터 0 · 「入力後の差異」 종류 0",
        page.locator("tr.c01-row[data-frozen]").count() == 0 and page.locator(".c01-f-frozen").count() == 0 and k0 == 0
        and FROZEN_TXT not in page.locator("#jikkyou-table").inner_text(), [k0, page.locator(".c01-f-frozen").count()])
     # ② 켬 (엔진 v0.5.122 출력 꼴): 2줄 고정 + 카드 2장 (record 칸 · new_doc seal)
@@ -3194,11 +3340,11 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
     tb = f"tbody[data-iv='{ivn}']"
     fr = page.locator(tb + " tr.c01-row[data-frozen='1']")
     ft = fr.first.locator(".st-ok, .c01-okedit").first.get_attribute("title") if fr.count() else ""
-    ok("R10W 줄 = 「確認済(入力済)」 2 · data-status 「確認済」 그대로 · 마우스 = 입력 시각 · 元に戻す 안내",
+    ok("R10W 줄 = 「確認済（入力済）」 2 · data-status 「確認済」 그대로 · 마우스 = 입력 시각 · 元に戻す 안내",
        fr.count() == 2 and all(FROZEN_TXT in fr.nth(i).inner_text() for i in range(fr.count())) and all(fr.nth(i).get_attribute("data-status") == "確認済" for i in range(fr.count()))
        and "11-08 09:58" in (ft or "") and "元に戻す" in (ft or ""), [fr.count(), ft])
     fb = page.locator(".c01-f-frozen")
-    ok("R10W 필터 「確認済(入力済) 2台」 (고정 줄 있을 때만)", fb.count() == 1 and fb.inner_text() == FROZEN_TXT + " 2台", fb.inner_text() if fb.count() else None)
+    ok("R10W 필터 「確認済（入力済） 2台」 (고정 줄 있을 때만)", fb.count() == 1 and fb.inner_text() == FROZEN_TXT + " 2台", fb.inner_text() if fb.count() else None)
     n_iv = page.locator("tbody[data-iv]").count()
     fb.click()
     page.wait_for_timeout(300)
@@ -3279,7 +3425,7 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
     jp.write_text(dump(j3), encoding="utf-8")
     page.evaluate("C01.app.tick()")
     page.wait_for_timeout(800)
-    ok("R10W Compass入力 「元に戻す」 (엔진 반영 전) = 「確認済(入力済)」 0 · 필터 없음", page.locator("tr.c01-row[data-frozen]").count() == 0 and page.locator(".c01-f-frozen").count() == 0,
+    ok("R10W Compass入力 「元に戻す」 (엔진 반영 전) = 「確認済（入力済）」 0 · 필터 없음", page.locator("tr.c01-row[data-frozen]").count() == 0 and page.locator(".c01-f-frozen").count() == 0,
        page.locator("tr.c01-row[data-frozen]").count())
     page.evaluate("p => { C01.RULES.otherCt = p[0]; C01.RULES.valueEdit = p[1]; C01.state.qkind = 'all'; C01.state.view = 'main'; C01.state.filter = 'all'; if (window.__cfW) window.confirm = window.__cfW; }", prev)
     jp.write_text(jt0, encoding="utf-8")
@@ -3449,11 +3595,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.54", page.title() == "LEENAI C-01 搬入票 v0.3.54", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.55", page.title() == "LEENAI C-01 搬入票 v0.3.55", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.54" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.55" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -3658,7 +3804,7 @@ def main():
             nat = page.eval_on_selector(".c01-lbimg", "e => e.naturalWidth")
             ok("사진 크게 · 좌우 · 썸네일 띠", c1.startswith("1 / 9") and c2.startswith("2 / 9") and c3.startswith("1 / 9") and strip == 9 and nat > 0, [c1, c2, c3, strip, nat])
             page.screenshot(path=str(shots / "photo_viewer.png"))
-            page.keyboard.press("Escape")
+            lb_zoom_checks(page, shots)
             # 30초 겹쳐 보기용 두 번째 창 (STAFF_B)
             page2 = ctx.new_page() if False else br.new_context(viewport={"width": 1440, "height": 1000}).new_page()
             watch(page2, "B")
