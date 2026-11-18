@@ -3351,6 +3351,26 @@ def r10x_checks(page, root, shots, engine_frz):
     okmsg = page.locator(".c01-okmsg").inner_text() if page.locator(".c01-okmsg").count() else ""
     ok("R10X 완료 = 「COMPASS の枠を正としました」", "COMPASS の枠を正としました" in okmsg, okmsg)
     page.evaluate("() => { if (window.__cfX) window.confirm = window.__cfX; C01.state.qkind = 'all'; C01.state.view = 'main'; C01.state.filter = 'all'; }")
+    # v0.3.54 (R10X · #311 · 엔진 v0.5.127 out_resend_photo_cand): 줄 resend_cand = 「再送依頼候補」 표시만 (업체 발송 0)
+    jsch = json.loads((Path(engine_frz) / "engine" / "output" / "schema" / "jikkyou.schema.json").read_text(encoding="utf-8"))
+    jr = json.loads(jt0)
+    ivr = next(x for x in jr["ivs"] if x["iv_no"] == "TST2611-01")
+    for rr in ivr["rows"]:
+        rr["resend_cand"] = ["seal"]                     # 그 IV 줄 전부 (보이는 줄 수 = 표시 수)
+    je = SC.errors({**jr, "ivs": [ivr]}, jsch)
+    ok("R10X 시험 jikkyou (resend_cand) = 엔진 v0.5.127 스키마 (오류 0)", not je and "resend_cand" in json.dumps(jsch), je[:3])
+    jp.write_text(dump(jr), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.click("#tab-main")
+    page.wait_for_timeout(300)
+    bd = page.locator(f"tbody[data-iv='{ivr['iv_no']}'] .c01-rsbadge")
+    tt = bd.first.get_attribute("title") if bd.count() else ""
+    nrow = page.locator(f"tbody[data-iv='{ivr['iv_no']}'] tr.c01-row").count()
+    ok("R10X 「再送依頼候補」 표시 = 그 IV 보이는 줄마다 1 · 다른 IV 0 · 마우스 = 搬入票 · シール番号 · 自動では送りません",
+       nrow >= 1 and bd.count() == nrow and bd.first.inner_text() == "再送依頼候補" and "シール番号" in (tt or "") and "自動では送りません" in (tt or "")
+       and page.locator(".c01-rsbadge").count() == nrow, [nrow, bd.count(), tt])
+    page.screenshot(path=str(shots / "r10x_resend_cand.png"))
     jp.write_text(jt0, encoding="utf-8")
     qp.write_text(qt0, encoding="utf-8")
     page.evaluate("C01.app.tick()")
@@ -3429,11 +3449,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.53", page.title() == "LEENAI C-01 搬入票 v0.3.53", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.54", page.title() == "LEENAI C-01 搬入票 v0.3.54", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.53" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.54" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),

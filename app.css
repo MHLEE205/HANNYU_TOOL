@@ -512,6 +512,7 @@ body.c01-gdr-on #c01-main { margin-right: 416px; }
 .c01-alert-stop { background: #b91c1c; color: #ffffff; }
 .c01-alert-late { background: #facc15; color: #1f2937; }
 .c01-cgbadge { color: var(--text3, #888); border-color: var(--border, #8884); font-weight: 400; }
+.c01-rsbadge { color: var(--c-diff, #c62); border-color: currentColor; font-weight: 600; }   /* v0.3.54 (R10X · #311) 再送依頼候補 */
 
 /* v0.3.46 (R9X): AI の提案 「この操作をしますか？」 · 答えの評価 · FAX 値の確認 · 行の AI 相談 · 使い方 (エンジンの操作表) */
 .c01-prop { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent, #3b82f6); border-radius: 8px; background: var(--read); display: flex; flex-direction: column; gap: 4px; }

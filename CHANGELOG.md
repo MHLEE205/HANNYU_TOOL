@@ -2,6 +2,11 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.54 (2026-11-18) — R10X: 実況表 「再送依頼候補」 の表示 (#311 · 表示だけ)
+- エンジン v0.5.127 (`out_resend_photo_cand` · 今は off) の行 `resend_cand` (搬入票が届いた後も CT · シール が空 = 写真から読めず ほかの出処もない) = 状況の横に 「再送依頼候補」 (マウスで 空の項目 · 「自動では送りません」)。業者へのメール · 催促の文 は変わらない。
+- エンジンの設定が off の間は 画面は 0.3.53 と同じ。
+- 試験 ui 471 (+2) · graph 47 · compass_live 25 · photoset 16 · layout 32。
+
 ## 0.3.53 (2026-11-18) — R10X: 「入力後の差異」 で COMPASS の枠が違う時のボタン (#309) · エンジンの写真の枠 (box) の試験
 - エンジン v0.5.125 (`cycle_input_slot_check` · 今は off) の 「入力後の差異」 で 違いが 「COMPASS で別の枠」 (`why` = `compass_slot`) だけのカード = ボタン 「COMPASSの配置を正とする」 (確かめの窓 → `_actions` `input_slot_take` · `field` · `value` = null · `queue_id`) と 「入力値のまま」。このカードには 「新しい値でCompass再入力」 を出さない (値は同じで 枠だけ違うため)。
 - 完了の文 「COMPASS の枠を正としました（次の判定で反映）」。エンジンの設定が off の間は 画面は 0.3.52 と同じ (実際の _data で 実況表 · 絞り込み · カード一覧 の hash が同じ)。

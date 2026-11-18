@@ -1663,6 +1663,10 @@ window.C01 = window.C01 || {};
     var cg = r.cancel_regroup;
     if (cg && cg.from_iv) out += ' <span class="c01-ibadge c01-cgbadge" data-info="cancel_regroup" title="' + esc('統合した日 ' + (cg.at || '?') + ' · 写真 ' + (cg.photos == null ? '?' : cg.photos) + ' 枚 — 取消になったブッキング ' + cg.from_iv + ' の写真を このブッキングの同じ CT にまとめました') + '">取消BKG（' + esc(cg.from_iv) + '）から統合</span>';
     if (ap.length) out += ' <span class="c01-ibadge" data-info="auto_sender" title="' + esc(INFO_TEXT.AUTO_SENDER) + '">自動推薦</span>';
+    /* v0.3.54 (R10X · #311 · エンジン v0.5.127 out_resend_photo_cand): 搬入票が届いた後も CT · シール が空の行 = 「再送依頼候補」 (表示だけ · 業者への送信なし) */
+    var rs = (r.resend_cand || []).filter(function (f) { return f === 'ct' || f === 'seal'; });
+    if (rs.length) out += ' <span class="c01-ibadge c01-rsbadge" data-info="resend_cand" title="' + esc('搬入票は届きましたが、' + rs.map(function (f) { return f === 'ct' ? 'CT番号' : 'シール番号'; }).join(' · ') +
+      ' を写真から読めず、ほかの出処もありません — 読める写真の再送をお願いするか、担当者が判断してください（自動では送りません）') + '">再送依頼候補</span>';
     var mg = mergeBadge(r);
     if (mg) out += mg;
     return out;
