@@ -2,7 +2,7 @@
 """fixtures 사본에 사유 29 (PHOTO_SET_INCOMPLETE) 再確認 줄 2개 + 엔진 queue 항목 「写真不足」 2개 (out_queue_photo_set 켬과 같은 모양) 를 넣고 확인:
 옆 창 문장 (엔진 reason_text 그대로) · 「確認する」 켜짐 → confirm_value (칸 ct · 값 그대로 · 写真 · queue_id) · 줄 確認済 ·
 確認・入力 칩 「写真不足 1」 · 「確認して次へ」 → 두 번째 action · _actions = 엔진 action.schema.json · 4테마 캡처 · 콘솔 오류 0 · 네트워크 = 로컬 · LEENAI_COMMON.
-사용: python tests/test_photoset.py [--shots 폴더] [--engine C:\\LEENAI_C01_V2\\engine_r625]"""
+사용: python tests/test_photoset.py [--shots 폴더] [--engine C:\\LEENAI_C01_PROD\\code]"""
 import argparse
 import hashlib
 import json
@@ -63,7 +63,7 @@ def prepare(root):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots" / "photoset"))
-    ap.add_argument("--engine", default=r"C:\LEENAI_C01_V2\engine_r625")
+    ap.add_argument("--engine", default=r"C:\LEENAI_C01_PROD\code")   # R11H: engine_r625 지움 → 실전 코드 (읽기만)
     a = ap.parse_args()
     shots = Path(a.shots)
     shots.mkdir(parents=True, exist_ok=True)

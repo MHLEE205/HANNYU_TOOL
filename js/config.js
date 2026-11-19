@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.56',
+  version: '0.3.57',
   date: '2026-11-18',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -143,5 +143,9 @@ C01.ASK = {
   /* v0.3.46 (R9X Part 2 · #291 ④): 答えごとに 「役に立った / 立たなかった」 (_actions ask_feedback · 立たなかった = 自動の改善依頼) — エンジン ask_feedback */
   feedback: true,
   /* v0.3.46 (R9W Part 1-2 · #290): 実況表の行の横の窓にも 「AIに相談」 (確認済 → 再確認 に戻した行など カードの無い行も) */
-  rowAsk: true
+  rowAsk: true,
+  /* v0.3.57 (R11F · #317 急ぎの修正 道 C): 答えの 「値を B に修正」 (今の値 · 新しい値 · 根拠 · その所の拡大 · 押す = ✎ 修正 と同じ記録 · 元に戻す) — エンジン ask_fix_value · ask_fix_ref */
+  fixButton: true,
+  /* v0.3.57 (R11F · #317): ボタンが無い答え = 「急ぎで依頼」 (CUT 今日・明日 = 赤) · 「改善依頼（一般）」 · 改善依頼の案 = 一般 / 急ぎ · 依頼一覧 区分 — エンジン ask_urgent_request */
+  urgentReq: true
 };

@@ -2,7 +2,7 @@
 """fixtures 를 임시 폴더로 복사 → serve_local.py (127.0.0.1) → Chromium 으로 열어 확인.
 확인: 実況表 열 15 · 줄 색 4종 · 담당 港 거르기 · メール未着 줄 · 사진 보기 넘기기 · 確認・入力 4종 처리 · _actions JSON = 엔진 스키마 ·
       30초 겹쳐 보기 (다른 창) · 先勝ち · 체크디짓 거부 · Compass入力/催促 비활성 · 4테마 스크린샷 · 콘솔 오류 0 · 네트워크 = LEENAI_COMMON·로컬만.
-사용: python tests/test_ui.py [--shots 폴더] [--engine C:\\LEENAI_C01_V2\\engine_r5] [--no-wait30]"""
+사용: python tests/test_ui.py [--shots 폴더] [--engine C:\\LEENAI_C01_PROD\\code] [--no-wait30]"""
 import argparse
 import json
 import re
@@ -3453,6 +3453,292 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
     page.wait_for_timeout(400)
 
 
+def r11f_checks(page, root, shots, engine):
+    """v0.3.57 (R11F · #317 급한 수정 길 C): AI 相談 답 「値を B に修正」 (지금 값 · 새 값 · 근거 · 그 칸 그림 확대 · 이동) → ✎ 修正 과 같은 manual_input
+    (origin ai_proposal · 엔진 스키마) · 「修正しました (元: A)。画面に反映まで 1〜2 分」 · 반영되면 그 줄 강조 1번 · 元に戻す 한 바퀴 = 시작 해시 ·
+    fix_check = 버튼 없음 · 버튼 없는 답 = 「急ぎで依頼」 (CUT 오늘·내일 빨강) · 「改善依頼（一般）」 · 전체 改善依頼の案 = 一般 / 急ぎ · 依頼一覧 区分 ·
+    설정 끔 = 지금 화면 · 휴대폰 폭. 가명 데이터만 (TSTU · TST2611)."""
+    import hashlib
+    import fitz
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    page.evaluate("() => { if (!window.__tw11 && !window._toasts) { const o = LEENAI.toast; LEENAI.toast = (m, t) => { window._toasts.push(m); return o && o(m, t); }; } window.__tw11 = 1; window._toasts = [];"
+                  " window.__cf11 = window.confirm; window._confirms = []; window.confirm = m => { window._confirms.push(m); return true; }; }")
+    page.keyboard.press("Escape")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    ivn, ctn, cur, new = "TST2611-04", "TSTU0010840", "TS001084", "TS001089"
+    jp = root / "_data" / "jikkyou.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    # 근거 PDF (가명 · 시험 사본 안) — 엔진 ask_fix_ref 의 sha16 으로 TOOL 이 찾는 원본
+    pp = root / "_data" / "photos" / f"{ivn}.json"
+    pj = json.loads(pp.read_text(encoding="utf-8"))
+    rel_pdf = f"{ivn}/搬入票/r11f_ev.pdf"
+    (root / rel_pdf).parent.mkdir(parents=True, exist_ok=True)
+    doc = fitz.open()
+    pg = doc.new_page(width=595, height=842)
+    pg.insert_text((80, 300), "N/W 12000 KG (test)", fontsize=20)
+    doc.save(str(root / rel_pdf))
+    doc.close()
+    pdf_sha = "f1f1f1f1f1f1f1f1"
+    pj["docs"].append({"path": rel_pdf, "size": (root / rel_pdf).stat().st_size, "sha16": pdf_sha})
+    pp.write_text(json.dumps(pj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    ph = next(c for c in pj["containers"] if c["ct"] == ctn)["photos"][0]
+    page.click("#tab-main")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(700)
+
+    def ids(kind):
+        return {x.get("action_id") for x in actions(root) if x.get("action") == kind}
+
+    def new_of(kind, before_ids):
+        return [x for x in actions(root) if x.get("action") == kind and x.get("action_id") not in before_ids]
+
+    def tb_hash():
+        return page.evaluate("iv => { const t = document.querySelector(\"tbody[data-iv='\" + iv + \"']\"); return t ? t.innerHTML : ''; }", ivn)
+
+    rk = page.evaluate("ct => [...document.querySelectorAll(\"tr.c01-row\")].map(t => t.getAttribute('data-key')).find(k => k && k.includes(ct))", ctn)
+    page.evaluate("k => { C01.state.sel = k; C01.state.editRow = null; C01.app.render(); }", rk)
+    page.wait_for_timeout(300)
+    page.click("#panel-ask")
+    page.wait_for_timeout(400)
+    h0 = hashlib.sha256(tb_hash().encode("utf-8")).hexdigest()[:16]
+    before = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
+    page.fill("#ask-in", f"シールは {new} です")
+    page.press("#ask-in", "Enter")
+    page.wait_for_timeout(500)
+    new_f = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    k1 = json.loads(new_f[0].read_text(encoding="utf-8")) if len(new_f) == 1 else {}
+    ok("R11F 행 AI 相談 질문 1건 (container_id)", len(new_f) == 1 and (k1.get("card") or {}).get("container_id"), k1.get("card"))
+    cid = (k1.get("card") or {}).get("container_id")
+    ev = {"origin": "reread", "compare": "same_as_reread", "before": cur, "after": new, "staff_text": "", "read_text": new, "source": "photo",
+          "file_id": None, "photo_id": 7, "page": None, "box": [300, 400, 700, 520], "sha16": ph["sha16"]}
+    rep = {"ask_id": k1["ask_id"], "status": "ok", "answer": "写真のシールを拡大して読み直しました。", "kind": "value", "approval_request": "", "urgent": 1,
+           "suggestions": [{"action": "fix_value", "field": "seal", "value": new, "iv": "", "label": "値を修正", "evidence": ev}],
+           "fix_check": [{"field": "n_w", "staff_value": "12345", "read_value": "12000", "by": "zoom_reread", "source": "document", "file_id": 3, "photo_id": None,
+                          "page": 1, "box": [120, 330, 420, 380], "sha16": pdf_sha}]}
+    (root / "_actions" / "ask_reply" / f"{k1['ask_id']}.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(900)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    fx = page.locator("#ask-box .c01-fix")
+    t = fx.inner_text() if fx.count() else ""
+    ok("R11F 「値を B に修正」 상자 = 지금 값 · 새 값 나란히 · 근거 (拡大して読み直し · 같은 값) · 버튼 글 「値を TS001089 に修正」",
+       fx.count() == 1 and "今の値" in t and cur in t and "新しい値" in t and new in t and "拡大して読み直し" in t and "原本の拡大読み直しと同じ" in t
+       and page.locator("#ask-box [data-fixgo]").inner_text().replace(" ", "") == f"値を{new}に修正", t)
+    ok("R11F fix_value 는 옛 「値を入れる」 버튼으로 안 나옴 (data-asksug 0) · 버튼 있는 답 = 急ぎで依頼 없음",
+       page.locator("#ask-box [data-asksug]").count() == 0 and page.locator("#ask-box .c01-req").count() == 0)
+    ck = page.locator("#ask-box .c01-fixchk")
+    ok("R11F fix_check = 「原本では 12000 に見えます」 · 그 칸 버튼 없음 (보기만)", ck.count() == 1 and "原本では" in ck.inner_text() and "12000" in ck.inner_text()
+       and ck.locator("[data-fixgo]").count() == 0 and ck.locator("[data-evchk]").count() == 1, ck.inner_text() if ck.count() else None)
+    page.screenshot(path=str(shots / "r11f_fix_box.png"), full_page=False)
+    # 근거 창 (사진 · 상자 · 확대 · 이동)
+    page.locator("#ask-box [data-evopen]").click()
+    page.wait_for_timeout(1300)
+    m = page.evaluate("""() => { const st = document.getElementById('ev-stage'), b = document.querySelector('.c01-evbox');
+        return { modal: !!document.querySelector('.c01-modal-ev'), img: !!document.querySelector('#ev-wrap img'), box: b ? b.getAttribute('style') : null,
+                 zoom: st ? st.getAttribute('data-zoom') : null, bar: !!document.getElementById('ev-z-bar') }; }""")
+    ok("R11F 「根拠を見る」 = 원본 사진 + 빨간 칸 (300·400·700·520 → 30%·40%) · 그 칸으로 확대 (1 배 넘음) · 확대 막대",
+       m["modal"] and m["img"] and m["box"] and "left:30.00%" in m["box"].replace(" ", "") and "top:40.00%" in m["box"].replace(" ", "") and float(m["zoom"] or 0) > 1 and m["bar"], m)
+    page.screenshot(path=str(shots / "r11f_evidence_photo.png"), full_page=False)
+    page.click("#ev-z-fit")
+    page.wait_for_timeout(200)
+    z1 = page.evaluate("() => document.getElementById('ev-stage').getAttribute('data-zoom')")
+    page.click("#ev-focus")
+    page.wait_for_timeout(200)
+    z2 = page.evaluate("() => document.getElementById('ev-stage').getAttribute('data-zoom')")
+    ok("R11F 全体表示 = 1 배 · 「その所へ」 = 다시 확대", z1 == "1.00" and float(z2) > 1, [z1, z2])
+    page.evaluate("() => document.querySelector('#c01-modal [data-close]').click()")
+    page.wait_for_timeout(200)
+    page.evaluate("() => { C01.PDF._lib = C01.PDF.lib; C01.PDF.lib = 'js/validate.js'; }")   # 시험 = 밖 pdf.js 안 받음 → iframe 대체 (실제 그리기 = 실데이터 화면 비교)
+    page.locator("#ask-box [data-evchk]").click()
+    page.wait_for_timeout(1500)
+    m2 = page.evaluate("""() => { const p = document.querySelector('#ev-wrap .c01-pdf'); const f = p && p.querySelector('iframe');
+        return { pdf: !!p, ev: p ? p.getAttribute('data-ev') : null, page: p ? p.getAttribute('data-page') : null, ifr: f ? f.getAttribute('src') : null,
+                 box: !!document.querySelector('.c01-evbox'), pg: (document.getElementById('pdf-pg') || {}).textContent || null }; }""")
+    page.evaluate("() => { C01.PDF.lib = C01.PDF._lib; delete C01.PDF._lib; }")
+    ok("R11F fix_check 「原本のその所を見る」 = 그 PDF (data-ev · 1쪽) + 칸 · 카드 쪽 표시 안 바뀜", m2["pdf"] and m2["ev"] == "1" and m2["page"] == "1" and m2["box"]
+       and m2["ifr"] and "r11f_ev.pdf" in m2["ifr"], m2)
+    page.screenshot(path=str(shots / "r11f_evidence_pdf.png"), full_page=False)
+    page.evaluate("() => document.querySelector('#c01-modal [data-close]').click()")
+    page.wait_for_timeout(200)
+    # 누름 → manual_input (✎ 修正 과 같은 꼴 + origin)
+    b_mi = ids("manual_input")
+    page.locator("#ask-box [data-fixgo]").click()
+    page.wait_for_timeout(600)
+    acts = new_of("manual_input", b_mi)
+    a = acts[0] if acts else {}
+    org = a.get("origin") or {}
+    ok("R11F 누름 = _actions manual_input 1건 (IV · CT · seal · 새 값 · 手入力 · edit · origin ai_proposal ask_id)",
+       len(acts) == 1 and a.get("iv") == ivn and a.get("ct") == ctn and a.get("field") == "seal" and a.get("value") == new and a.get("source") == "手入力"
+       and org.get("kind") == "ai_proposal" and org.get("ask_id") == k1["ask_id"] and str(org.get("key", "")).startswith("fix-") and len(org.get("key", "")) <= 32, a)
+    ok("R11F 보낸 action = 엔진 스키마 통과 (manual_input + origin)", SC.check_obj(a, "action") == [], SC.check_obj(a, "action"))
+    qid_edit = page.evaluate("cid => { const s = 'edit|' + cid + '|seal'; const h = x => { let v = 0x811c9dc5; for (let i = 0; i < x.length; i++) { v ^= x.charCodeAt(i); v = Math.imul(v, 0x01000193) >>> 0; } return ('0000000' + v.toString(16)).slice(-8); }; return h(s) + h(s + '|2'); }", cid)
+    ok("R11F queue_id = ✎ 修正 과 같은 행·항목 id", a.get("queue_id") == qid_edit, [a.get("queue_id"), qid_edit])
+    cf = page.evaluate("() => window._confirms")
+    ok("R11F 自動OK 행 = ✎ 修正 과 같은 확인 1번", any("自動OK" in c for c in cf), cf)
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    t2 = page.locator("#ask-box .c01-fix").inner_text()
+    ok("R11F 누른 뒤 「修正しました（元: TS001084）。画面に反映まで 1〜2 分」 · 버튼 사라짐 · 元に戻す",
+       f"修正しました（元: {cur}）。画面に反映まで 1〜2 分" in t2 and page.locator("#ask-box [data-fixgo]").count() == 0
+       and page.locator("#ask-box [data-fixundo]").count() == 1, t2)
+    ok("R11F 토스트 「修正しました（元: …）」", any(f"修正しました（元: {cur}）" in x for x in page.evaluate("() => window._toasts")), page.evaluate("() => window._toasts"))
+    # 엔진 반영 흉내 (실況表 의 seal = 새 값) → 토스트 1번 · 그 줄 강조 1번
+    jj = json.loads(jt0)
+    for iv in jj["ivs"]:
+        for r in iv["rows"]:
+            if r["ct"] == ctn:
+                r["seal"] = new
+    jp.write_text(json.dumps(jj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(700)
+    fl = page.evaluate("ct => [...document.querySelectorAll('tr.c01-row.c01-flash')].map(t => t.getAttribute('data-key')).filter(k => k && k.includes(ct)).length", ctn)
+    ts = page.evaluate("() => window._toasts")
+    ok("R11F 반영되면 토스트 「画面に反映されました」 1번 · 그 줄 강조 (c01-flash) 1번 · 상자 「画面に反映しました」",
+       fl == 1 and sum(1 for x in ts if "画面に反映されました" in x) == 1 and "画面に反映しました" in page.locator("#ask-box .c01-fix").inner_text(), [fl, ts[-3:]])
+    page.screenshot(path=str(shots / "r11f_fix_reflected.png"), full_page=False)
+    page.wait_for_timeout(2800)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    ok("R11F 강조는 1번만 (다시 그려도 없음)", page.locator("tr.c01-row.c01-flash").count() == 0 and sum(1 for x in page.evaluate("() => window._toasts") if "画面に反映されました" in x) == 1)
+    # 元に戻す 한 바퀴 → 시작 해시
+    b_un = ids("undo")
+    page.locator("#ask-box [data-fixundo]").click()
+    page.wait_for_timeout(600)
+    un = new_of("undo", b_un)
+    ok("R11F 元に戻す = undo 1건 (value.action_id = 그 manual_input) · 엔진 스키마", len(un) == 1 and (un[0].get("value") or {}).get("action_id") == a.get("action_id")
+       and SC.check_obj(un[0], "action") == [], un)
+    jp.write_text(jt0, encoding="utf-8")                                   # 엔진이 되돌린 실況表 (처음 값)
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(900)
+    page.evaluate("() => { C01.state.sel = null; C01.app.render(); }")
+    page.wait_for_timeout(300)
+    h1 = hashlib.sha256(tb_hash().encode("utf-8")).hexdigest()[:16]
+    ok("R11F 수정 → 元に戻す 한 바퀴 = 実況表 그 IV 해시 시작과 같음", h1 == h0, [h0, h1])
+    t3 = page.locator("#ask-box .c01-fix").inner_text()
+    ok("R11F 되돌린 뒤 상자 = 다시 버튼 · 「前の修正は元に戻しました」", page.locator("#ask-box [data-fixgo]").count() == 1 and "前の修正は元に戻しました" in t3, t3)
+    # 버튼 없는 답 — CUT 오늘·내일 = 빨강 「急ぎで依頼」 · 「改善依頼（一般）」
+    def ask_and_reply(q, rep_extra):
+        b0 = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
+        page.fill("#ask-in", q)
+        page.press("#ask-in", "Enter")
+        page.wait_for_timeout(500)
+        nf = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in b0]
+        k = json.loads(nf[0].read_text(encoding="utf-8"))
+        rp = {"ask_id": k["ask_id"], "status": "ok", "answer": "この画面のボタンでは直せません。", "kind": "other", "approval_request": "", "suggestions": [], **rep_extra}
+        (root / "_actions" / "ask_reply" / f"{k['ask_id']}.json").write_text(json.dumps(rp, ensure_ascii=False), encoding="utf-8")
+        for _ in range(12):                                                # 답이 화면에 나올 때까지 (최대 약 10초)
+            page.evaluate("() => C01.app.tick()")
+            page.wait_for_timeout(600)
+            page.evaluate("() => C01.app.render()")
+            page.wait_for_timeout(200)
+            if page.locator("#ask-box .c01-ask-a.wait").count() == 0:
+                break
+        return k
+    k2 = ask_and_reply("写真が別のコンテナに入っている", {"urgent": 1})
+    ub = page.locator(f"#ask-box [data-urg='{k2['ask_id']}']")             # 시계가 멈춘 구간 = 같은 시각 → 순서 대신 ask_id 로
+    rq = page.locator("#ask-box .c01-req").filter(has=page.locator(f"[data-urg='{k2['ask_id']}']"))
+    ok("R11F 버튼 없는 답 = 「急ぎで依頼（CUT 今日・明日）」 빨강 + 「改善依頼（一般）」", rq.count() == 1 and ub.count() == 1 and "red" in (ub.get_attribute("class") or "")
+       and "急ぎで依頼（CUT 今日・明日）" in ub.inner_text() and rq.locator("[data-reqgen]").count() == 1, rq.inner_text() if rq.count() else None)
+    page.screenshot(path=str(shots / "r11f_urgent_red.png"), full_page=False)
+    b_u = ids("urgent_request")
+    ub.click()
+    page.wait_for_timeout(600)
+    us = new_of("urgent_request", b_u)
+    u = us[0] if us else {}
+    uv = u.get("value") or {}
+    ok("R11F 「急ぎで依頼」 = _actions urgent_request 1건 (질문 · ask_id · row · IV · CT · field null) · 확인 창",
+       len(us) == 1 and uv.get("ask_id") == k2["ask_id"] and uv.get("question") == "写真が別のコンテナに入っている" and uv.get("row") == cid
+       and u.get("iv") == ivn and u.get("ct") == ctn and u.get("field") is None and any("急ぎ" in c for c in page.evaluate("() => window._confirms")), u)
+    ok("R11F urgent_request = 엔진 스키마 통과", SC.check_obj(u, "action") == [], SC.check_obj(u, "action"))
+    ok("R11F 보낸 뒤 「急ぎで依頼しました」 · 그 답의 버튼 사라짐 (2번 눌러도 1건)", "急ぎで依頼しました" in page.locator("#ask-box .c01-ask-log").inner_text()
+       and page.locator(f"#ask-box [data-urg='{k2['ask_id']}']").count() == 0)
+    k3 = ask_and_reply("このメールの件", {"urgent": 0})
+    u3 = page.locator(f"#ask-box [data-urg='{k3['ask_id']}']")
+    ok("R11F CUT 오늘·내일 아닌 IV = 「急ぎで依頼」 빨강 아님", u3.count() == 1 and "red" not in (u3.get_attribute("class") or ""))
+    b_i = ids("improve_request")
+    page.locator(f"#ask-box [data-reqgen='{k3['ask_id']}']").click()
+    page.wait_for_timeout(600)
+    ims = new_of("improve_request", b_i)
+    im = ims[0] if ims else {}
+    ok("R11F 「改善依頼（一般）」 = _actions improve_request 1건 (ask_id · 제목 · 요약 · IV) · 엔진 스키마",
+       len(ims) == 1 and (im.get("value") or {}).get("ask_id") == k3["ask_id"] and (im.get("value") or {}).get("ivs") == [ivn] and SC.check_obj(im, "action") == [],
+       [im, SC.check_obj(im, "action")])
+    ok("R11F 보낸 뒤 「改善依頼（一般）を送りました」", "改善依頼（一般）を送りました" in page.locator("#ask-box .c01-ask-log").inner_text()
+       and page.locator(f"#ask-box [data-reqgen='{k3['ask_id']}']").count() == 0)
+    # 휴대폰 폭 (390) — 상자 · 버튼이 화면 안
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    mob = page.evaluate("""() => { const b = document.querySelector('#ask-box'); const f = document.querySelector('#ask-box .c01-fix');
+        const r = e => e ? e.getBoundingClientRect().toJSON() : null; return { box: r(b), fix: r(f), vw: window.innerWidth }; }""")
+    ok("R11F 휴대폰 폭 390 = 수정 상자 화면 폭 안", mob["fix"] is not None and mob["fix"]["right"] <= mob["vw"] + 1 and mob["fix"]["left"] >= -1, mob)
+    page.locator("#ask-box .c01-fix").scroll_into_view_if_needed()
+    page.screenshot(path=str(shots / "r11f_mobile.png"), full_page=False)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.wait_for_timeout(300)
+    # 설정 끔 = 지금 화면 (fix_value = 옛 버튼 · 急ぎで依頼 없음)
+    page.evaluate("() => { C01.ASK._fb = C01.ASK.fixButton; C01.ASK._ur = C01.ASK.urgentReq; C01.ASK.fixButton = false; C01.ASK.urgentReq = false; C01.app.render(); }")
+    page.wait_for_timeout(300)
+    ok("R11F 끔 = fix 상자 0 · 옛 버튼 (data-asksug) · 依頼 상자 0", page.locator("#ask-box .c01-fix").count() == 0 and page.locator("#ask-box [data-asksug]").count() >= 1
+       and page.locator("#ask-box .c01-req").count() == 0 and page.locator("#ask-box .c01-fixchk").count() == 0)
+    page.evaluate("() => { C01.ASK.fixButton = C01.ASK._fb; C01.ASK.urgentReq = C01.ASK._ur; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    page.click("#ask-close")
+    page.wait_for_timeout(200)
+    # 전체 AI 相談: 改善依頼の案 = 一般 (1日以上) / 急ぎ (今日中) · 依頼一覧 区分
+    page.click("#gask-open")
+    page.wait_for_timeout(300)
+    b0 = set(p.name for p in (root / "_actions" / "ask").rglob("*.json"))
+    page.fill("#gask-in", "今日 CUT の IV の写真が出ない")
+    page.press("#gask-in", "Enter")
+    page.wait_for_timeout(500)
+    g = json.loads([p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in b0][0].read_text(encoding="utf-8"))
+    imp = {"title": "写真が出ない", "summary": "CUT が今日の IV で 写真の一覧が古い。", "cause": None, "mail_ids": [], "ivs": [ivn], "bkgs": []}
+    rp = {"ask_id": g["ask_id"], "scope": "global", "status": "ok", "kind": "investigation", "suggestions": [], "approval_request": "", "improve": imp, "answer": "調べました。"}
+    (root / "_actions" / "ask_reply" / f"{g['ask_id']}.json").write_text(json.dumps(rp, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(900)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    ib = page.locator("#gask-box .c01-imp").last
+    ok("R11F 改善依頼の案 = 「一般で依頼（1日以上）」 「急ぎで依頼（今日中）」 「やめる」 · 依頼 상자 (c01-req) 겹치지 않음",
+       ib.locator("[data-impsend]").inner_text() == "一般で依頼（1日以上）" and ib.locator("[data-impurg]").inner_text() == "急ぎで依頼（今日中）"
+       and ib.locator("[data-impdrop]").count() == 1 and page.locator("#gask-box .c01-req").count() == 0, ib.inner_text())
+    page.screenshot(path=str(shots / "r11f_gask_kinds.png"), full_page=False)
+    b_u2 = ids("urgent_request")
+    ib.locator("[data-impurg]").click()
+    page.wait_for_timeout(600)
+    us = new_of("urgent_request", b_u2)
+    u2 = us[0] if us else {}
+    ok("R11F 「急ぎで依頼（今日中）」 = urgent_request 1건 (질문 · note = 제목 / 요약 · IV null) · 스키마 · 「急ぎ（今日中）で依頼しました」",
+       len(us) == 1 and (u2.get("value") or {}).get("ask_id") == g["ask_id"] and "写真が出ない" in ((u2.get("value") or {}).get("note") or "")
+       and SC.check_obj(u2, "action") == [] and "急ぎ（今日中）で依頼しました" in page.locator("#gask-box .c01-imp").last.inner_text(), u2)
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.locator("[data-gtab='reqs']").click()
+    page.wait_for_timeout(300)
+    page.locator("[data-reqall='0']").click()
+    page.wait_for_timeout(300)
+    hd = page.locator("#gask-box .c01-reqs thead").inner_text()
+    rows = page.locator("#gask-box .c01-reqs tbody tr")
+    urg_rows = page.locator("#gask-box .c01-reqs tbody tr.c01-requrg")
+    gen = [x for x in rows.all_inner_texts() if "一般" in x]
+    ok("R11F 依頼一覧 = 区分 칸 · 急ぎ 2건 (受付 · 今日中に対応) · 一般 (requests.json) 상태 그대로",
+       "区分" in hd and urg_rows.count() == 2 and all("受付" in x and "今日中に対応" in x for x in urg_rows.all_inner_texts()) and len(gen) >= 1,
+       rows.all_inner_texts())
+    page.screenshot(path=str(shots / "r11f_reqs_kinds.png"), full_page=False)
+    page.evaluate("() => { C01.ASK._ur = C01.ASK.urgentReq; C01.ASK.urgentReq = false; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    ok("R11F 끔 = 依頼一覧 区分 칸 없음 · 급한 행 없음 (지금 표)", "区分" not in page.locator("#gask-box .c01-reqs thead").inner_text()
+       and page.locator("#gask-box .c01-reqs tbody tr.c01-requrg").count() == 0)
+    page.evaluate("() => { C01.ASK.urgentReq = C01.ASK._ur; C01.app.render(); }")
+    page.locator("[data-gtab='chat']").click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    page.evaluate("() => { if (window.__cf11) window.confirm = window.__cf11; }")
+
+
 def r10x_checks(page, root, shots, engine_frz):
     """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
     「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
@@ -3614,11 +3900,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.56", page.title() == "LEENAI C-01 搬入票 v0.3.56", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.57", page.title() == "LEENAI C-01 搬入票 v0.3.57", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.56" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.57" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4147,6 +4433,7 @@ def main():
             r10h_checks(page, root, shots, a.engine)
             r10w_checks(page, root, shots, a.engine, a.engine_r10u)
             r10x_checks(page, root, shots, a.engine_frz)
+            r11f_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

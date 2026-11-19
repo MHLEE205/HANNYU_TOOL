@@ -548,3 +548,22 @@ body.c01-rdr-on #c01-main { margin-right: 416px; }
 .c01-zp-b { min-width: 30px; height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border, #555); background: var(--surface, #2A2A26); color: var(--text, #F2F2EE); cursor: pointer; font-size: 14px; }
 .c01-zp-fit { font-size: 12px; } .c01-zp-v { min-width: 44px; text-align: center; font-size: 12px; color: var(--text2, #bbb); font-variant-numeric: tabular-nums; }
 .c01-pv-enhfig { overflow: hidden; } .c01-pv-enhwrap { overflow: hidden; }
+/* v0.3.57 (R11F · #317): AI 相談の答え 「値を B に修正」 · 根拠の窓 · 急ぎで依頼 · 依頼一覧 区分 · 反映した行の強調 */
+.c01-fix { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent, #3b82f6); border-radius: 8px; background: var(--read); display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+.c01-fix .k, .c01-fixchk .k, .c01-req .k { font-size: 11px; color: var(--text2); }
+.c01-fixvals { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; }
+.c01-fixcol { display: flex; flex-direction: column; gap: 1px; } .c01-fixcol .mono { font-size: 15px; font-weight: 700; word-break: break-all; }
+.c01-fixcol .old { text-decoration: line-through; opacity: .75; } .c01-fixcol .new { color: var(--ok, #2a7); } .c01-fixarrow { font-size: 16px; padding-bottom: 2px; }
+.c01-fixgo { max-width: 100%; white-space: normal; } .c01-fixgo .mono { font-weight: 700; }
+.c01-fixchk { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--warn, #c80); border-radius: 8px; display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+.c01-req { margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--text2, #888); border-radius: 8px; display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+.c01-urg.red { background: #d33; border-color: #d33; color: #fff; font-weight: 700; }
+.c01-reqkd { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--text2, #888); white-space: nowrap; } .c01-reqkd.urg { border-color: #d33; color: #d33; font-weight: 700; }
+.c01-modal-ev { width: min(1100px, 96vw); max-width: 96vw; }
+.c01-evstage { overflow: hidden; text-align: center; background: var(--read); border-radius: 6px; touch-action: none; }
+.c01-evwrap { position: relative; display: inline-block; max-width: 100%; vertical-align: top; }
+.c01-evwrap img.c01-evimg { display: block; max-width: 100%; max-height: 70vh; }
+.c01-evwrap .c01-pdf canvas { display: block; }
+.c01-evbox { position: absolute; border: 3px solid #e53935; box-shadow: 0 0 0 2px rgba(255,255,255,.7); border-radius: 3px; pointer-events: none; }
+@keyframes c01-flash { 0%, 60% { background: rgba(255, 213, 79, .55); } 100% { background: transparent; } }
+tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }

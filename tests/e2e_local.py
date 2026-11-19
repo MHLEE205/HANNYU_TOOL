@@ -18,6 +18,8 @@ from playwright.sync_api import sync_playwright
 TOOL = Path(__file__).resolve().parent.parent
 MAIN_DB = Path(r"C:\LEENAI_C01_V2\data\engine.db").resolve()
 MAIN_ROOT = Path(r"C:\LEENAI_C01_V2\data\photo_v2_local").resolve()
+PROD_DB = Path(r"C:\LEENAI_C01_PROD\data\engine.db").resolve()   # R11H: 실전 DB · 실전 출력도 거부
+PROD_ROOT = Path(r"C:\LEENAI_C01_PROD\data\photo_v2_local").resolve()
 R = {"checks": [], "console_errors": [], "external": []}
 
 
@@ -60,7 +62,7 @@ def main():
     ap.add_argument("--today", default="2026-11-08")
     a = ap.parse_args()
     db, root, out = Path(a.db).resolve(), Path(a.root).resolve(), Path(a.out)
-    if db == MAIN_DB or root == MAIN_ROOT:
+    if db in (MAIN_DB, PROD_DB) or root in (MAIN_ROOT, PROD_ROOT) or str(Path(a.data).resolve()).upper().startswith(r"C:\LEENAI_C01_PROD"):
         sys.exit("거부: 본 DB / 본 photo_v2_local 은 쓰지 않음 — 사본만")
     out.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, a.engine)

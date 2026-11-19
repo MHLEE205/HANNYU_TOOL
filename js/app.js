@@ -419,20 +419,21 @@ window.C01 = window.C01 || {};
   }
   function drawPdf(el) {
     var rel = el.getAttribute('data-pdf'), thumb = el.getAttribute('data-thumb') === '1';
+    var evw = el.getAttribute('data-ev') === '1';                  /* v0.3.57 (R11F): 根拠の窓 = 回転 · 倍率なし (エンジンの枠と同じ向き) · 頁の表示を変えない */
     var want = +el.getAttribute('data-page') || 1;
     var rots = {};
     try { rots = JSON.parse(el.getAttribute('data-rots') || '{}') || {}; } catch (e) { rots = {}; }
     pdfDoc(rel).then(function (doc) {
       var n = doc.numPages, pg = Math.min(Math.max(1, want), n);
       el.setAttribute('data-pages', n);
-      if (!thumb) { S.pdfPage[el.getAttribute('data-pkey') || rel] = pg; var lab = $('pdf-pg'); if (lab) lab.textContent = 'p.' + pg + ' / ' + n; }
+      if (!thumb && !evw) { S.pdfPage[el.getAttribute('data-pkey') || rel] = pg; var lab = $('pdf-pg'); if (lab) lab.textContent = 'p.' + pg + ' / ' + n; }
       return doc.getPage(pg).then(function (page) {
         var base = rotOf(rots, pg);
-        var rot = (thumb ? 0 : S.rot) + base;
+        var rot = (thumb || evw ? 0 : S.rot) + base;
         el.setAttribute('data-base-rot', base);
         var r = (page.rotate + rot) % 360;
         var v1 = page.getViewport({ scale: 1, rotation: r });
-        var cssW = thumb ? 150 : Math.round((+el.getAttribute('data-bw') || 640) * S.zoom / 100);
+        var cssW = thumb ? 150 : Math.round((+el.getAttribute('data-bw') || 640) * (evw ? 100 : S.zoom) / 100);
         var dpr = window.devicePixelRatio || 1;
         var vp = page.getViewport({ scale: cssW / v1.width * dpr, rotation: r });
         var cv = el.querySelector('canvas');
@@ -3920,6 +3921,243 @@ window.C01 = window.C01 || {};
     writeAction(mkAction('ask_feedback', { value: { ask_id: aid, good: !!good } }))
       .then(function () { toast(good ? 'ありがとうございます' : '改善依頼として受け付けます（依頼一覧 「自動」）', 'success'); render(); }).catch(function () {});
   }
+  /* ── v0.3.57 (R11F · 決定 #317 急ぎの修正 道 C): AI 相談の答え 「値を B に修正」 (今の値 · 新しい値 · 根拠 · その所の拡大) ·
+     押す = 担当者 (✎ 修正 と同じ _actions manual_input · 記録 · 元に戻す · origin ai_proposal) · ボタンが無い答え = 「急ぎで依頼」 · 「改善依頼（一般）」 ·
+     全体の 改善依頼の案 = 「一般（1日以上）」 / 「急ぎ（今日中）」 (_actions urgent_request · エンジン ask_urgent_request) — AI は値を変えない (押すのは担当者) */
+  function fixOn() { return !!(C01.ASK && C01.ASK.fixButton); }
+  function urgOn() { return !!(C01.ASK && C01.ASK.urgentReq); }
+  var FIX_SRC = { document: '搬入票', photo: '写真' };
+  var FIX_CMP = { same_as_reread: '原本の拡大読み直しと同じ値です', same_as_candidate: 'エンジンが原本から読んだ候補と同じ値です',
+    no_original: 'エンジンの原本の読み取りがありません — 原本で確かめてから押してください' };
+  function rowByCid(cid) {
+    var f = null;
+    if (!cid) return null;
+    ((S.jik && S.jik.ivs) || []).forEach(function (iv) { (iv.rows || []).forEach(function (r) { if (!f && r.container_id === cid) f = { iv: iv, r: r }; }); });
+    return f;
+  }
+  function fixNorm(v) { return String(v == null ? '' : v).replace(/[\s,]/g, '').toUpperCase(); }
+  function fixKey(aid, s) { var k = aid + '|' + s.field + '|' + s.value; return 'fix-' + hkey(k) + hkey(k + '|2'); }
+  function fixCur(f, fd) {
+    if (!f) return null;
+    var h = statusOf(f.r, f.iv, overlay()).human[fd];
+    var v = h ? h.value : f.r[fd];
+    return v == null ? '' : String(v);
+  }
+  /* この案から書いた manual_input (origin.key) — 元に戻した = undone */
+  function fixAct(key) {
+    var ov = overlay(), hit = null;
+    (S.actions || []).concat(S.mine || []).forEach(function (x) {
+      var a = x.action || x;
+      if (a.action === 'manual_input' && a.origin && a.origin.key === key) hit = { a: a, pending: !!x.pending, undone: !!(ov.undone && ov.undone[a.action_id]) };
+    });
+    return hit;
+  }
+  function fixWhy(f, s) {
+    if (!S.me || !S.me.email) return '担当者を選んでください（右上）';
+    if (!f) return 'この行は 実況表にありません';
+    if (!f.r.ct) return 'CT が分からない行は 先に CT を確認・入力してください';
+    var v = C01.validate.field(s.field, s.value);
+    if (!v.ok) return FIELD_LABEL[s.field] + ': ' + v.error;
+    var h = statusOf(f.r, f.iv, overlay()).human[s.field];
+    if (h && !valueEditOn()) return 'すでに人が確認した値です — ここからは直せません';
+    if (fixNorm(fixCur(f, s.field)) === fixNorm(v.value)) return '今の値と同じです';
+    return '';
+  }
+  /* 根拠の原本 = sha16 が同じ _data のファイル (queue · photos · 実況表) — エンジン ask_fix_ref が無い答え = 見つからない (文だけ) */
+  function evRef(ev) {
+    if (!ev || !ev.sha16) return null;
+    S.evCache = S.evCache || {};
+    var ck = ev.sha16 + '@' + String(S.lastLoad && S.lastLoad.getTime());
+    if (S.evCache[ck] !== undefined) return S.evCache[ck] ? { path: S.evCache[ck].path, name: S.evCache[ck].name || '', page: ev.page || null, box: ev.box || null } : null;
+    var hit = null;
+    var walk = function (o, d) {
+      if (hit || !o || typeof o !== 'object' || d > 7) return;
+      if (Array.isArray(o)) { for (var i = 0; i < o.length && !hit; i++) walk(o[i], d + 1); return; }
+      if (o.sha16 === ev.sha16 && o.path) { hit = o; return; }
+      Object.keys(o).forEach(function (k) { if (!hit && o[k] && typeof o[k] === 'object') walk(o[k], d + 1); });
+    };
+    walk(S.queue, 0); walk(S.photos, 0); walk(S.jik, 0);
+    S.evCache[ck] = hit ? { path: hit.path, name: hit.name || '' } : null;
+    return hit ? { path: hit.path, name: hit.name || '', page: ev.page || null, box: ev.box || null } : null;
+  }
+  function evText(ev) {
+    var out = [];
+    if (ev.origin === 'question') out.push('根拠: 質問の文' + (ev.staff_text ? '「' + ev.staff_text + '」' : ''));
+    else if (ev.origin === 'reread') out.push('根拠: 原本' + (FIX_SRC[ev.source] ? '（' + FIX_SRC[ev.source] + (ev.page ? ' p.' + ev.page : '') + '）' : '') + 'を拡大して読み直し → ' + (ev.read_text || ''));
+    if (FIX_CMP[ev.compare]) out.push(FIX_CMP[ev.compare]);
+    return out;
+  }
+  /* 根拠の窓 — 原本 (PDF の頁 · 写真) + 赤い枠 (エンジンが読んだ所 · 0..1000) · 拡大・補正 と同じ 拡大 · 移動 (js/zoompan.js) · 「その所へ」 = 枠を真ん中に拡大 */
+  function evOpen(ref, label) {
+    var b = (ref.box && ref.box.length === 4) ? ref.box.map(function (n) { return Math.max(0, Math.min(1000, +n || 0)); }) : null;
+    var pct = function (n) { return (n / 10).toFixed(2) + '%'; };
+    var isPdf = /\.pdf$/i.test(ref.path || '');
+    var inner = isPdf ? '<div class="c01-pdf" data-pdf="' + esc(ref.path) + '" data-page="' + (+ref.page || 1) + '" data-bw="' + Math.max(280, Math.min(900, Math.round((window.innerWidth || 900) * 0.92) - 48)) + '" data-ev="1"><canvas></canvas><span class="c01-pdfmsg">読み込み中…</span></div>'
+      : imgTag(ref.path, 'c01-evimg', label);
+    var html = '<div class="c01-mh"><b>根拠 — ' + esc(label) + '</b><span class="t2 mono">' + esc((ref.name || '') + (isPdf && ref.page ? ' · p.' + ref.page : '')) + '</span><span class="c01-flex"></span>' +
+      (C01.zoomBar ? C01.zoomBar('ev-z') : '') + (b ? '<button class="c01-btn-ghost2" id="ev-focus">その所へ</button>' : '') + '<button class="c01-btn-ghost2" data-close>閉じる</button></div>' +
+      '<div class="c01-mb"><div class="c01-evstage" id="ev-stage"><div class="c01-evwrap" id="ev-wrap">' + inner +
+      (b ? '<div class="c01-evbox" style="left:' + pct(b[0]) + ';top:' + pct(b[1]) + ';width:' + pct(b[2] - b[0]) + ';height:' + pct(b[3] - b[1]) + '"></div>' : '') + '</div></div>' +
+      '<p class="t2">' + (b ? '赤い枠 = エンジンが その値を読んだ所 · ' : '') + 'ホイール · ダブルクリック · 指 2 本で拡大 · 引っ張って移動（原本は変えません）</p></div>';
+    showModal(html, 'c01-modal-ev');
+    hydrate($('c01-modal'));
+    var wrap = $('ev-wrap'), zp = (C01.ZoomPan && wrap) ? C01.zoomBind(new C01.ZoomPan($('ev-stage'), [wrap], {}), 'ev-z') : null;
+    S.evzp = zp;
+    var focus = function () {
+      if (!zp || !b) return;
+      var w = (b[2] - b[0]) / 1000, h = (b[3] - b[1]) / 1000, s = Math.max(1, Math.min(C01.ZoomPan.MAX, 0.5 / Math.max(w, h, 0.02)));
+      zp.s = s; zp.fx = 0.5 - ((b[0] + b[2]) / 2000) * s; zp.fy = 0.5 - ((b[1] + b[3]) / 2000) * s; zp.apply();
+    };
+    if ($('ev-focus')) $('ev-focus').onclick = focus;
+    var im = wrap && wrap.querySelector('img');
+    if (im) im.addEventListener('load', focus, { once: true });
+    setTimeout(focus, 900);                                        /* PDF = 描き終わる頃 · 画像 (キャッシュ済み) */
+  }
+  function fixBox(a, s, i, q) {
+    var ev = s.evidence || {}, fd = s.field, key = fixKey(a.ask_id, s);
+    var f = rowByCid(q && q.container_id), act = fixAct(key), lab = FIELD_LABEL[fd] || fd;
+    var done = act && !act.undone;
+    var before = done ? ((S.fixBefore && S.fixBefore[key]) || ev.before || '') : fixCur(f, fd);
+    var h = '<div class="c01-fix" data-fixkey="' + esc(key) + '"><div class="k">値の修正（AI の案 · 押すのは担当者）</div>' +
+      '<div class="c01-fixvals"><span class="t2">' + esc(lab) + '</span><span class="c01-fixcol"><span class="t2">今の値</span><span class="mono old">' + (before ? esc(before) : '—') + '</span></span>' +
+      '<span class="c01-fixarrow">→</span><span class="c01-fixcol"><span class="t2">新しい値</span><span class="mono new">' + esc(s.value) + '</span></span></div>' +
+      evText(ev).map(function (t) { return '<div class="t2">' + esc(t) + '</div>'; }).join('');
+    var ref = evRef(ev);
+    if (ref) h += '<div><button class="c01-btn-sub" data-evopen="' + esc(a.ask_id) + '|' + i + '">根拠を見る（その所を拡大）</button></div>';
+    if (done) {
+      var refl = !act.pending && f && fixNorm(f.r[fd]) === fixNorm(act.a.value);
+      h += '<div class="c01-imp-ok">修正しました（元: ' + esc(before || '—') + '）。' + (refl ? '画面に反映しました' : '画面に反映まで 1〜2 分') + '</div>' +
+        (!act.pending ? '<div><button class="c01-undo2" data-fixundo="' + esc(key) + '|' + esc((q && q.container_id) || '') + '">元に戻す</button></div>' : '');
+    } else {
+      var why = fixWhy(f, s);
+      h += '<div class="c01-imp-b"><button class="c01-btn-pri c01-fixgo" data-fixgo="' + esc(a.ask_id) + '|' + i + '"' + (why ? ' disabled title="' + esc(why) + '"' : '') + '>' +
+        '値を <span class="mono">' + esc(s.value) + '</span> に修正</button></div>' + (why ? '<div class="t2">' + esc(why) + '</div>' : '') +
+        (act && act.undone ? '<div class="t2">前の修正は元に戻しました</div>' : '');
+    }
+    return h + '</div>';
+  }
+  function fixGo(aid, s, q) {
+    var f = rowByCid(q && q.container_id), why = fixWhy(f, s), fd = s.field, key = fixKey(aid, s);
+    if (why) { toast(why, 'warn'); return; }
+    if (fixAct(key) && !fixAct(key).undone) return;                 /* 2 回押し = 1 回 */
+    var v = C01.validate.field(fd, s.value);
+    if (v.warn && !window.confirm(v.warn)) return;                    /* #109 ③ と同じ確認窓 */
+    if (fd === 'ct') {
+      if (mergeRowsOn() && mergeTarget(f.iv, f.r, v.value)) { toast('同じ BKG の別の行に この CT があります — 行の ✎ 修正 から 「まとめる」 を選んでください', 'warn'); return; }
+      if (!ctDupWarn(f.iv.iv_no, v.value, f.r.container_id)) return;
+    }
+    var st0 = statusOf(f.r, f.iv, overlay()).st;                     /* ✎ 修正 と同じ: 自動OK · 確認済 の行 = 1 回確かめる */
+    if ((st0 === '自動OK' || st0 === '確認済') && !window.confirm('この行は ' + st0 + ' です。値を変えると 確認済（手入力）に変わり、記録されます。修正しますか？')) return;
+    if (compassIsDone(f.iv) && !window.confirm('COMPASS には入力済みです — 修正後に Compass入力 をもう一度。修正しますか？')) return;
+    var before = fixCur(f, fd);
+    S.fixBefore = S.fixBefore || {}; S.fixBefore[key] = before;
+    S.fixWait = S.fixWait || {}; S.fixWait[key] = { cid: f.r.container_id, fd: fd, value: v.value, at: Date.now() };
+    S.propOrigin = { action: 'manual_input', ask_id: aid, key: key, until: Date.now() + 120000 };
+    var a = mkAction('manual_input', { iv: f.iv.iv_no, ct: f.r.ct, field: fd, value: v.value, source: '手入力', queue_id: editQid(f.r, fd), override: v.override,
+      mode: valueEditOn() ? 'edit' : null });
+    writeAction(a).then(function () { toast('修正しました（元: ' + (before || '—') + '）。画面に反映まで 1〜2 分', 'success'); render(); }).catch(function () { delete S.fixWait[key]; });
+  }
+  function fixUndo(key, cid) {
+    var act = fixAct(key), f = rowByCid(cid);
+    if (!act || act.undone || act.pending || !f) { toast('元に戻せません（行が見つかりません）', 'warn'); return; }
+    undoValue(f.iv, f.r, act.a.field, { action_id: act.a.action_id, value: act.a.value });
+  }
+  /* 反映された (エンジンの実況表の値 = 修正した値) → トースト 1 回 + 実況表のその行を 1 回 強調 (今 見えていなければ 見えた時 · 10 分まで) */
+  function fixReflect() {
+    if (!S.fixWait) return;
+    Object.keys(S.fixWait).forEach(function (key) {
+      var w = S.fixWait[key], act = fixAct(key), f = rowByCid(w.cid);
+      if (!act || act.undone || Date.now() - w.at > 600000) { delete S.fixWait[key]; return; }
+      if (act.pending || !f || fixNorm(f.r[w.fd]) !== fixNorm(w.value)) return;
+      if (!w.toasted) { w.toasted = 1; toast((FIELD_LABEL[w.fd] || w.fd) + ' の修正が画面に反映されました', 'success'); }
+      var rk = rowKey(f.iv, f.r), tr = null;
+      document.querySelectorAll('tr.c01-row[data-key]').forEach(function (el) { if (!tr && el.getAttribute('data-key') === rk) tr = el; });
+      if (!tr) return;
+      tr.classList.remove('c01-flash'); void tr.offsetWidth; tr.classList.add('c01-flash');
+      setTimeout(function () { tr.classList.remove('c01-flash'); }, 2600);
+      delete S.fixWait[key];
+    });
+  }
+  /* ボタンが無い答え — 「急ぎで依頼」 (CUT 今日・明日の IV = 赤) · 「改善依頼（一般）」 */
+  function reqSent(aid) {
+    var out = null;
+    (S.actions || []).concat(S.mine || []).forEach(function (x) {
+      var a = x.action || x;
+      if (a.value && a.value.ask_id === aid && (a.action === 'urgent_request' || a.action === 'improve_request')) out = out && out.action === 'urgent_request' ? out : a;
+    });
+    return out;
+  }
+  function reqBox(a, r) {
+    if (!urgOn()) return '';
+    var sent = reqSent(a.ask_id);
+    if (sent && sent.action === 'urgent_request') return '<div class="c01-req"><div class="c01-imp-ok">急ぎで依頼しました（今日中に対応 · 右上 AI 相談 → 依頼一覧）</div></div>';
+    if (sent) {
+      var st = impState(a.ask_id);
+      return '<div class="c01-req"><div class="c01-imp-ok">' + (st && st.no ? '改善依頼（一般）を受け付けました（No.' + esc(String(st.no)) + '） · ' + esc(st.status || '') : '改善依頼（一般）を送りました（受付番号は まもなく）') + '</div></div>';
+    }
+    var red = !!(r && r.urgent === 1);
+    return '<div class="c01-req"><div class="k">ボタンで直せない時</div><div class="c01-imp-b">' +
+      '<button class="c01-btn-ghost2 c01-urg' + (red ? ' red' : '') + '" data-urg="' + esc(a.ask_id) + '"' + (red ? ' title="CUT が今日・明日の IV です"' : '') + '>急ぎで依頼' + (red ? '（CUT 今日・明日）' : '') + '</button>' +
+      '<button class="c01-btn-sub" data-reqgen="' + esc(a.ask_id) + '">改善依頼（一般）</button></div>' +
+      '<div class="t2">急ぎ = 今日中に対応 · 一般 = 1日以上（右上 AI 相談 → 依頼一覧 で状態を見られます）</div></div>';
+  }
+  function askById(aid) { return (S.asks || []).filter(function (y) { return y.ask && y.ask.ask_id === aid; })[0]; }
+  function urgSend(aid) {
+    var x = askById(aid);
+    if (!x) return;
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    if (reqSent(aid) && reqSent(aid).action === 'urgent_request') return;          /* 2 回押し = 1 件 */
+    if (!window.confirm('急ぎ（今日中）で依頼しますか？\n担当（リナイ · トール）が 今日中に確認します。')) return;
+    var c = x.ask.card || {}, r = x.reply || {}, im = r.improve || null;
+    var note = im ? [im.title, im.summary].filter(Boolean).join(' / ') : ('カード: ' + (c.kind ? kindLabel(c.kind) : '') + ' · 答え: ' + String(r.answer || '').split('\n')[0]);
+    var v = { ask_id: aid, question: String(x.ask.question || '').slice(0, 1000), row: c.container_id ? String(c.container_id).slice(0, 80) : null,
+      by_name: S.me.name ? String(S.me.name).slice(0, 80) : null, note: note ? note.slice(0, 600) : null };
+    var a = mkAction('urgent_request', { iv: c.iv || null, ct: c.ct || null, field: null, value: v, source: null, queue_id: c.queue_id || null });
+    writeAction(a).then(function () { toast('急ぎで依頼しました（今日中に対応）', 'success'); render(); }).catch(function () {});
+  }
+  function genSend(aid) {
+    var x = askById(aid);
+    if (!x) return;
+    if (!S.me || !S.me.email) { toast('担当者を選んでください', 'warn'); return; }
+    if (reqSent(aid)) return;
+    var c = x.ask.card || {}, r = x.reply || {};
+    var v = { ask_id: aid, question: String(x.ask.question || '').slice(0, 1000),
+      title: ('AI 相談で直せなかった: ' + (c.kind ? kindLabel(c.kind) : '') + (c.iv ? ' ' + c.iv : '')).slice(0, 200),
+      summary: ('質問: ' + String(x.ask.question || '') + '\n答え: ' + String(r.answer || '')).slice(0, 1200), cause: null,
+      mail_ids: [], ivs: c.iv ? [String(c.iv)] : [], bkgs: [], by_name: S.me.name || null };
+    var a = mkAction('improve_request', { iv: c.iv || null, value: v });
+    S.impWait = S.impWait || {}; S.impWait[aid] = 1;
+    writeAction(a).then(function () { toast('改善依頼（一般）を送りました（受付番号は まもなく）', 'success'); render(); }).catch(function () { delete S.impWait[aid]; });
+  }
+  function fixBind(box, q) {
+    var sugOf = function (attr, el) {
+      var pr = el.getAttribute(attr).split('|'), x = askById(pr[0]);
+      return { aid: pr[0], s: x && x.reply && (x.reply.suggestions || []).filter(function (z) { return ASK_ACT[z.action]; })[+pr[1]] };
+    };
+    box.querySelectorAll('[data-fixgo]').forEach(function (el) { el.onclick = function () { var o = sugOf('data-fixgo', el); if (o.s) fixGo(o.aid, o.s, q); }; });
+    box.querySelectorAll('[data-evopen]').forEach(function (el) {
+      el.onclick = function () { var o = sugOf('data-evopen', el), ref = o.s && evRef(o.s.evidence); if (ref) evOpen(ref, (FIELD_LABEL[o.s.field] || o.s.field) + ' ' + o.s.value); };
+    });
+    box.querySelectorAll('[data-evchk]').forEach(function (el) {
+      el.onclick = function () {
+        var pr = el.getAttribute('data-evchk').split('|'), x = askById(pr[0]), ck = x && x.reply && (x.reply.fix_check || [])[+pr[1]], ref = ck && evRef(ck);
+        if (ref) evOpen(ref, (FIELD_LABEL[ck.field] || ck.field) + ' ' + ck.read_value);
+      };
+    });
+    box.querySelectorAll('[data-fixundo]').forEach(function (el) { el.onclick = function () { var pr = el.getAttribute('data-fixundo').split('|'); fixUndo(pr[0], pr[1]); }; });
+    box.querySelectorAll('[data-urg]').forEach(function (el) { el.onclick = function () { urgSend(el.getAttribute('data-urg')); }; });
+    box.querySelectorAll('[data-reqgen]').forEach(function (el) { el.onclick = function () { genSend(el.getAttribute('data-reqgen')); }; });
+  }
+  /* 原本と違う (エンジンが fix_check) = ボタンなし · 「原本では A に見えます」 + その所 */
+  function fixChkBox(a, r) {
+    if (!fixOn()) return '';
+    return (r.fix_check || []).map(function (ck, i) {
+      var ref = evRef(ck);
+      return '<div class="c01-fixchk"><div class="k">原本と違います — ボタンは出しません</div><div>' + esc(FIELD_LABEL[ck.field] || ck.field) + ': 原本では <b class="mono">' + esc(ck.read_value) + '</b> に見えます' +
+        (ck.staff_value ? '（質問の値 <span class="mono">' + esc(ck.staff_value) + '</span>）' : '') + '</div>' +
+        '<div class="t2">原本をもう一度見てください' + (ref ? '' : '') + '</div>' + (ref ? '<div><button class="c01-btn-sub" data-evchk="' + esc(a.ask_id) + '|' + i + '">原本のその所を見る</button></div>' : '') + '</div>';
+    }).join('');
+  }
   function askOn() { return !!(C01.ASK && C01.ASK.enabled && S.src && typeof S.src.listAsks === 'function'); }
   function askKey(q) { return (q.iv_no || '') + '|' + cardKey(q); }
   function askId() { return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
@@ -3973,13 +4211,20 @@ window.C01 = window.C01 || {};
       var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
       if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
       var sug = (r.suggestions || []).filter(function (s) { return ASK_ACT[s.action]; });
+      /* v0.3.57 (R11F): fix_value = 「値を B に修正」 の箱 (今の値 · 新しい値 · 根拠) — 行 (container_id) がある時だけ · 他のボタンは今のまま */
+      var isFix = function (s) { return fixOn() && s.action === 'fix_value' && !!(q && q.container_id); };
+      var fixes = [], rest = [];
+      sug.forEach(function (s, i) { (isFix(s) ? fixes : rest).push({ s: s, i: i }); });
+      var nBtn = rest.length + fixes.length + propList(r).length + (r.improve ? 1 : 0);
       return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
         (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') +
-        (sug.length ? '<div class="c01-ask-sug">' + sug.map(function (s, i) {
+        fixes.map(function (o) { return fixBox(a, o.s, o.i, q); }).join('') + fixChkBox(a, r) +
+        (rest.length ? '<div class="c01-ask-sug">' + rest.map(function (o) {
+          var s = o.s, i = o.i;
           var ok = askCan(q, s);
           return '<button class="c01-btn-ghost2" data-asksug="' + esc(a.ask_id) + '|' + i + '"' + (ok ? '' : ' disabled title="この画面では使えません"') + '>' +
             esc(s.label || s.action) + (s.value ? ' <span class="mono">' + esc(s.value) + '</span>' : '') + (s.iv ? ' <span class="mono">' + esc(s.iv) + '</span>' : '') + '</button>';
-        }).join('') + '<span class="t2">押すと この画面の今のボタンと同じ (記録 · 元に戻す)</span></div>' : '') + propBox(a, r, q) + fbBox(a, r) + '</div>';
+        }).join('') + '<span class="t2">押すと この画面の今のボタンと同じ (記録 · 元に戻す)</span></div>' : '') + propBox(a, r, q) + (nBtn ? '' : reqBox(a, r)) + fbBox(a, r) + '</div>';
     }).join('') + '</div>';
     h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + ASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-askq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
     h += '<div class="c01-ask-in"><input id="ask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.askDraft[k] || '') + '" aria-label="AI への質問">' +
@@ -4050,6 +4295,7 @@ window.C01 = window.C01 || {};
     if ($('ask-send')) $('ask-send').onclick = function () { askSend(q, inp && inp.value); };
     box.querySelectorAll('[data-askq]').forEach(function (el) { el.onclick = function () { askSend(q, ASK_QUICK[+el.getAttribute('data-askq')]); }; });
     propBind(box, q);                                              /* v0.3.46 (R9X Part 0 · 2) */
+    fixBind(box, q);                                               /* v0.3.57 (R11F) */
     box.querySelectorAll('[data-asksug]').forEach(function (el) {
       el.onclick = function () {
         var pr = el.getAttribute('data-asksug').split('|');
@@ -4096,6 +4342,7 @@ window.C01 = window.C01 || {};
       return a.action === 'improve_request' && a.value && a.value.ask_id === aid;
     });
     if (sent) return { sent: true };
+    if (urgOn() && reqSent(aid) && reqSent(aid).action === 'urgent_request') return { urg: true };     /* v0.3.57 (R11F): 急ぎ（今日中）で依頼した */
     return S.impDrop && S.impDrop[aid] ? { dropped: true } : null;
   }
   function impBox(a, r) {
@@ -4108,21 +4355,43 @@ window.C01 = window.C01 || {};
         (im.ivs || []).length ? 'IV ' + im.ivs.join(', ') : ''].filter(Boolean).join(' · ')) + '</div>' : '');
     if (st && st.no) h += '<div class="c01-imp-ok">依頼を受け付けました（No.' + esc(String(st.no)) + '） · ' + esc(st.status || '') + '</div>';
     else if (st && st.sent) h += '<div class="c01-imp-ok">依頼を送りました（受付番号は まもなく）</div>';
+    else if (st && st.urg) h += '<div class="c01-imp-ok">急ぎ（今日中）で依頼しました · 依頼一覧</div>';
     else if (st && st.dropped) h += '<div class="t2">依頼しませんでした</div>';
+    else if (urgOn()) h += '<div class="c01-imp-b"><button class="c01-btn-ghost2" data-impsend="' + esc(a.ask_id) + '">一般で依頼（1日以上）</button>' +
+      '<button class="c01-btn-ghost2 c01-urg" data-impurg="' + esc(a.ask_id) + '">急ぎで依頼（今日中）</button>' +
+      '<button class="c01-btn-sub" data-impdrop="' + esc(a.ask_id) + '">やめる</button></div>';     /* v0.3.57 (R11F · #317): 一般 / 急ぎ */
     else h += '<div class="c01-imp-b"><button class="c01-btn-ghost2" data-impsend="' + esc(a.ask_id) + '">この内容で依頼</button>' +
       '<button class="c01-btn-sub" data-impdrop="' + esc(a.ask_id) + '">やめる</button></div>';
     return h + '</div>';
   }
+  /* v0.3.57 (R11F · #317): 急ぎ（今日中）の依頼 = _actions urgent_request (エンジンは受付だけ · 一覧ファイルなし) — 送った記録から 行を作る (状態 = 受付 · 送信中) */
+  function urgRows() {
+    if (!urgOn()) return [];
+    var out = [], seen = {};
+    (S.actions || []).concat(S.mine || []).forEach(function (x) {
+      var a = x.action || x;
+      if (a.action !== 'urgent_request' || seen[a.action_id]) return;
+      seen[a.action_id] = 1;
+      var v = a.value || {};
+      out.push({ urg: true, no: '急', at: a.at, by: a.by, by_name: v.by_name, title: String(v.question || '').slice(0, 120) + (a.iv ? ' (' + a.iv + ')' : ''),
+        status: x.pending ? '送信中' : '受付', plan: '今日中に対応' });
+    });
+    return out.sort(function (p, q) { return String(p.at) < String(q.at) ? 1 : -1; });
+  }
   function reqsHtml() {
     var all = (S.reqs && S.reqs.items) || null;
+    if (urgOn() && urgRows().length) all = urgRows().concat(all || []);
     if (!all) return '<p class="t2 c01-ask-empty">依頼一覧はまだありません（エンジンの一覧なし）。</p>';
     var me = ((S.me && S.me.email) || '').toLowerCase();
     var mine = S.gReqAll ? all : all.filter(function (x) { return String(x.by || '').toLowerCase() === me; });
     var h = '<div class="c01-reqsw"><button class="c01-chip' + (S.gReqAll ? '' : ' on') + '" data-reqall="0">自分の依頼</button>' +
       '<button class="c01-chip' + (S.gReqAll ? ' on' : '') + '" data-reqall="1">全体</button></div>';
     if (!mine.length) return h + '<p class="t2 c01-ask-empty">依頼はまだありません。</p>';
-    return h + '<table class="c01-reqs"><thead><tr><th>No</th><th>日付</th><th>内容</th><th>状態</th></tr></thead><tbody>' + mine.map(function (x) {
-      return '<tr><td class="mono">' + esc(String(x.no)) + '</td><td class="mono">' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + '</td>' +
+    var kd = urgOn();                                              /* v0.3.57 (R11F): 区分 (一般 · 急ぎ) — 切 = 今までの表 */
+    return h + '<table class="c01-reqs"><thead><tr><th>No</th>' + (kd ? '<th>区分</th>' : '') + '<th>日付</th><th>内容</th><th>状態</th></tr></thead><tbody>' + mine.map(function (x) {
+      return '<tr' + (x.urg ? ' class="c01-requrg"' : '') + '><td class="mono">' + esc(String(x.no)) + '</td>' +
+        (kd ? '<td>' + (x.urg ? '<span class="c01-reqkd urg" title="今日中に対応">急ぎ</span>' : '<span class="c01-reqkd" title="1日以上">一般</span>') + '</td>' : '') +
+        '<td class="mono">' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + '</td>' +
         '<td>' + (x.source === 'auto' ? '<span class="c01-trialtag c01-auto" title="AI 相談で解決できなかった質問を 自動で受け付けました">自動</span> ' : '') +
         esc(x.title || '') + (S.gReqAll && x.by_name ? ' <span class="t2">(' + esc(x.by_name) + ')</span>' : '') +
         (x.memo ? '<div class="t2">' + esc(x.memo) + '</div>' : '') + '</td>' +
@@ -4144,7 +4413,7 @@ window.C01 = window.C01 || {};
       var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
       if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
       return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
-        (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') + impBox(a, r) + propBox(a, r, null) + fbBox(a, r) + '</div>';
+        (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') + impBox(a, r) + propBox(a, r, null) + (r.improve || propList(r).length ? '' : reqBox(a, r)) + fbBox(a, r) + '</div>';
     }).join('') + '</div>';
     h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + GASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-gaskq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';
     h += '<div class="c01-ask-in"><input id="gask-in" placeholder="質問を入力 (日本語 · 한국어)" value="' + esc(S.gDraft || '') + '" aria-label="AI への質問（全体）">' +
@@ -4205,6 +4474,8 @@ window.C01 = window.C01 || {};
     box.querySelectorAll('[data-gaskq]').forEach(function (el) { el.onclick = function () { S.gDraft = GASK_QUICK[+el.getAttribute('data-gaskq')] + ' : '; render(); var i2 = $('gask-in'); if (i2) i2.focus(); }; });
     box.querySelectorAll('[data-impsend]').forEach(function (el) { el.onclick = function () { impSend(el.getAttribute('data-impsend')); }; });
     propBind(box, null);                                           /* v0.3.46 (R9X Part 0 · 2) */
+    fixBind(box, null);                                            /* v0.3.57 (R11F): 急ぎで依頼 · 改善依頼（一般） */
+    box.querySelectorAll('[data-impurg]').forEach(function (el) { el.onclick = function () { urgSend(el.getAttribute('data-impurg')); }; });
     box.querySelectorAll('[data-impdrop]').forEach(function (el) {
       el.onclick = function () { S.impDrop = S.impDrop || {}; S.impDrop[el.getAttribute('data-impdrop')] = 1; render(); };
     });
@@ -4385,6 +4656,7 @@ window.C01 = window.C01 || {};
     renderGask();                                                  /* v0.3.39 (R9L · #273): 右上 「AI 相談」 (全体) — どの画面でも */
     renderRowAsk();                                                /* v0.3.46 (R9W Part 1-2): 実況表の行の AI 相談 */
     impToasts();
+    fixReflect();                                                  /* v0.3.57 (R11F): 修正が反映 = その行を 1 回強調 */
     /* 差し替えで箱が新しくなった時も 同じ画面ならスクロール位置を戻す */
     if (view0 === S.view) {
       Object.keys(keep).forEach(function (id) { var e = $(id); if (e && e !== keep[id][0]) { e.scrollTop = keep[id][1]; e.scrollLeft = keep[id][2]; } });
