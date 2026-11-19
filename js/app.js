@@ -123,7 +123,20 @@ window.C01 = window.C01 || {};
   var IDIFF_WHY = { record: 'Compass入力の記録と、今の行の値・枠が違います', new_doc: 'Compass入力の後で届いた書類・写真の値が、入力した値と違います',
     compass_slot: 'Compass入力の後で、COMPASS ではこの CT が別の枠に入っています' };
   var IDIFF_FIELDS = [['slot', '枠'], ['ct', 'CT番号'], ['seal', 'シール番号'], ['n_w', '正味重量'], ['t_w', '風袋重量'], ['bales', 'ベール数']];
-  var FROZEN_LABEL = '確認済（入力済）';
+  var FROZEN_LABEL = '入力済';   /* v0.3.60 (R11R · #334): 絞り込みの名前 = 入力済 (自動OK · 確認済 の両方) · 行は 「自動OK ✓入力済」 / 「確認済 ✓入力済」 */
+  /* v0.3.60 (R11R · 決定 #334): 自動OK (エンジン = 緑) と 確認済 (人の手 = 青) を 画面全体で分ける — 規則はこの 1 か所だけ。
+     固定の行 (Compass入力 済み · エンジン input_frozen) は エンジンの出力 status が 確認済 になるので、固定の前の判定で分ける:
+     エンジン判定 (engine_status) が 自動OK · 人の値が 1 つも無い (✎ 修正 · 値を修正 · 確認・入力 の値 · 作業日 も含む) · AUTO_OK_EDITED / CT_CHECKDIGIT_OVERRIDE 無し = auto (エンジン)。
+     それ以外の 確認済 (再確認 · 受信中 から人が確認 · 人の値あり) = human。Compass入力 は全部の行が 自動OK / 確認済 の時だけ = 固定の前に 再確認 · 受信中 だった行は 必ず人の値がある。 */
+  function dispKind(r, x) {
+    if (x.st === '自動OK') return 'auto';
+    if (x.st !== '確認済') return '';
+    if (!x.frozen) return 'human';
+    var info = (r && r.info) || [];
+    var flagged = info.some(function (s) { return /^AUTO_OK_EDITED\(/.test(s) || s === 'CT_CHECKDIGIT_OVERRIDE'; });
+    return r && r.engine_status === '自動OK' && !Object.keys(x.human || {}).length && !flagged ? 'auto' : 'human';
+  }
+  C01.dispKind = dispKind;
   function idiffSlotText(iv, g) {
     if (!g) return '（なし）';
     var s = ((iv && iv.slots) || []).filter(function (x) { return x.slot_guid === g; })[0];
@@ -783,7 +796,7 @@ window.C01 = window.C01 || {};
 
   function buildGroups() {
     var ov = overlay();
-    var out = [], cnt = { check: 0, compass: 0, remind: 0, frozen: 0 }, no = 0;
+    var out = [], cnt = { check: 0, compass: 0, remind: 0, frozen: 0, auto: 0, human: 0 }, no = 0;
     var today = (S.info && S.info.today) || '';
     var ivs = ((S.jik && S.jik.ivs) || []).filter(function (iv) { return portOk(iv.pol) && ivLive(iv); })
       .slice().sort(function (a, b) { return (a.cy_cut || '') < (b.cy_cut || '') ? -1 : (a.cy_cut || '') > (b.cy_cut || '') ? 1 : (a.iv_no < b.iv_no ? -1 : 1); });
@@ -814,7 +827,9 @@ window.C01 = window.C01 || {};
           (cand.where || []).join(' / ') + (cand.recv && cand.recv.length ? ' · ' + cand.recv.join(' / ') : '') + '）— 未着ではない可能性 · 催促の対象外' : '';
         var candQid = cand && cand.qid && (cand.files || []).length ? cand.qid : null;    /* v0.3.31 (R8V #254): 候補ファイルがある時だけ押せる */
         var frozen = !!r.input_frozen && x.st === '確認済' && !ivUndo && !(ov.take && ov.take[r.container_id]);   /* v0.3.52 (R10W · #307): エンジン input_frozen = 確認済（入力済） */
-        return { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, rTitle: rTitle, wait: wait, openQ: openQ, candTitle: candTitle, candQid: candQid, frozen: frozen };
+        var row = { kind: 'row', key: rowKey(iv, r), r: r, st: x.st, human: x.human, vals: vals, short: short, rTitle: rTitle, wait: wait, openQ: openQ, candTitle: candTitle, candQid: candQid, frozen: frozen };
+        row.dk = dispKind(r, row);                            /* v0.3.60 (R11R · #334): auto (緑) / human (青) / '' */
+        return row;
       });
       var unarr = (iv.mail_missing || []).map(function (m) {
         return { kind: 'missing', key: iv.iv_no + '|missing|' + m.slot_guid, m: m, st: 'メール未着', vals: { work_date: m.work_date }, wait: 'メール未着' };
@@ -829,6 +844,8 @@ window.C01 = window.C01 || {};
       if (allOk && !compassDone) cnt.compass += 1;
       if (remind) cnt.remind += 1;
       cnt.frozen += rows.filter(function (x) { return x.frozen; }).length;
+      cnt.auto += rows.filter(function (x) { return x.dk === 'auto'; }).length;     /* v0.3.60 (R11R · #334): 入力済 を含む · エンジン判定で分ける */
+      cnt.human += rows.filter(function (x) { return x.dk === 'human'; }).length;
       var onlyUn = rows.length === 0 && unarr.length > 0;
       if (onlyUn && !S.showUnarrived) return;
       if (S.filter === 'check' && !hasCheck) return;
@@ -983,8 +1000,10 @@ window.C01 = window.C01 || {};
       '<button class="c01-f c01-f-check' + (S.filter === 'check' ? ' on' : '') + '" data-filter="check">要確認 ' + b.cnt.check + '台</button>' +
       '<button class="c01-f c01-f-compass' + (S.filter === 'compass' ? ' on' : '') + '" data-filter="compass">Compass入力待ち ' + b.cnt.compass + '件</button>' +
       '<button class="c01-f c01-f-remind' + (S.filter === 'remind' ? ' on' : '') + '" data-filter="remind">催促候補 ' + b.cnt.remind + '件</button>' +
-      (b.cnt.frozen || S.filter === 'frozen' ? '<button class="c01-f c01-f-frozen' + (S.filter === 'frozen' ? ' on' : '') + '" data-filter="frozen" title="Compass入力 の時の値 · 枠で固定した行（エンジンが後で値を変えても そのまま · 違いは 確認・入力 「入力後の差異」）">' +
-        FROZEN_LABEL + ' ' + b.cnt.frozen + '台</button>' : '') +      /* v0.3.52 (R10W · #307): 固定の行がある時だけ */
+      (b.cnt.frozen || S.filter === 'frozen' ? '<button class="c01-f c01-f-frozen' + (S.filter === 'frozen' ? ' on' : '') + '" data-filter="frozen" title="Compass入力 の時の値 · 枠で固定した行（自動OK · 確認済 の両方 · エンジンが後で値を変えても そのまま · 違いは 確認・入力 「入力後の差異」）">' +
+        FROZEN_LABEL + ' ' + b.cnt.frozen + '台</button>' : '') +      /* v0.3.52 (R10W · #307): 固定の行がある時だけ · v0.3.60 (R11R): 名前 = 入力済 */
+      '<span class="c01-kcnt" id="kind-count" title="入力済 の行も含む · エンジンの判定で分けた数（緑 = エンジンの自動OK · 青 = 人が確認）">' +
+        '<span class="st-ok">自動OK ' + b.cnt.auto + '</span> · <span class="st-hum">確認済 ' + b.cnt.human + '</span></span>' +      /* v0.3.60 (R11R · #334) */
       '<label class="c01-chk"><input type="checkbox" id="show-unarrived"' + (S.showUnarrived ? ' checked' : '') + '>メール未着も表示</label>' +
       '</div></div>';
     /* v0.3.2 (R7B): 横スクロール 0 — 列幅は colgroup (table-layout: fixed) · 長い列 (品目・圧縮業者・Plant) は 2 行まで + title で全文 */
@@ -1015,7 +1034,7 @@ window.C01 = window.C01 || {};
             (!g.onlyUn ? '<button class="c01-blocked" data-compass="' + esc(iv.iv_no) + '" title="全台が 自動OK / 確認済 になると入力できます（比較表だけ見られます）">Compass入力（未完了あり）</button>' : '')) +
         '</div></td></tr>';
       g.rows.forEach(function (x) {
-        var cls = x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';
+        var cls = x.dk === 'human' ? 'ok hum' : x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';   /* v0.3.60 (R11R): 人の確認 = 青 (hum) */
         if (S.sel === x.key) cls += ' sel';
         if (x.kind === 'missing') {
           html += '<tr class="c01-row wait missing" data-key="' + esc(x.key) + '"><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') + '</td>' + c1(iv.iv_no, 'mono') +
@@ -1027,10 +1046,14 @@ window.C01 = window.C01 || {};
         var photos = r.photos || 0;
         var ctCell = photos > 0 ? '<button class="c01-ctlink" data-photos="' + esc(x.key) + '" title="クリックで写真を新しいタブに表示 (Shift+クリック = この画面で表示)">' + esc(v.ct || '') + '</button>' : '<span class="mono">' + esc(v.ct || '') + '</span>';
         var hmark = function (f) { return x.human[f] ? ' <span class="c01-hm" title="確認済 ' + esc(x.human[f].by || '') + '">✓</span>' : ''; };
-        var stLab = x.frozen ? FROZEN_LABEL : x.st;          /* v0.3.52 (R10W · #307) */
+        /* v0.3.60 (R11R · #334): 状況 = 自動OK (緑) / 確認済 (青) · 固定の行は後ろに小さく 「✓入力済」 (色が見えなくても 文字で分かる) */
+        var hum = x.dk === 'human';
+        var stK = hum ? 'st-hum' : 'st-ok';
+        var stLab = (hum ? '確認済' : x.dk === 'auto' ? '自動OK' : esc(x.st)) + (x.frozen ? ' <small class="c01-inmark">✓入力済</small>' : '');
         var frzT = x.frozen ? 'Compass入力 の時の値 · 枠で固定（' + String((r.input_frozen || {}).done_at || '').slice(5, 16).replace('T', ' ') + ' 入力）— 元に戻す = Compass入力 の 「元に戻す」' : '';
-        var stCell = (x.st === '自動OK' || x.st === '確認済') && valueEditOn() ? '<button class="st-ok c01-okedit' + (x.frozen ? ' c01-frozen' : '') + '" data-okedit="' + esc(x.key) + '" title="' + esc((frzT ? frzT + ' · ' : '') + 'クリックで値を修正（確認済（手入力）に変わります）') + '">' + stLab + '</button>' :
-          x.st === '自動OK' || x.st === '確認済' ? '<span class="st-ok' + (x.frozen ? ' c01-frozen' : '') + '"' + (frzT ? ' title="' + esc(frzT) + '"' : '') + '>' + stLab + '</span>' :
+        var dkT = x.dk === 'auto' ? 'エンジンの自動OK' + (x.frozen ? '（Compass入力 済み）' : '') : x.dk === 'human' ? '人が確認した行' + (x.frozen ? '（Compass入力 済み）' : '') : '';
+        var stCell = (x.st === '自動OK' || x.st === '確認済') && valueEditOn() ? '<button class="' + stK + ' c01-okedit' + (x.frozen ? ' c01-frozen' : '') + '" data-okedit="' + esc(x.key) + '" data-dk="' + esc(x.dk) + '" title="' + esc(dkT + ' · ' + (frzT ? frzT + ' · ' : '') + 'クリックで値を修正（確認済（手入力）に変わります）') + '">' + stLab + '</button>' :
+          x.st === '自動OK' || x.st === '確認済' ? '<span class="' + stK + (x.frozen ? ' c01-frozen' : '') + '" data-dk="' + esc(x.dk) + '" title="' + esc(dkT + (frzT ? ' · ' + frzT : '')) + '">' + stLab + '</span>' :
           x.st === '再確認' ? '<button class="c01-checkbtn" data-sel="' + esc(x.key) + '"' + (x.rTitle ? ' title="' + esc(x.rTitle) + '"' : '') + '>⚠ 要確認 · ' + esc(x.short) + '</button>' :
             (x.candQid ? '<button class="st-wait c01-cand c01-candbtn" data-cand="' + esc(x.candQid) + '" title="' + esc(x.candTitle + ' — クリックで候補のファイルを開く（IVに連結 / 搬入票ではない）') + '">' + esc(x.wait) + ' ▸</button>' :
             '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>');
@@ -1058,7 +1081,7 @@ window.C01 = window.C01 || {};
     });
     if (!b.groups.length) html += '<tbody><tr><td colspan="15" class="c01-empty">表示する IV がありません（担当港・絞り込みを確認してください）</td></tr></tbody>';
     html += '</table></div>';
-    html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK / 確認済</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
+    html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK（エンジン）</span><span><i class="lg hum"></i>確認済（人が確認）</span><span><small class="c01-inmark">✓入力済</small> = Compass入力 済み</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
       (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠のない行 · 行が枠の数を超える）</span>' : '') +
       '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった行だけ差し替え (スクロール位置そのまま) */
@@ -2095,7 +2118,8 @@ window.C01 = window.C01 || {};
       '<section><h4>1. 自分の担当を見る</h4><p>実況表の 「担当港」 で <b>「自分の担当」</b> を押すと、自分の港の IV だけが出ます。「全港」 = 全部。港の名前を押すとその港だけ（複数選べます）。</p></section>' +
       '<section><h4>2. 状況の意味</h4><ul>' +
       '<li><span class="st-ok">自動OK</span> — エンジンの値がそろっています（手で確かめる必要なし）</li>' +
-      '<li><span class="st-ok">確認済</span> — 人が確認した値です</li>' +
+      '<li><span class="st-hum">確認済</span> — 人が確認した値です（青）</li>' +
+      '<li><span class="st-ok">自動OK</span> <small class="c01-inmark">✓入力済</small> / <span class="st-hum">確認済</span> <small class="c01-inmark">✓入力済</small> — Compass入力 済みの行（固定 · 色は入力の前の判定のまま）</li>' +
       '<li><span class="c01-help-chk">再確認</span> — 「⚠ 要確認」 を押して値を確かめてください</li>' +
       '<li><span class="st-wait">受信中</span> / <span class="st-wait">メール未着</span> — 書類・写真がまだそろっていません（待ち）</li></ul></section>' +
       (S.guide && (S.guide.items || []).length ? guideHtml() : '<section><h4>3. 確認・入力</h4><ul>' +

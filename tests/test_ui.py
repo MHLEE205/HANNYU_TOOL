@@ -21,7 +21,7 @@ ALLOWED = ("http://127.0.0.1", "https://mhlee205.github.io/LEENAI_COMMON/")
 RES = {"checks": [], "console_errors": [], "external_requests": []}
 
 
-FROZEN_TXT = "確認済（入力済）"   # v0.3.52 (R10W · #307)
+FROZEN_TXT = "✓入力済"   # v0.3.52 (R10W · #307) · v0.3.60 (R11R · #334): 「自動OK ✓入力済」 / 「確認済 ✓入力済」
 
 
 def ok(name, cond, detail=""):
@@ -3344,7 +3344,7 @@ def r10w_checks(page, root, shots, engine, engine_r10u=None):
        fr.count() == 2 and all(FROZEN_TXT in fr.nth(i).inner_text() for i in range(fr.count())) and all(fr.nth(i).get_attribute("data-status") == "確認済" for i in range(fr.count()))
        and "11-08 09:58" in (ft or "") and "元に戻す" in (ft or ""), [fr.count(), ft])
     fb = page.locator(".c01-f-frozen")
-    ok("R10W 필터 「確認済（入力済） 2台」 (고정 줄 있을 때만)", fb.count() == 1 and fb.inner_text() == FROZEN_TXT + " 2台", fb.inner_text() if fb.count() else None)
+    ok("R10W 필터 「入力済 2台」 (고정 줄 있을 때만 · R11R 이름)", fb.count() == 1 and fb.inner_text() == "入力済 2台", fb.inner_text() if fb.count() else None)
     n_iv = page.locator("tbody[data-iv]").count()
     fb.click()
     page.wait_for_timeout(300)
@@ -3907,6 +3907,156 @@ def r11j_checks(page, root, shots, engine):
         rp.unlink()
 
 
+def r11r_checks(page, root, shots, engine):
+    """v0.3.60 (R11R · 決定 #334): 自動OK (エンジン = 緑) と 確認済 (人の手 = 青) を分ける · 固定の行 (入力済) は 固定の前の判定で
+    「自動OK ✓入力済」 / 「確認済 ✓入力済」 · 絞り込み 「入力済 n台」 (両方) · 上の数 「自動OK n · 確認済 n」 (入力済 を含む) ·
+    IV 見出し n/N台 そのまま · 色の対比 (文字でも分かる) · 携帯の幅 390. 仮名データだけ."""
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    jp, qp = d / "jikkyou.json", d / "queue.json"
+    jt0 = jp.read_text(encoding="utf-8")
+    page.keyboard.press("Escape")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, sel: null, editRow: null, filter: 'all', view: 'main', qkind: 'all'}); C01.app.tick(); }")
+    page.click("#tab-main")
+    page.click("[data-port='all']")
+    page.wait_for_timeout(400)
+    gone = {(x.get("value") or {}).get(k) for x in actions(root) if x.get("action") in ("other_ct", "merge_rows") for k in ("container_id", "from_container_id")}
+    j = json.loads(jt0)
+    qcid = {x.get("container_id") for x in json.loads(qp.read_text(encoding="utf-8"))["items"]}
+    acid = {x.get("container_id") for x in actions(root)} | {x.get("ct") for x in actions(root)}
+    elig = lambda iv_: [r for r in iv_["rows"] if r.get("ct") and r["container_id"] not in gone and r["container_id"] not in qcid   # noqa: E731
+                        and r["container_id"] not in acid and r.get("ct") not in acid]
+    # 고정 3줄 = 한 IV (줄 3개 이상) · 고정 안 된 2줄 = 다른 IV (가명 시험 데이터는 IV 하나에 3줄)
+    # 사람 쪽 줄 (②③⑤) 은 앞 시험의 기록 · 카드가 있어도 됨 (사람 값을 넣으므로) · 自動OK 로 기대하는 줄 (①④) 만 기록 · 카드 없는 줄
+    anyr = lambda iv_: [r for r in iv_["rows"] if r.get("ct") and r["container_id"] not in gone]   # noqa: E731
+    iv1 = next((x for x in j["ivs"] if len(anyr(x)) >= 3 and elig(x)), None)
+    rest_c = [(x, r) for x in j["ivs"] if x is not iv1 for r in elig(x)]
+    ok("R11R 준비: 고정할 IV (줄 3개 · 그중 기록 · 카드 없는 줄 1) + 다른 IV 기록 없는 줄 1 + 줄 1", iv1 is not None and len(rest_c) >= 1, [iv1 is not None, len(rest_c), [(len(anyr(x)), len(elig(x))) for x in j["ivs"]]])
+    if iv1 is None or not rest_c:
+        return
+    ivn = iv1["iv_no"]
+    ra = elig(iv1)[0]
+    rb, rc = [r for r in anyr(iv1) if r is not ra][:2]
+    ivd, rd = rest_c[0]
+    ive, re_ = next((x, r) for x in j["ivs"] if x is not iv1 for r in anyr(x) if r is not rd)
+    ivof = {r["container_id"]: x["iv_no"] for x in j["ivs"] for r in x["rows"]}
+    hv = lambda f, v: {f: {"value": v, "source": "手入力", "by": "staff_a@fake", "at": "2026-11-08T09:00:00+09:00", "action_id": "r11rhv" + f + "0001"}}   # noqa: E731
+    frz = {"at": "2026-11-08T10:00:00+09:00", "done_at": "2026-11-08T09:58:00+09:00", "action_id": "r11rcd000001", "src": "apply"}
+    base_info = lambda r: [s for s in (r.get("info") or []) if s != "INPUT_FROZEN"]   # noqa: E731
+    # ① 고정 · 엔진 自動OK · 사람 값 없음  ② 고정 · 엔진 自動OK · 사람 값 1칸  ③ 고정 · 엔진 再確認 → 사람  ④ 고정 안 됨 自動OK  ⑤ 고정 안 됨 確認済 (再確認 → 사람)
+    ra.update({"status": "確認済", "engine_status": "自動OK", "reasons": [], "human": {}, "info": base_info(ra) + ["INPUT_FROZEN"], "input_frozen": dict(frz)})
+    rb.update({"status": "確認済", "engine_status": "自動OK", "reasons": [], "human": hv("seal", rb.get("seal") or "TS9R11R1"), "info": base_info(rb) + ["INPUT_FROZEN"], "input_frozen": dict(frz)})
+    rc.update({"status": "確認済", "engine_status": "再確認", "reasons": ["SEAL_MISMATCH"], "human": hv("n_w", rc.get("n_w") or 20000), "info": base_info(rc) + ["INPUT_FROZEN"], "input_frozen": dict(frz)})
+    rd.update({"status": "自動OK", "engine_status": "自動OK", "reasons": [], "human": {}, "info": base_info(rd)})
+    rd.pop("input_frozen", None)
+    re_.update({"status": "確認済", "engine_status": "再確認", "reasons": ["SEAL_MISMATCH"], "human": hv("t_w", re_.get("t_w") or 3000), "info": base_info(re_)})
+    re_.pop("input_frozen", None)
+    iv1["compass_input"] = [{"action_id": "r11rcd000001", "by": "staff_a@fake", "at": "2026-11-08T09:58:00+09:00", "value": {"cells": [], "failed": []}}]
+    jp.write_text(dump(j), encoding="utf-8")
+    je = SC.check_obj({**j, "ivs": [x for x in j["ivs"] if x is iv1 or x is ivd or x is ive]}, "jikkyou") if hasattr(SC, "check_obj") else []
+    ok("R11R 시험 데이터 = 엔진 jikkyou 스키마 (오류 0)", not je, je[:4])
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(900)
+    page.evaluate("C01.app.render()")
+    page.wait_for_timeout(200)
+    tb = f"tbody[data-iv='{ivn}']"
+    rowsel = lambda r: page.locator(f"tbody[data-iv='{ivof[r['container_id']]}'] tr.c01-row", has_text=r["ct"])   # noqa: E731
+
+    def info(r):
+        t = rowsel(r)
+        st = t.locator("[data-dk]").first
+        return {"n": t.count(), "dk": st.get_attribute("data-dk") if st.count() else None, "txt": st.inner_text().replace("\n", " ").strip() if st.count() else "",
+                "cls": st.get_attribute("class") if st.count() else "", "hum": "hum" in (t.first.get_attribute("class") or "") if t.count() else None,
+                "frozen": t.first.get_attribute("data-frozen") if t.count() else None, "title": st.get_attribute("title") if st.count() else ""}
+    A, B, C, D, E = (info(r) for r in (ra, rb, rc, rd, re_))
+    ok("R11R ① 고정 · 엔진 自動OK · 사람 값 없음 = 「自動OK ✓入力済」 (초록 st-ok · 줄 파랑 아님)",
+       A["n"] == 1 and A["dk"] == "auto" and A["txt"] == "自動OK ✓入力済" and "st-ok" in A["cls"] and not A["hum"] and A["frozen"] == "1" and "エンジンの自動OK" in A["title"], A)
+    ok("R11R ② 고정 · 엔진 自動OK · 사람 값 1칸 (✎ 修正) = 「確認済 ✓入力済」 (파랑 st-hum · 줄 hum)",
+       B["dk"] == "human" and B["txt"] == "確認済 ✓入力済" and "st-hum" in B["cls"] and B["hum"] and B["frozen"] == "1", B)
+    ok("R11R ③ 고정 · 엔진 再確認 → 사람 = 「確認済 ✓入力済」 (파랑)", C["dk"] == "human" and C["txt"] == "確認済 ✓入力済" and "st-hum" in C["cls"] and C["hum"], C)
+    ok("R11R ④ 고정 안 됨 自動OK = 「自動OK」 (초록 · ✓入力済 없음)", D["dk"] == "auto" and D["txt"] == "自動OK" and "st-ok" in D["cls"] and not D["hum"] and D["frozen"] is None, D)
+    ok("R11R ⑤ 고정 안 됨 確認済 = 「確認済」 (파랑 · ✓入力済 없음)", E["dk"] == "human" and E["txt"] == "確認済" and "st-hum" in E["cls"] and E["hum"] and E["frozen"] is None, E)
+    ok("R11R 엔진 data-status 그대로 (고정 3 = 確認済 · ④ 自動OK · ⑤ 確認済)",
+       [rowsel(r).first.get_attribute("data-status") for r in (ra, rb, rc, rd, re_)] == ["確認済", "確認済", "確認済", "自動OK", "確認済"], None)
+    # 위 수 · 필터 · IV 견출
+    kc = page.locator("#kind-count").inner_text()
+    na = page.locator("tr.c01-row [data-dk='auto']").count()
+    nh = page.locator("tr.c01-row [data-dk='human']").count()
+    ok("R11R 위 수 「自動OK n · 確認済 n」 = 표의 초록 · 파랑 줄 수 (入力済 포함)", kc == f"自動OK {na} · 確認済 {nh}" and na >= 2 and nh >= 3, [kc, na, nh])
+    fb = page.locator(".c01-f-frozen")
+    nfz = page.locator("tr.c01-row[data-frozen='1']").count()
+    ok("R11R 필터 이름 「入力済 n台」 (自動OK · 確認済 둘 다)", fb.count() == 1 and fb.inner_text() == f"入力済 {nfz}台" and nfz == 3, fb.inner_text() if fb.count() else None)
+    head = page.locator(tb + " .c01-ivhead").inner_text()
+    ok_n = page.locator(tb + " tr.c01-row:not(.over) [data-dk]").count()   # TOOL okN = 自動OK · 確認済 (枠外 빼고) — 표시 나누기와 상관없이 그대로
+    page.screenshot(path=str(shots / "r11r_rows.png"), full_page=False)
+    fb.click()
+    page.wait_for_timeout(300)
+    ok("R11R 필터 누름 = 고정 줄이 있는 IV 만 (그 IV 의 고정 3줄 보임)", page.locator(tb).count() == 1 and page.locator(tb + " tr.c01-row[data-frozen='1']").count() == 3,
+       page.locator("tbody[data-iv]").count())
+    fb = page.locator(".c01-f-frozen")
+    fb.click()
+    page.wait_for_timeout(300)
+    ok("R11R IV 견출 n/N台 계산 그대로 (自動OK · 確認済 둘 다 OK 수)", f"{ok_n}/" in head, [head[:80], ok_n])
+    # 색 대비 (4 테마) · 문자로도 구분
+    cols = {}
+    for th in ("light", "leenai", "focus", "dark"):
+        page.evaluate(f"document.documentElement.setAttribute('data-theme','{th}')")
+        page.wait_for_timeout(120)
+        cols[th] = page.evaluate("""(sel) => { const g = (e, p) => e ? getComputedStyle(e)[p] : null;
+            const a = document.querySelector(sel[0]), b = document.querySelector(sel[1]);
+            return {ok: g(a, 'color'), hum: g(b, 'color'), okbg: g(a && a.closest('td'), 'backgroundColor'), humbg: g(b && b.closest('td'), 'backgroundColor')}; }""",
+                                 [tb + " tr.c01-row:not(.hum) [data-dk='auto']", tb + " tr.c01-row.hum [data-dk='human']"])
+
+    def rgb(s):
+        v = [float(x) for x in re.findall(r"[\d.]+", s or "")][:4]
+        if len(v) == 4:   # rgba → 흰 바탕 위 (light 계열) / 어두운 바탕 (#1b1d22) 위
+            return v
+        return v + [1.0]
+
+    def flat(c, bg):
+        a = c[3]
+        return [c[i] * a + bg[i] * (1 - a) for i in range(3)]
+
+    def lum(c):
+        f = lambda x: (x / 255) / 12.92 if x / 255 <= 0.03928 else ((x / 255 + 0.055) / 1.055) ** 2.4   # noqa: E731
+        return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+
+    def ratio(a, b):
+        la, lb = sorted((lum(a), lum(b)), reverse=True)
+        return (la + 0.05) / (lb + 0.05)
+    con = {}
+    for th, c in cols.items():
+        base = [27, 29, 34] if th == "dark" else [255, 255, 255]
+        hb = flat(rgb(c["humbg"]), base)
+        con[th] = {"hum_text_vs_bg": round(ratio(flat(rgb(c["hum"]), hb), hb), 2), "ok_text_vs_bg": round(ratio(flat(rgb(c["ok"]), flat(rgb(c["okbg"]), base)), flat(rgb(c["okbg"]), base)), 2),
+                   "text_diff": c["ok"] != c["hum"], "bg_diff": c["okbg"] != c["humbg"]}
+    RES["r11r_contrast"] = con
+    ok("R11R 색: 4 테마 모두 自動OK 글자색 ≠ 確認済 글자색 · 줄 바탕도 다름 · 確認済 글자 대비 ≥ 4.5 (색이 안 보여도 「自動OK」 · 「確認済」 · 「✓入力済」 글자로 구분)",
+       all(v["text_diff"] and v["bg_diff"] and v["hum_text_vs_bg"] >= 4.5 for v in con.values()), con)
+    page.evaluate("document.documentElement.setAttribute('data-theme','light')")
+    # 휴대폰 폭
+    page.set_viewport_size({"width": 390, "height": 800})
+    page.wait_for_timeout(300)
+    rowsel(ra).first.locator(".c01-inmark").first.scroll_into_view_if_needed()   # 표가 옆으로 넘침 (전과 같음) → 상태 글자까지 옆으로 스크롤
+    mk = rowsel(ra).first.locator(".c01-inmark")
+    sp = rowsel(ra).first.locator("[data-dk]").first
+    sb, mb, tdb = sp.bounding_box() or {}, mk.bounding_box() or {}, rowsel(ra).first.locator("td.c-st").bounding_box() or {}
+    page.screenshot(path=str(shots / "r11r_rows_phone.png"), full_page=False)
+    ok("R11R 휴대폰 폭 390 = 「自動OK ✓入力済」 한 줄 (✓入力済 가 같은 줄 · 상태 글자 안 · 스크롤하면 화면 안)",
+       bool(sb and mb and tdb) and abs((mb.get("y", 0) + mb.get("height", 0) / 2) - (sb.get("y", 0) + sb.get("height", 0) / 2)) < 8
+       and mb.get("x", 0) + mb.get("width", 0) <= sb.get("x", 0) + sb.get("width", 0) + 1 and 0 <= mb.get("x", -1) and mb.get("x", 0) + mb.get("width", 0) <= 391, (sb, mb, tdb))
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    # 범례
+    lg = page.locator(".c01-legend").inner_text()
+    ok("R11R 범례 = 「自動OK（エンジン）」 · 「確認済（人が確認）」 · 「✓入力済 = Compass入力 済み」", "自動OK（エンジン）" in lg and "確認済（人が確認）" in lg and "✓入力済" in lg, lg[:120])
+    jp.write_text(jt0, encoding="utf-8")
+    page.evaluate("() => { C01.state.filter = 'all'; C01.app.tick(); }")
+    page.wait_for_timeout(600)
+
+
 def r11g_checks(page, root, shots, engine):
     """v0.3.58 (R11G · #320): 使い方 = エンジン manual.json (目次 · 検索 · 章リンク) · カード / AI 相談 の 「？」 → その章 ·
     AI の答えの 参考 (manual_refs) → その章 · マニュアルのボタン名 = TOOL の画面の字 (公開前の自動照合) · 画像 = docs/img ·
@@ -4107,11 +4257,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.59", page.title() == "LEENAI C-01 搬入票 v0.3.59", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.60", page.title() == "LEENAI C-01 搬入票 v0.3.60", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.59" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.60" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4643,6 +4793,7 @@ def main():
             r11f_checks(page, root, shots, a.engine)
             r11g_checks(page, root, shots, a.engine)
             r11j_checks(page, root, shots, a.engine)
+            r11r_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

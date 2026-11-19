@@ -6,21 +6,25 @@
   --row-wait: rgba(140, 150, 165, .12); --row-wait-b: rgba(140, 150, 165, .3);
   --row-sel: rgba(224, 140, 30, .32); --ivhead: rgba(91, 155, 255, .12); --ivhead-b: rgba(91, 155, 255, .25);
   --c-diff: #f0a84a; --c-manual: #7fb0ff; --c-photo: #b4a2f0; --c-fax: #f08a7a; --ph-alert: rgba(255, 110, 130, .30);
+  --row-hum: rgba(70, 130, 235, .18); --row-hum-b: rgba(110, 160, 255, .45);   /* v0.3.60 (R11R · #334): 人が確認 = 青 */
 }
 [data-theme="light"] {
   --row-over: #F8B4BC; --row-over-b: #C8102E; --row-over-t: #7A0010; --over-chip: #C8102E;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #E8F4EC; --row-ok-b: #C8E3D2; --row-check: #FDF1E2; --row-check-b: #F0D3AC; --row-wait: #F1F1EE; --row-wait-b: #E0E0DA;
   --row-sel: #FBE6CB; --ivhead: #E9EFF7; --ivhead-b: #D5DEEA; --c-diff: #8A4D00; --c-manual: #1E5AA8; --c-photo: #5B4A9E; --c-fax: #8A3B2E; --ph-alert: #FFC7CE;
+  --row-hum: #E3ECFA; --row-hum-b: #B9CDEE;
 }
 [data-theme="leenai"] {
   --row-over: #F4A9B2; --row-over-b: #B3001B; --row-over-t: #6E000E; --over-chip: #B3001B;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #DCEFD9; --row-ok-b: #B6D8B0; --row-check: #F6E6CC; --row-check-b: #E2C291; --row-wait: #E3EBE1; --row-wait-b: #C8D5C5;
   --row-sel: #F0D9B0; --ivhead: #D4E8D0; --ivhead-b: #A8C8A3; --c-diff: #7c3f00; --c-manual: #1f4f86; --c-photo: #4a3c86; --c-fax: #7a2e22; --ph-alert: #F6C3CA;
+  --row-hum: #D8E4F5; --row-hum-b: #A9C0E2;
 }
 [data-theme="focus"] {
   --row-over: #F2A6B0; --row-over-b: #A8001A; --row-over-t: #64000D; --over-chip: #A8001A;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #D9ECDF; --row-ok-b: #AFCFB9; --row-check: #F3E3CC; --row-check-b: #DDBF92; --row-wait: #DDE2EA; --row-wait-b: #BEC8D6;
   --row-sel: #EBD5B0; --ivhead: #CDD4E0; --ivhead-b: #9DAABE; --c-diff: #7c2d12; --c-manual: #1f3f70; --c-photo: #40357a; --c-fax: #7a2618; --ph-alert: #F2C2C8;
+  --row-hum: #D3DEF0; --row-hum-b: #A2B6D6;
 }
 #app { min-height: 100vh; background: var(--frame, var(--bg)); color: var(--text); font-family: var(--font, 'Segoe UI', 'Noto Sans JP', 'Yu Gothic UI', sans-serif); font-size: 13px; line-height: 1.5; }
 .mono, .c01-table .mono { font-family: var(--mono, 'Consolas', 'Menlo', monospace); }
@@ -49,7 +53,11 @@
 .c01-f { background: none; border: none; padding: 4px 2px; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; }
 .c01-f.on { text-decoration: underline; }
 .c01-f-check { color: var(--c-diff); } .c01-f-compass { color: var(--accent); } .c01-f-remind { color: var(--text2); }
-.c01-f-frozen { color: var(--ok); }   /* v0.3.52 (R10W · #307): 確認済（入力済） の絞り込み */
+.c01-f-frozen { color: var(--text); }   /* v0.3.52 (R10W · #307): 入力済 の絞り込み (v0.3.60: 自動OK · 確認済 の両方 → 色なし) */
+.c01-kcnt { font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text2); }   /* v0.3.60 (R11R · #334): 自動OK n · 確認済 n */
+.st-hum { color: var(--c-manual); font-weight: 600; }   /* v0.3.60 (R11R · #334): 人が確認 = 青 (エンジン 自動OK = 緑) */
+.st-hum.c01-frozen { white-space: nowrap; }
+.c01-inmark { font-size: 10px; font-weight: 600; opacity: .85; white-space: nowrap; }   /* ✓入力済 (Compass入力 済み) */
 .st-ok.c01-frozen { white-space: nowrap; }
 .c01-idiff .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .c01-chk { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text2); }
@@ -74,13 +82,14 @@
 .c01-ivhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .c01-ivhead .b { font-weight: 700; } .c01-ivhead .pol { font-weight: 600; color: var(--accent); }
 .c01-row.ok td { background: var(--row-ok); } .c01-row.check td { background: var(--row-check); } .c01-row.wait td { background: var(--row-wait); }
+.c01-row.hum td { background: var(--row-hum); }   /* v0.3.60 (R11R · #334): 人が確認 = 青 (.ok の後 · .sel · .over より前) */
 .c01-row.sel td { background: var(--row-sel); }
 .st-ok { color: var(--ok); font-weight: 600; } .st-wait { color: var(--text2); font-weight: 600; }
 .st-wait.c01-cand { color: var(--warn, #c07a00); text-decoration: underline dotted; cursor: help; }  /* v0.3.10 R7I Part D 受信中・候補あり */
 .c01-checkbtn { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--row-check-b); background: var(--read); color: var(--c-diff); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .c01-ctlink { background: none; border: none; padding: 0; font-family: var(--mono, monospace); font-size: 13px; color: var(--accent); text-decoration: underline; cursor: zoom-in; }
 .c01-phbtn { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; cursor: zoom-in; font-family: inherit; }
-.c01-hm { color: var(--ok); font-size: 11px; }
+.c01-hm { color: var(--c-manual); font-size: 11px; }   /* v0.3.60 (R11R): 人の値の ✓ = 青 */
 .c01-btn-pri { min-height: 30px; padding: 3px 12px; border-radius: 6px; border: 1px solid var(--accent-btn); background: var(--accent-btn); color: #fff; font-size: 12px; font-weight: 600; font-family: inherit; }
 .c01-btn-sub { min-height: 30px; padding: 3px 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--read); color: var(--text); font-size: 12px; font-family: inherit; }
 .c01-btn-pri[disabled], .c01-btn-sub[disabled] { opacity: .55; cursor: not-allowed; }
@@ -315,6 +324,8 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-suspect { display: inline-block; padding: 0 6px; border-radius: 4px; border: 1px solid var(--over-chip); color: var(--over-chip); font-size: 10.5px; font-weight: 800; cursor: help; }
 .c01-overhead { font-size: 12px; }
 .lg.over { background: var(--row-over); border: 1px solid var(--row-over-b); }
+.lg.hum { background: var(--row-hum); border: 1px solid var(--row-hum-b); }   /* v0.3.60 (R11R) */
+.c01-row.over td .st-hum { color: var(--row-over-t); }
 /* v0.3.15 (R7N Part G): 原本 = 行と結び付いた書類だけ · 候補 · 搬入票なし（待ち） · 向き補正 · ✎ 修正 */
 .c01-candchip { border-style: dashed !important; }
 .c01-candnote { margin: 0 10px 6px; padding: 4px 8px; border-left: 3px solid var(--c-diff); color: var(--c-diff); font-size: 12px; }
