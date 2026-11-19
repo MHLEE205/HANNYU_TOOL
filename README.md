@@ -26,7 +26,7 @@
 - 엔진이 내면 쓰는 칸 (v0.3.18 · 없으면 지금 그대로): `queue.items[].seal_fmt_ok` `{"값": true|false}` 또는 `seal_format` `{regex, prefixes, digits, prefix_required}` (シール 후보 형식 · 「形式不一致」) ·
   `jikkyou.ivs[].rows[].docs` `[{path, name, page, sha16, rotation}]` (줄의 서류 → 同一コンテナ候補 원본 · 要確認 옆 창 「原本」)
 - 운영 규칙 (결정 #109) = `js/config.js` `C01.RULES` 한 곳 — 엔진 `engine/actions/apply.py` `ACTION_RULES` 와 같은 규칙:
-  ① 사람 값 ≠ 엔진 다시 판정 값 → 사람 값 유지 + 「ⓘ」 정보 · ② スロット変更 (⇄) = 모든 직원 — 옮길 칸에 다른 CT 가 있으면 「○○ が入っています。入れ替えますか」 → 입れ替え 1건 (`swap_ct`) · `_actions` 에 누가·언제·전→후 (`slot_before`) · 줄에 「⇄ 枠変更」 · 「元に戻す」 · ③ 체크디짓 틀린 CT = 확인창 「チェックディジットが合いません。もう一度確認してください」 → 확인하면 저장 (`override: ["CT_CHECKDIGIT_OVERRIDE"]` · 確認済 · 自動OK 안 됨 · 줄에 「CD」)
+  ① 사람 값 ≠ 엔진 다시 판정 값 → 사람 값 유지 + 「ⓘ」 정보 · ② スロット変更 (⇄) = 모든 직원 — 옮길 칸에 다른 CT 가 있으면 「○○ が入っています。入れ替えますか」 → 入れ替え 1건 (`swap_ct`) · `_actions` 에 누가·언제·전→후 (`slot_before`) · 줄에 「⇄ 枠変更」 · 「元に戻す」 · ③ 체크디짓 틀린 CT = 확인창 「チェックディジットが合いません。もう一度確認してください」 → 확인하면 저장 (`override: ["CT_CHECKDIGIT_OVERRIDE"]` · 確認済 · 自動OK 안 됨 · 줄에 「CD」)
 - 催促 서명 Email (#112) = 누른 직원 (로그인 사용자) 주소 — 초안의 자리표시자 `(送信者のメールアドレス)` 를 미리보기에서 바꿔 보여 줌 (엔진 `engine/notify/remind.py` `with_sender`)
 - Compass入力 = 비교표 창 (DRY · `js/compass.js` = 엔진 규칙) · 催促 = 미리보기 창 — **「送信」 은 둘 다 비활성** (R7 이후 · 결정 뒤). `C01.SEND` 한 곳
 - Compass入力 비교 규칙 (D-11 대기 · 기본 OFF): `js/config.js` `C01.COMPASS.follow_same_cond_slot` 한 곳 — 켜면 넣을 CT 가 같은 부킹 同一条件 다른 칸에 이미 있으면 그 칸으로 비교 (엔진 설정 `compass_follow_same_cond_slot` 과 같은 이름·규칙)
@@ -48,6 +48,7 @@ python C:\LEENAI_C01_V2\tool\tools\serve_local.py --root C:\LEENAI_C01_V2\tool\f
 - `python tests/render_mockup.py --out <폴더>` — 시안 대조 캡처
 
 공개 레포 `MHLEE205/HANNYU_TOOL` (결정 #110 · #120) — v0.3.0 첫 공개 (2026-11-10) · v0.3.1 graph 모드 (R7A) · v0.3.2 実況表 한 화면 · PDF 화면 표시 (R7B) · v0.3.3 ~ v0.3.6 파일 열기 점검 (R7C) · v0.3.7 Plant 칸 · 担当港 복수 · 판단 버튼 위 (R7D) · v0.3.9 実況表 줄 순서 = COMPASS 칸 순서 · No 부킹별 · AI 区分 정보 (R7E) · v0.3.10 ~ v0.3.12 사진 장수 색 · 確認・入力 카드 · 同一コンテナ候補 · 作業日 予定日 (R7I ~ R7K) · v0.3.13 写真 = 새 탭 photo.html (R7L) · v0.3.14 사진 종류에 엔진 fill (FULL · 扉閉め) · README 버전 (R7M) · v0.3.15 자동 갱신 스크롤 유지 · 搬入票 없는 줄 手入力 숨김 · 원본 = 줄과 연결된 서류만 · 엔진 회전 · 値 修正 · COMPASS 枠外 빨강 (R7N) · v0.3.16 担当者 = 職員マスター · 自分の担当 = pol_staff 担当・補助 (R7O) · v0.3.17 머리 「使い方」 (1 화면 · 병행 기간 안내) · 催促 · Compass入力 「試験表示」 배지 (R7P) · v0.3.18 自分の担当 맞추기 · 화상 회전 · 枠外 #182 · シール 형식 · 同一候補 원본+사진 · PDF 쪽 (R7S). GitHub Pages 켜기 · Azure 리디렉트 URI · 직원 공개는 형님 작업.
+- 急ぎ依頼 상태 (v0.3.59 R11J · #317): 依頼一覧 의 急ぎ 행 = 엔진 `requests.json` 의 `kind: urgent` 행 (상태 · 예정 · 판 · 이유) · 없으면 _actions 의 urgent_request 로 受付 / 送信中 (R11F 그대로).
 - 매뉴얼 (v0.3.58 R11G · #320): 원본 = 엔진 `engine/ask/manual_ja.md` → `_data/manual.json` · 그림 = `docs/img/*.png` (가명 fixtures 화면 · 다시 만들기 = 라운드 tmp `shots_manual.py`). **TOOL 판을 올릴 때 매뉴얼 판도 같이 확인** — test_ui 「R11G 매뉴얼 버튼 이름 = TOOL 화면 글자」 가 공개 전 자동 대조 (버튼 글자를 바꾸면 매뉴얼도 고침).
 - `python tests/test_graph.py` — graph 모드 시험 (가짜 Graph · 가명 · 실제 SharePoint 호출 0)
 - `python tests/test_layout.py --shots <폴더>` — 実況表 한 화면 시험 (1366 · 1600 · 1920 폭 · 가로 스크롤 0 · 상자 아래 끝 ≤ 창 · 머리글 고정 · R7B)

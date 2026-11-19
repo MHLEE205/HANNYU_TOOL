@@ -2,7 +2,7 @@
 r"""TOOL (js/config.js · js/validate.js · js/app.js) 과 엔진 (engine/actions/apply.py · engine/notify/remind.py) 이 같은 규칙인지 확인한다.
 - ① 설정: C01.RULES slotChange ↔ ACTION_RULES["slot_change"] · ctCheckDigitWrong 'warn' ↔ ct_checkdigit_override · humanVsEngine 'keep_info'
 - ② CT 입력: 같은 입력 (가명) 을 JS validate.field('ct') 와 엔진 norm_value('ct', v, override) 에 넣어 받음/거부·값·override 가 같은지
-- ③ 문구: 체크디짓 확인창 · 催促 서명 자리표시자 · 슬롯 입れ替え 확인창 형식
+- ③ 문구: 체크디짓 확인창 · 催促 서명 자리표시자 · 슬롯 入れ替え 확인창 형식
 node = Playwright 에 들어 있는 node.exe (따로 설치 없음). 데이터 없음 (가명 CT 만).
 사용: python tests/rules_cross.py [--engine C:\LEENAI_C01_PROD\code]"""
 import argparse
@@ -67,7 +67,7 @@ def main():
     ok("③ 체크디짓 확인창 문구", js["msg"] == "チェックディジットが合いません。もう一度確認してください", js["msg"])
     app = (TOOL / "js" / "app.js").read_text(encoding="utf-8")
     ok("③ 催促 서명 자리표시자 같음 (remind.SIGN_PLACEHOLDER)", f"var SIGN_PLACEHOLDER = '{R.SIGN_PLACEHOLDER}'" in app, R.SIGN_PLACEHOLDER)
-    ok("③ 입れ替え 확인창 「○○ が入っています。入れ替えますか」", "occ.ct + ' が入っています。入れ替えますか'" in app)
+    ok("③ 入れ替え 확인창 「○○ が入っています。入れ替えますか」", "occ.ct + ' が入っています。入れ替えますか'" in app)
     ok("③ override 이름 같음 (CT_CHECKDIGIT_OVERRIDE)", AP.CT_CHECKDIGIT_OVERRIDE in app and AP.CT_CHECKDIGIT_OVERRIDE in (TOOL / "js" / "validate.js").read_text(encoding="utf-8"))
     print(f"== {sum(res)}/{len(res)} OK")
     return 0 if all(res) else 1

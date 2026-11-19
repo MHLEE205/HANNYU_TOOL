@@ -508,7 +508,7 @@ def rot_checks(page, shots):
 
 
 def r7w_checks(page, ctx, root, shots):
-    """v0.3.23 (R7W): Part A 自動OK · 確認済 줄 修正 (状況 클릭 → 경고 → 修正 폼 · mode edit · 確認済 · 元に戻す · COMPASS 입력済 경고) · Part B 📄 서류 탭 (搬入票 먼저)."""
+    """v0.3.23 (R7W): Part A 自動OK · 確認済 줄 修正 (状況 클릭 → 경고 → 修正 폼 · mode edit · 確認済 · 元に戻す · COMPASS 入力済 경고) · Part B 📄 서류 탭 (搬入票 먼저)."""
     jp = root / "_data" / "jikkyou.json"
     jt0 = jp.read_text(encoding="utf-8")
     dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + "\n"   # noqa: E731
@@ -530,7 +530,7 @@ def r7w_checks(page, ctx, root, shots):
     btn.click()
     page.wait_for_selector(".c01-modal-okedit")
     mt = page.locator(".c01-modal-okedit").inner_text()
-    ok("A 경고 1번 = 「この行は 自動OK です · 確認済（手入力）に変わり、記録されます · 修正しますか？」 + COMPASS 입력済 경고 · [修正する] [やめる]",
+    ok("A 경고 1번 = 「この行は 自動OK です · 確認済（手入力）に変わり、記録されます · 修正しますか？」 + COMPASS 入力済 경고 · [修正する] [やめる]",
        "この行は 自動OK です" in mt and "確認済（手入力）に変わり、記録されます。修正しますか？" in mt and "COMPASS には入力済み — 修正後に Compass入力 をもう一度" in mt
        and page.locator("#okedit-go").inner_text() == "修正する" and "やめる" in mt, mt)
     page.screenshot(path=str(shots / "r7w_okedit_warn.png"))
@@ -3584,7 +3584,7 @@ def r11f_checks(page, root, shots, engine):
        f"修正しました（元: {cur}）。画面に反映まで 1〜2 分" in t2 and page.locator("#ask-box [data-fixgo]").count() == 0
        and page.locator("#ask-box [data-fixundo]").count() == 1, t2)
     ok("R11F 토스트 「修正しました（元: …）」", any(f"修正しました（元: {cur}）" in x for x in page.evaluate("() => window._toasts")), page.evaluate("() => window._toasts"))
-    # 엔진 반영 흉내 (실況表 의 seal = 새 값) → 토스트 1번 · 그 줄 강조 1번
+    # 엔진 반영 흉내 (実況表 의 seal = 새 값) → 토스트 1번 · 그 줄 강조 1번
     jj = json.loads(jt0)
     for iv in jj["ivs"]:
         for r in iv["rows"]:
@@ -3609,7 +3609,7 @@ def r11f_checks(page, root, shots, engine):
     un = new_of("undo", b_un)
     ok("R11F 元に戻す = undo 1건 (value.action_id = 그 manual_input) · 엔진 스키마", len(un) == 1 and (un[0].get("value") or {}).get("action_id") == a.get("action_id")
        and SC.check_obj(un[0], "action") == [], un)
-    jp.write_text(jt0, encoding="utf-8")                                   # 엔진이 되돌린 실況表 (처음 값)
+    jp.write_text(jt0, encoding="utf-8")                                   # 엔진이 되돌린 実況表 (처음 값)
     page.evaluate("() => C01.app.tick()")
     page.wait_for_timeout(900)
     page.evaluate("() => { C01.state.sel = null; C01.app.render(); }")
@@ -3828,6 +3828,85 @@ def r10x_checks(page, root, shots, engine_frz):
     page.wait_for_timeout(400)
 
 
+def r11j_checks(page, root, shots, engine):
+    """v0.3.59 (R11J · #317): 依頼一覧 の 急ぎ = エンジン requests.json の kind urgent 行 (状態 受付 → 対応中 → 反映済 · 対応しない = 理由) ·
+    同じ action_id の 送った記録の行は出さない · 答えの下 「急ぎで依頼しました（急ぎ No.n） · 状態」 · エンジンが出さない = 今まで (R11F) ·
+    requests.json = エンジン スキマ · 携帯の幅 390. 仮名データだけ (R11F で作った urgent_request を使う)."""
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    rp = root / "_data" / "requests.json"
+    rt0 = rp.read_text(encoding="utf-8") if rp.exists() else None
+    base = json.loads(rt0) if rt0 else {"schema_version": 1, "kind": "improve_requests", "today": "2026-01-10", "items": []}
+    us = sorted([x for x in actions(root) if x.get("action") == "urgent_request"], key=lambda x: str(x.get("at")))
+    ok("R11J 준비: R11F 의 급한 의뢰 기록 2건", len(us) == 2, len(us))
+    if len(us) < 2:
+        return
+    u = us[-1]
+    page.keyboard.press("Escape")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+
+    def put(status, memo=None, version=None):
+        plan = {"受付": "今日中に対応", "対応中": "対応中（担当が作業しています）", "反映済": "反映済" + (f" ({version})" if version else ""),
+                "対応しない": "対応しない" + (f": {memo}" if memo else "")}[status]
+        it = {"no": 3, "kind": "urgent", "action_id": u["action_id"], "ask_id": (u.get("value") or {}).get("ask_id"), "at": u.get("at"), "by": u.get("by"),
+              "by_name": (u.get("value") or {}).get("by_name"), "title": "写真が出ない (TST2611-04)", "question": "写真が出ない", "status": status,
+              "memo": memo, "version": version, "plan": plan, "status_at": "2026-01-10T12:00:00+09:00"}
+        obj = {**base, "items": [it] + [x for x in base["items"] if x.get("kind") != "urgent"]}
+        rp.write_text(dump(obj), encoding="utf-8")
+        page.evaluate("() => { C01.state.reqsMiss = 0; C01.app.tick(); }")
+        page.wait_for_timeout(900)
+        page.evaluate("() => C01.app.render()")
+        page.wait_for_timeout(200)
+        return obj
+
+    page.click("#gask-open")
+    page.wait_for_timeout(300)
+    page.locator("[data-gtab='reqs']").click()
+    page.wait_for_timeout(200)
+    page.locator("[data-reqall='1']").click()
+    page.wait_for_timeout(200)
+    urg = lambda: page.locator("#gask-box .c01-reqs tbody tr.c01-requrg")   # noqa: E731
+    n0 = urg().count()
+    seen = []
+    for st, memo, ver in (("受付", None, None), ("対応中", None, None), ("反映済", None, "v0.5.999")):
+        obj = put(st, memo, ver)
+        rows = urg().all_inner_texts()
+        mine = [x for x in rows if "写真が出ない (TST2611-04)" in x]
+        seen.append((st, len(rows), bool(mine) and st in mine[0], page.locator("#gask-box .c01-reqst.s-" + st).count()))
+        if st == "受付":
+            ok("R11J requests.json (急ぎ 행) = 엔진 스키마", SC.check_obj(obj, "requests") == [], SC.check_obj(obj, "requests"))
+    ok("R11J 急ぎ 한 바퀴 受付 → 対応中 → 反映済 = 같은 줄 (행 수 그대로 · 送った記録 행 대신 엔진 행) · 상태 글자 · 색 칸",
+       all(x[1] == n0 and x[2] and x[3] >= 1 for x in seen) and n0 == 2, seen)
+    ok("R11J 反映済 = 판 (v0.5.999) · No = 엔진 번호", any("反映済 (v0.5.999)" in x and x.strip().startswith("3") for x in urg().all_inner_texts()), urg().all_inner_texts())
+    put("対応しない", "担当者の処理で解決しました", None)
+    ok("R11J 対応しない = 이유 한 줄", any("対応しない: 担当者の処理で解決しました" in x for x in urg().all_inner_texts()), urg().all_inner_texts())
+    page.set_viewport_size({"width": 390, "height": 800})
+    page.wait_for_timeout(300)
+    bx = page.locator("#gask-box").bounding_box() or {}
+    st_vis = page.locator("#gask-box .c01-reqst.s-対応しない").first
+    sb = st_vis.bounding_box() or {}
+    page.screenshot(path=str(shots / "r11j_reqs_phone.png"), full_page=False)
+    ok("R11J 휴대폰 폭 390 = 依頼一覧 상자 안 · 상태 칸 보임", bx.get("width", 999) <= 391 and sb and sb.get("x", 999) + sb.get("width", 0) <= 391, (bx, sb))
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.wait_for_timeout(200)
+    put("対応中")
+    page.screenshot(path=str(shots / "r11j_reqs_status.png"), full_page=False)
+    # 끔 = 엔진이 급한 행을 내지 않음 → R11F 그대로 (送った記録 2 행 · 受付)
+    rp.write_text(rt0 if rt0 is not None else dump(base), encoding="utf-8")
+    page.evaluate("() => { C01.state.reqsMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(900)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(200)
+    ok("R11J 끔 (엔진 급한 행 없음) = R11F 화면 그대로 (急ぎ 2 행 · 受付 · 今日中に対応)",
+       urg().count() == 2 and all("受付" in x and "今日中に対応" in x for x in urg().all_inner_texts()), urg().all_inner_texts())
+    page.locator("[data-gtab='chat']").click()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    if rt0 is None and rp.exists():
+        rp.unlink()
+
+
 def r11g_checks(page, root, shots, engine):
     """v0.3.58 (R11G · #320): 使い方 = エンジン manual.json (目次 · 検索 · 章リンク) · カード / AI 相談 の 「？」 → その章 ·
     AI の答えの 参考 (manual_refs) → その章 · マニュアルのボタン名 = TOOL の画面の字 (公開前の自動照合) · 画像 = docs/img ·
@@ -4028,11 +4107,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.58", page.title() == "LEENAI C-01 搬入票 v0.3.58", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.59", page.title() == "LEENAI C-01 搬入票 v0.3.59", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.58" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.59" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4459,7 +4538,7 @@ def main():
                and ms[0]["value"]["pair_id"] == ms[0]["queue_id"] and ms[0]["value"]["photo_container_id"].startswith("C-G-"), ms)
             page.click(".c01-kinds [data-kind='done']")
             di = page.locator(".c01-item.done", has_text="同一コンテナ候補")
-            ok("合わせた카드 = 完了 에", di.count() == 1, di.count())
+            ok("合わせたカード = 完了 에", di.count() == 1, di.count())
             if di.count():
                 di.first.click()
                 page.click("#q-undo")
@@ -4476,7 +4555,7 @@ def main():
             errs = {x["action_id"]: schema_check.errors(x, sch) for x in actions(root)}
             ok("_actions JSON = 엔진 action.schema.json (오류 0)", all(not e for e in errs.values()), {k: v for k, v in errs.items() if v})
             RES["actions"] = [{k: x[k] for k in ("action", "field", "source", "queue_id")} for x in actions(root)]
-            # #109 ② slot_change = 모든 직원 (STAFF_A · 관리자 목록 없음) · 빈 칸으로 · 입れ替え 확인창 · 되돌리기
+            # #109 ② slot_change = 모든 직원 (STAFF_A · 관리자 목록 없음) · 빈 칸으로 · 入れ替え 확인창 · 되돌리기
             page.click("#tab-main")
             page.click("[data-port='all']")
             page.wait_for_timeout(200)
@@ -4500,7 +4579,7 @@ def main():
             badge = page.locator(f"tr.c01-row[data-key*='{r0['ct']}'] [data-info='slot_change']")
             ok("줄 정보 표시 「⇄ 枠変更」 (누가·언제·전→후)", badge.count() == 1 and "STAFF A" in (badge.get_attribute("title") or "") and "→" in (badge.get_attribute("title") or ""),
                badge.get_attribute("title") if badge.count() else None)
-            # 입れ替え: r1 을 r2 칸으로 → 확인창 (취소 → 기록 0 · 확인 → 2건)
+            # 入れ替え: r1 을 r2 칸으로 → 확인창 (취소 → 기록 0 · 확인 → 2건)
             dl = []
             page.locator(tb + " [data-slot]").nth(1).click()
             page.wait_for_selector("[data-slotpick]")
@@ -4514,11 +4593,11 @@ def main():
             page.click("#slot-apply")
             page.wait_for_timeout(400)
             sw = [x for x in actions(root) if x["action"] == "slot_change" and x["action_id"] not in ids1]
-            ok("#109 ② 입れ替え 확인창 「○○ が入っています。入れ替えますか」 · 취소 = 기록 0", dl and dl[0] == f"{r2['ct']} が入っています。入れ替えますか" and n1 == n0 + 1, dl)
-            ok("입れ替え 확인 → slot_change 1건 (swap_ct · 두 대를 한 기록으로)", len(sw) == 1 and (sw[0]["ct"], sw[0]["value"]["slot_guid"], sw[0]["value"]["slot_before"],
+            ok("#109 ② 入れ替え 확인창 「○○ が入っています。入れ替えますか」 · 취소 = 기록 0", dl and dl[0] == f"{r2['ct']} が入っています。入れ替えますか" and n1 == n0 + 1, dl)
+            ok("入れ替え 확인 → slot_change 1건 (swap_ct · 두 대를 한 기록으로)", len(sw) == 1 and (sw[0]["ct"], sw[0]["value"]["slot_guid"], sw[0]["value"]["slot_before"],
                sw[0]["value"]["swap_ct"]) == (r1["ct"], r2["slot_guid"], r1["slot_guid"], r2["ct"]), sw)
             b2 = page.locator(f"tr.c01-row[data-key*='{r2['ct']}'] [data-info='slot_change']")
-            ok("입れ替え 상대 줄에도 정보 표시", b2.count() == 1 and r1["ct"] in (b2.get_attribute("title") or ""), b2.get_attribute("title") if b2.count() else None)
+            ok("入れ替え 상대 줄에도 정보 표시", b2.count() == 1 and r1["ct"] in (b2.get_attribute("title") or ""), b2.get_attribute("title") if b2.count() else None)
             # 되돌리기 (r0)
             page.locator(tb + " [data-slot]").nth(0).click()
             page.wait_for_selector("#slot-undo")
@@ -4563,6 +4642,7 @@ def main():
             r10x_checks(page, root, shots, a.engine_frz)
             r11f_checks(page, root, shots, a.engine)
             r11g_checks(page, root, shots, a.engine)
+            r11j_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

@@ -13,7 +13,7 @@ window.C01 = window.C01 || {};
     UNREGISTERED_SENDER: '送信元', 'CUT後受信': 'CUT後',   /* v0.3.24 (R7X Part B · #212): 理由文言 v0.1 の短い表 */
     CONTRACT_MONTH_CONFLICT: '契約月', NW_OVER_LIMIT: '重量',   // R6M7: 사유 코드 27 (#115) · 28 (#125) — 문장은 엔진 reason_text
     PHOTO_SET_INCOMPLETE: '写真不足', PACKER_AUTOSTOP: '停止中' };   // R6M11: 사유 코드 29 (#129·#131) · 30 (#118) — 문장은 엔진 reason_text
-  // R6M11 (#129 「実況表 줄に足りない写真の種類」): 사유 29 줄의 빠진 종류 (엔진 row.photo_missing) — 문장의 {없는 종류} 를 바꿈
+  // R6M11 (#129 「実況表 行に足りない写真の種類」): 사유 29 줄의 빠진 종류 (엔진 row.photo_missing) — 문장의 {없는 종류} 를 바꿈
   function reasonTexts(r) {
     var miss = r.photo_missing || '';
     return (r.reason_text || []).map(function (t) { return String(t).split('{없는 종류}').join(miss || '—'); });
@@ -4205,7 +4205,10 @@ window.C01 = window.C01 || {};
   function reqBox(a, r) {
     if (!urgOn()) return '';
     var sent = reqSent(a.ask_id);
-    if (sent && sent.action === 'urgent_request') return '<div class="c01-req"><div class="c01-imp-ok">急ぎで依頼しました（今日中に対応 · 右上 AI 相談 → 依頼一覧）</div></div>';
+    if (sent && sent.action === 'urgent_request') {
+      var ue = urgEngine().filter(function (x) { return x.action_id === sent.action_id; })[0];       /* v0.3.59 (R11J): 状態 (エンジンの行があれば) */
+      return '<div class="c01-req"><div class="c01-imp-ok">急ぎで依頼しました' + (ue ? '（急ぎ No.' + esc(String(ue.no)) + '） · ' + esc(ue.status || '') : '（今日中に対応 · 右上 AI 相談 → 依頼一覧）') + '</div></div>';
+    }
     if (sent) {
       var st = impState(a.ask_id);
       return '<div class="c01-req"><div class="c01-imp-ok">' + (st && st.no ? '改善依頼（一般）を受け付けました（No.' + esc(String(st.no)) + '） · ' + esc(st.status || '') : '改善依頼（一般）を送りました（受付番号は まもなく）') + '</div></div>';
@@ -4479,10 +4482,16 @@ window.C01 = window.C01 || {};
       '<button class="c01-btn-sub" data-impdrop="' + esc(a.ask_id) + '">やめる</button></div>';
     return h + '</div>';
   }
-  /* v0.3.57 (R11F · #317): 急ぎ（今日中）の依頼 = _actions urgent_request (エンジンは受付だけ · 一覧ファイルなし) — 送った記録から 行を作る (状態 = 受付 · 送信中) */
+  /* v0.3.57 (R11F · #317): 急ぎ（今日中）の依頼 = _actions urgent_request — 送った記録から 行を作る (状態 = 受付 · 送信中)
+     v0.3.59 (R11J · #317): エンジンが requests.json に 急ぎ の行 (kind urgent · 状態 受付 → 対応中 → 反映済 / 対応しない) を出していれば その行を使う
+     (同じ action_id の 送った記録の行は出さない) · 出していなければ 今まで通り */
+  function urgEngine() {
+    return ((S.reqs && S.reqs.items) || []).filter(function (x) { return x.kind === 'urgent'; });
+  }
   function urgRows() {
     if (!urgOn()) return [];
     var out = [], seen = {};
+    urgEngine().forEach(function (x) { if (x.action_id) seen[x.action_id] = 1; });
     (S.actions || []).concat(S.mine || []).forEach(function (x) {
       var a = x.action || x;
       if (a.action !== 'urgent_request' || seen[a.action_id]) return;
@@ -4495,6 +4504,7 @@ window.C01 = window.C01 || {};
   }
   function reqsHtml() {
     var all = (S.reqs && S.reqs.items) || null;
+    if (all) all = all.map(function (x) { return x.kind === 'urgent' ? Object.assign({ urg: true }, x) : x; });     /* v0.3.59 (R11J): エンジンの 急ぎ 行 */
     if (urgOn() && urgRows().length) all = urgRows().concat(all || []);
     if (!all) return '<p class="t2 c01-ask-empty">依頼一覧はまだありません（エンジンの一覧なし）。</p>';
     var me = ((S.me && S.me.email) || '').toLowerCase();

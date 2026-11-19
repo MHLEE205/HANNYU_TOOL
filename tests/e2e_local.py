@@ -1,5 +1,5 @@
 # ✦ Powered by LEENAI Automation System — C-01 TOOL v0.1 끝-끝 시험 (사본 DB + 사본 _data · local 모드 · Playwright)
-r"""TOOL 로 値の違い 2 · 手入力 1 · 写真のCT 1 · 未分類FAX 1 · 先勝ち 1 · 체크디짓 확인 후 저장 1 (v0.2.2 #109 ③) · 슬롯 입れ替え 1 (#109 ②) 처리 → run_actions_tick.py (사본) →
+r"""TOOL 로 値の違い 2 · 手入力 1 · 写真のCT 1 · 未分類FAX 1 · 先勝ち 1 · 체크디짓 확인 후 저장 1 (v0.2.2 #109 ③) · 슬롯 入れ替え 1 (#109 ②) 처리 → run_actions_tick.py (사본) →
 사본 DB 반영 · _data 다시 쓰기 → TOOL 다시 읽어 상태 확인 → 되돌림 (apply.revert) → 판정 표 해시 = 처리 전.
 이 스크립트에는 데이터가 없다 (대상은 실행 때 queue.json 에서 고름). 결과·스크린샷은 --out (레포 밖) 에만.
 사용: python tests/e2e_local.py --db <사본 engine.db> --root <사본 photo_v2_local> --data <사본 C01_DATA> --out <폴더>
@@ -180,7 +180,7 @@ def main():
             page.wait_for_timeout(200)
             ok("未分類FAX → link_fax", any(x["action"] == "link_fax" and x["queue_id"] == q7 for x in acts(root)))
             page.screenshot(path=str(out / "e2e_input_after.png"))
-            # v0.2.2 (#109 ②) 슬롯 입れ替え: 칸 있는 줄 2개 이상인 IV 에서 첫 줄을 둘째 줄 칸으로 (확인창 → 1건 swap_ct)
+            # v0.2.2 (#109 ②) 슬롯 入れ替え: 칸 있는 줄 2개 이상인 IV 에서 첫 줄을 둘째 줄 칸으로 (확인창 → 1건 swap_ct)
             page.click("#tab-main")
             page.wait_for_timeout(200)
             sw = page.evaluate("""() => { for (const iv of C01.state.jik.ivs) { const rs = iv.rows.filter(r => r.ct && r.slot_guid && iv.rows.filter(y => y.ct === r.ct).length === 1);
@@ -195,11 +195,11 @@ def main():
                 page.click("#slot-apply")
                 page.wait_for_timeout(400)
                 sc = [x for x in acts(root) if x["action"] == "slot_change"]
-                ok("슬롯 입れ替え 확인창 → slot_change 1 (swap_ct · 모든 직원)", dmsg == [f"{sw['b']} が入っています。入れ替えますか"] and len(sc) == 1
+                ok("슬롯 入れ替え 확인창 → slot_change 1 (swap_ct · 모든 직원)", dmsg == [f"{sw['b']} が入っています。入れ替えますか"] and len(sc) == 1
                    and sc[0]["value"]["swap_ct"] == sw["b"], dmsg)
                 page.screenshot(path=str(out / "e2e_slot.png"))
             else:
-                ok("슬롯 입れ替え 대상 IV", False, "칸 있는 줄 2개 IV 없음")
+                ok("슬롯 入れ替え 대상 IV", False, "칸 있는 줄 2개 IV 없음")
             page.click("#tab-input")
             page.wait_for_timeout(200)
             # 다른 창 30초 안
@@ -237,7 +237,7 @@ def main():
             page.wait_for_timeout(200)
             lost = page.locator(".c01-form .c01-lost").count() == 1
             ok("TOOL 「他の人が先に確認しました」 (엔진 superseded 결과)", lost)
-            # v0.2.2: 엔진 반영 뒤 _data — 체크디짓 확인 줄 = 確認済 · info CT_CHECKDIGIT_OVERRIDE (自動OK 아님) · 슬롯 입れ替え 줄 정보
+            # v0.2.2: 엔진 반영 뒤 _data — 체크디짓 확인 줄 = 確認済 · info CT_CHECKDIGIT_OVERRIDE (自動OK 아님) · 슬롯 入れ替え 줄 정보
             jk = json.loads((root / "_data" / "jikkyou.json").read_text(encoding="utf-8"))
             rows = {r["container_id"]: r for iv in jk["ivs"] for r in iv["rows"]}
             if q5_cid and q5_cid in rows:
@@ -249,7 +249,7 @@ def main():
             if sw:
                 ra = next(r for iv in jk["ivs"] if iv["iv_no"] == sw["iv"] for r in iv["rows"] if r["ct"] == sw["a"])
                 rb = next(r for iv in jk["ivs"] if iv["iv_no"] == sw["iv"] for r in iv["rows"] if r["ct"] == sw["b"])
-                ok("엔진: 슬롯 입れ替え 반영 (칸 서로 바뀜 · 줄 정보 누가·전→후)", ra["slot_guid"] == sw["sb"] and rb["slot_guid"] == sw["sa"]
+                ok("엔진: 슬롯 入れ替え 반영 (칸 서로 바뀜 · 줄 정보 누가·전→후)", ra["slot_guid"] == sw["sb"] and rb["slot_guid"] == sw["sa"]
                    and ra.get("slot_change", {}).get("before") == sw["sa"] and ra["slot_change"]["by"] == "staff.a@example.invalid", ra.get("slot_change"))
             page.screenshot(path=str(out / "e2e_conflict.png"))
             page.click("#tab-main")
