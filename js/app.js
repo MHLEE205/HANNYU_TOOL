@@ -2080,7 +2080,10 @@ window.C01 = window.C01 || {};
   }
 
   /* ── v0.3.17 (R7P · 決定 #175 · #176): 使い方 (1 画面) — 職員向け。人の名前・メールは書かない · v0.3.48 (R10B · #298): 期間 · 切り替えの文 · 試験表示 を外す ── */
-  function openHelp() {
+  function openHelp(sid) {
+    sid = typeof sid === 'string' ? sid : '';                                       /* v0.3.58 (R11G · #320): 章 id (「？」 · AI の参考) */
+    if (S.manual && (S.manual.sections || []).length) { openManual(sid); return; }
+    manLoad(sid);
     S.modal = { kind: 'help' };
     var html = '<div class="c01-mh"><b>使い方</b>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
@@ -2107,11 +2110,123 @@ window.C01 = window.C01 || {};
       '<li>気づいた点は担当の管理者へ（画面の写真と IV 番号）。</li></ul></section>' +
       '</div></div>';
     showModal(html, 'c01-modal-help');
-    if (!S.guide && S.meta && S.meta.tool_guide && !(S.guideMiss && Date.now() - S.guideMiss < 300000) && S.src && S.src.getJson) {   /* エンジンが言った時だけ (無い = 404 なし) */
+    if (!S.guide && !manOn() && S.meta && S.meta.tool_guide && !(S.guideMiss && Date.now() - S.guideMiss < 300000) && S.src && S.src.getJson) {   /* エンジンが言った時だけ (無い = 404 なし) · v0.3.58: マニュアルがある時は そちら */
       S.src.getJson(S.meta.tool_guide).then(function (x) { S.guide = x; if (S.modal && S.modal.kind === 'help') openHelp(); })
         .catch(function () { S.guideMiss = Date.now(); });
     }
   }
+  /* ── v0.3.58 (R11G · 決定 #320): 使い方マニュアル = エンジン _data/manual.json (engine/ask/manual_ja.md · AI 相談と同じ原本 · ここでは書かない)。
+     目次 · 検索 · 章リンク · 「？」 (data-man) → その章へ · 画像 = docs/img (仮名データの画面) · 無い (エンジン 切) = 今までの 使い方 ── */
+  var MAN_ID = /^\d+(-\d+)?$/;
+  function manOn() { return !!(S.meta && S.meta.manual); }
+  function manLoad(sid) {
+    if (S.manual || !manOn() || (S.manMiss && Date.now() - S.manMiss < 300000) || !S.src || !S.src.getJson || S.manBusy) return;
+    S.manBusy = true;
+    S.src.getJson(S.meta.manual).then(function (x) {
+      S.manBusy = false;
+      if (x && (x.sections || []).length) { S.manual = x; if (S.modal && S.modal.kind === 'help') openManual(sid || ''); }
+    }).catch(function () { S.manBusy = false; S.manMiss = Date.now(); });
+  }
+  function manInline(s) {
+    return s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\[btn:([^\]]+)\]/g, '<span class="c01-man-btn">$1</span>');
+  }
+  function manMd(text) {
+    var out = [], list = null, para = [];
+    function flushP() { if (para.length) { out.push('<p>' + para.join('<br>') + '</p>'); para = []; } }
+    function flushL() { if (list) { out.push('</' + list + '>'); list = null; } }
+    String(text || '').split('\n').forEach(function (ln) {
+      var l = ln.replace(/\s+$/, ''), m;
+      if (!l.trim() || /^<!--/.test(l.trim())) { flushP(); flushL(); return; }
+      if ((m = l.match(/^!\[([^\]]*)\]\((img\/[a-z0-9_\-]+\.png)\)$/))) {
+        flushP(); flushL();
+        out.push('<figure class="c01-man-fig"><img src="docs/' + m[2] + '" alt="' + esc(m[1]) + '" loading="lazy"><figcaption>' + esc(m[1]) + '（画面の例 · 仮名データ）</figcaption></figure>');
+        return;
+      }
+      if ((m = l.match(/^\s*-\s+(.*)$/)) || (m = l.match(/^\s*\d+\.\s+(.*)$/))) {
+        flushP();
+        var kind = /^\s*-\s/.test(l) ? 'ul' : 'ol';
+        if (list !== kind) { flushL(); out.push('<' + kind + '>'); list = kind; }
+        out.push('<li>' + manInline(esc(m[1])) + '</li>');
+        return;
+      }
+      flushL();
+      para.push(manInline(esc(l)));
+    });
+    flushP(); flushL();
+    return out.join('');
+  }
+  function manQ(sid, label) {
+    if (!manOn() || !MAN_ID.test(String(sid || ''))) return '';
+    return '<button type="button" class="c01-manq" data-man="' + esc(sid) + '" title="使い方 ' + esc(sid) + (label ? ' ' + esc(label) : '') + ' を開く" aria-label="使い方 ' + esc(sid) + '">？</button>';
+  }
+  var MANQ_KIND = { '値の違い': '3-2', '値の確認': '3-2', '手入力': '3-3', '写真のCT': '3-8', '写真不足': '2-3', '未分類FAX': '3-7', '業者・IV未定': '3-7',
+    '他社搬入票候補': '3-6', '同一候補': '3-4', '確認済の見直し': '2-3', '入力後の差異': '3-11' };
+  function manRefs(r) {
+    var xs = ((r && r.manual_refs) || []).filter(function (x) { return x && MAN_ID.test(String(x.id || '')); });
+    if (!xs.length) return '';
+    return '<div class="c01-ask-ref">' + xs.map(function (x) {
+      return '<button type="button" class="c01-linkbtn" data-man="' + esc(x.id) + '">参考: 使い方 ' + esc(x.id) + ' ' + esc(x.title || '') + '</button>';
+    }).join(' ') + '</div>';
+  }
+  function manAnswer(r) {
+    var t = String((r && r.answer) || '');
+    return ((r && r.manual_refs) || []).length ? t.replace(/\n?参考: 使い方 [^\n]*/g, '') : t;
+  }
+  function manNorm(s) { return String(s || '').normalize('NFKC').toLowerCase(); }
+  function openManual(sid) {
+    var M = S.manual, secs = M.sections || [];
+    S.modal = { kind: 'help', man: true };
+    var toc = secs.filter(function (s) { return s.level === 2; }).map(function (c) {
+      var subs = secs.filter(function (s) { return s.level === 3 && s.chapter === c.id; });
+      return '<li><a href="#" data-mango="' + esc(c.id) + '">' + esc(c.id) + '. ' + esc(c.title) + '</a>' + (subs.length ? '<ul>' + subs.map(function (s) {
+        return '<li><a href="#" data-mango="' + esc(s.id) + '">' + esc(s.id) + ' ' + esc(s.title) + '</a></li>'; }).join('') + '</ul>' : '') + '</li>';
+    }).join('');
+    var body = secs.map(function (s) {
+      var h = s.level === 2 ? '<h3>' + esc(s.id) + '. ' + esc(s.title) + '</h3>' : '<h4>' + esc(s.id) + ' ' + esc(s.title) + '</h4>';
+      return '<section class="c01-man-sec lv' + s.level + '" id="man-' + esc(s.id) + '" data-mansec="' + esc(s.id) + '">' + h + manMd(s.text) + '</section>';
+    }).join('');
+    var html = '<div class="c01-mh"><b>使い方</b> <span class="t2">' + esc(M.title || '') + ' · ' + esc(M.version || '') + ' · ' + esc(M.date || '') + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>' +
+      '<div class="c01-mb c01-help c01-man" id="help-body"><div class="c01-man-search"><input id="man-q" type="search" placeholder="使い方を検索（例: まとめる · 催促 · 他社）" aria-label="使い方を検索">' +
+      '<span class="t2" id="man-n"></span></div><div class="c01-man-wrap"><nav class="c01-man-toc" aria-label="目次"><b>目次</b><ul>' + toc + '</ul></nav>' +
+      '<div class="c01-man-body" id="man-body">' + body + '<p class="c01-powered">✦ Powered by LEENAI Automation System</p></div></div></div>';
+    showModal(html, 'c01-modal-help');
+    var box = $('c01-modal');
+    box.querySelectorAll('[data-mango]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); manGo(a.getAttribute('data-mango')); }; });
+    $('man-q').oninput = function () { manFilter(this.value); };
+    if (sid) manGo(sid);
+  }
+  function manGo(sid) {
+    var el = $('man-' + sid);
+    if (!el) return;
+    if ($('man-q') && $('man-q').value) { $('man-q').value = ''; manFilter(''); }
+    document.querySelectorAll('.c01-man-sec.hit').forEach(function (x) { x.classList.remove('hit'); });
+    el.classList.add('hit');
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'start' });
+  }
+  function manFilter(q) {
+    var w = manNorm(q).trim().split(/\s+/).filter(Boolean), n = 0, M = S.manual || {};
+    (M.sections || []).forEach(function (s) {
+      var el = $('man-' + s.id);
+      if (!el) return;
+      var hay = manNorm(s.title + ' ' + s.text + ' ' + (s.keys || []).join(' '));
+      var hit = !w.length || w.every(function (x) { return hay.indexOf(x) >= 0; });
+      el.hidden = !hit;
+      if (hit && w.length && s.level === 3) n += 1;
+    });
+    if (w.length) (M.sections || []).forEach(function (s) {                      /* 章の見出し = 中に当たりがあれば出す */
+      if (s.level !== 2) return;
+      var any = (M.sections || []).some(function (x) { return x.level === 3 && x.chapter === s.id && $('man-' + x.id) && !$('man-' + x.id).hidden; });
+      if (any && $('man-' + s.id)) $('man-' + s.id).hidden = false;
+    });
+    if ($('man-n')) $('man-n').textContent = w.length ? n + ' 件' : '';
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('[data-man]') : null;
+    if (!b) return;
+    e.preventDefault();
+    openHelp(b.getAttribute('data-man'));
+  });
   /* v0.3.46 (R9W Part 1 · #290): 操作の一覧 = エンジン _data/tool_guide.json (AI 相談に渡す表と同じ原本 · ここでは書かない) */
   function guideHtml() {
     var g = S.guide;
@@ -2747,7 +2862,7 @@ window.C01 = window.C01 || {};
       vItems = VALUE_KINDS[q.kind] ? card.items.filter(function (y) { return VALUE_KINDS[y.kind]; }) : [];
       var vOpen = vItems.filter(function (y) { return !queueState(y, ov).done; });
       if (VALUE_KINDS[q.kind]) st = vOpen.length ? { done: false } : queueState(vItems[0], ov);
-      html += '<div class="c01-form-h"><span class="k" style="color:' + KC.color + '">' + esc(VALUE_KINDS[q.kind] ? card.kinds.filter(function (k) { return VALUE_KINDS[k]; }).map(kindLabel).join('・') : kindLabel(q.kind)) + '</span><span class="mono big">' +
+      html += '<div class="c01-form-h"><span class="k" style="color:' + KC.color + '">' + esc(VALUE_KINDS[q.kind] ? card.kinds.filter(function (k) { return VALUE_KINDS[k]; }).map(kindLabel).join('・') : kindLabel(q.kind)) + '</span>' + manQ(MANQ_KIND[q.kind] || '2-3', kindLabel(q.kind)) + '<span class="mono big">' +
         esc(q.kind === '写真のCT' ? 'CT 不明の写真 ' + (q.files || []).length + '枚' : (q.kind === '未分類FAX' || q.kind === HOLD) ? ((q.files || [])[0] || {}).name || '' : (q.ct || '（CT 不明）')) + '</span>' +
         (qAiDiff(q, iv) ? '<span class="c01-ibadge" data-info="AI_GROUP_DIFF" title="' + esc(INFO_TEXT.AI_GROUP_DIFF) + '">AI 区分が異なる</span>' : '') +
         '<span class="t2">' + esc(q.kind === '未分類FAX' ? '送信元 ' + (q.issuer || '不明') + (q.received_at ? ' · 受信 ' + md(String(q.received_at).slice(0, 10)) : '') :
@@ -4202,7 +4317,7 @@ window.C01 = window.C01 || {};
   function askDrawer(q) {
     var th = askThread(q), k = askKey(q);
     var h = '<aside class="c01-askdr" id="ask-box" role="complementary" aria-label="AIに相談">' +
-      '<div class="c01-askdr-h"><div><b>AIに相談</b>' + (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') +
+      '<div class="c01-askdr-h"><div><b>AIに相談</b>' + manQ('5-1', 'カードの AIに相談') + (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') +
       '<span class="t2 mono">' + esc((q.iv_no || '') + (q.ct ? ' · ' + q.ct : '')) + '</span></div>' +
       '<button type="button" class="c01-x" id="ask-close" title="閉じる (Esc)" aria-label="閉じる">✕</button></div>';
     h += '<div class="c01-ask-log">' + (th.length ? '' : '<p class="t2 c01-ask-empty">このカードの質問はまだありません。今見ているカードと開いている原本 (ファイル · 頁) が一緒に送られます。</p>') + th.map(function (x) {
@@ -4216,7 +4331,7 @@ window.C01 = window.C01 || {};
       var fixes = [], rest = [];
       sug.forEach(function (s, i) { (isFix(s) ? fixes : rest).push({ s: s, i: i }); });
       var nBtn = rest.length + fixes.length + propList(r).length + (r.improve ? 1 : 0);
-      return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
+      return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(manAnswer(r)) + '</div>' + manRefs(r) +
         (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') +
         fixes.map(function (o) { return fixBox(a, o.s, o.i, q); }).join('') + fixChkBox(a, r) +
         (rest.length ? '<div class="c01-ask-sug">' + rest.map(function (o) {
@@ -4401,18 +4516,18 @@ window.C01 = window.C01 || {};
   function gaskDrawer() {
     var th = gaskThread(), tab = S.gTab === 'reqs' ? 'reqs' : 'chat';
     var h = '<aside class="c01-askdr c01-gdr" id="gask-box" role="complementary" aria-label="AI 相談（全体）">' +
-      '<div class="c01-askdr-h"><div><b>AI 相談（全体）</b>' + (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') +
+      '<div class="c01-askdr-h"><div><b>AI 相談（全体）</b>' + manQ('5-2', '全体の AI 相談') + (C01.ASK.trial ? ' <span class="c01-trialtag">試験表示</span>' : '') +
       '<span class="t2">カードと関係ない質問 · 「来ているのに出ない」 などの改善依頼</span></div>' +
       '<button type="button" class="c01-x" id="gask-close" title="閉じる (Esc)" aria-label="閉じる">✕</button></div>' +
       '<div class="c01-gtabs"><button class="c01-tab' + (tab === 'chat' ? ' on' : '') + '" data-gtab="chat">相談</button>' +
-      '<button class="c01-tab' + (tab === 'reqs' ? ' on' : '') + '" data-gtab="reqs">依頼一覧</button></div>';
+      '<button class="c01-tab' + (tab === 'reqs' ? ' on' : '') + '" data-gtab="reqs">依頼一覧</button>' + manQ(tab === 'reqs' ? '5-4' : '4-1', tab === 'reqs' ? '依頼一覧' : '急ぎの修正') + '</div>';
     if (tab === 'reqs') return h + '<div class="c01-ask-log">' + reqsHtml() + '</div><p class="c01-powered">✦ Powered by LEENAI Automation System</p></aside>';
     h += '<div class="c01-ask-log">' + (th.length ? '' : '<p class="t2 c01-ask-empty">画面全体についての質問はまだありません。例: 「〇〇 から BKG △△ のメールが来ているのに写真がない」。AI がメール · ブッキングを調べて 原因を答えます (データは変えません)。</p>') + th.map(function (x) {
       var a = x.ask, r = x.reply;
       var who = esc(a.by_name || a.by || '') + ' · ' + esc(String(a.at || '').slice(11, 16));
       var body = '<div class="c01-ask-q"><span class="t2">' + who + '</span> ' + esc(a.question) + '</div>';
       if (!r) return body + '<div class="c01-ask-a wait">回答待ち…</div>';
-      return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(r.answer || '') + '</div>' +
+      return body + '<div class="c01-ask-a"><div class="c01-ask-txt">' + esc(manAnswer(r)) + '</div>' + manRefs(r) +
         (r.approval_request ? '<div class="c01-ask-apr">管理者の承認依頼として記録しました: ' + esc(r.approval_request) + '</div>' : '') + impBox(a, r) + propBox(a, r, null) + (r.improve || propList(r).length ? '' : reqBox(a, r)) + fbBox(a, r) + '</div>';
     }).join('') + '</div>';
     h += '<div class="c01-askdr-f"><div class="c01-ask-quick">' + GASK_QUICK.map(function (t, i) { return '<button class="c01-chip" data-gaskq="' + i + '">' + esc(t) + '</button>'; }).join('') + '</div>';

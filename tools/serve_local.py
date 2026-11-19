@@ -94,7 +94,7 @@ class H(BaseHTTPRequestHandler):
                 return self._file(s.actions, rel)
             return self._file(s.root, rel)
         rel = path.lstrip("/")
-        if rel.split("/")[0] in ("js", "app.css", "fixtures") or rel == "app.css":
+        if rel.split("/")[0] in ("js", "app.css", "fixtures", "docs") or rel == "app.css":     # v0.3.58 (R11G): docs/img = 使い方の画面の例
             return self._file(TOOL, rel)
         return self._send(404, {"error": "not found"})
 

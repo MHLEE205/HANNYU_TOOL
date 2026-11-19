@@ -3828,6 +3828,134 @@ def r10x_checks(page, root, shots, engine_frz):
     page.wait_for_timeout(400)
 
 
+def r11g_checks(page, root, shots, engine):
+    """v0.3.58 (R11G · #320): 使い方 = エンジン manual.json (目次 · 検索 · 章リンク) · カード / AI 相談 の 「？」 → その章 ·
+    AI の答えの 参考 (manual_refs) → その章 · マニュアルのボタン名 = TOOL の画面の字 (公開前の自動照合) · 画像 = docs/img ·
+    携帯の幅 · マニュアル無し = 今までの 使い方. 仮名データだけ."""
+    sys.path.insert(0, engine)
+    from engine.ask import manual as MAN  # noqa: E402
+    from engine.output import schema_check as SC  # noqa: E402
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    mp = d / "meta.json"
+    mt0 = mp.read_text(encoding="utf-8")
+    page.keyboard.press("Escape")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; C01.state.view = 'main'; C01.app.render(); }")
+    man = {"schema_version": 1, "kind": "manual", **MAN.output()}
+    ok("R11G manual.json = 엔진 스키마", SC.errors(man, SC.load("manual")) == [])
+    # ① 매뉴얼 버튼 이름 = TOOL 화면 글자 (공개 전 자동 대조 · #305)
+    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "photo.html"))
+    miss = [b for b in man["buttons"] if b not in src]
+    ok("R11G 매뉴얼 버튼 이름 = TOOL 화면 글자 (" + str(len(man["buttons"])) + "개 · 없음 0)", not miss and len(man["buttons"]) >= 20, miss)
+    imiss = [x for x in man["images"] if not (TOOL / "docs" / x).is_file()]
+    ok("R11G 매뉴얼 그림 = TOOL docs/img 에 있음", not imiss and len(man["images"]) >= 3, imiss)
+    # ② 끈 엔진 (meta 에 manual 없음) = 지금 使い方 · 「？」 0
+    page.click("#help-open")
+    page.wait_for_timeout(400)
+    ok("R11G 끔 = 지금 使い方 (1~4 · 「？」 0)", page.locator(".c01-man").count() == 0 and "1. 自分の担当を見る" in page.locator("#help-body").inner_text()
+       and page.locator(".c01-manq").count() == 0)
+    page.keyboard.press("Escape")
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    # ③ 켬: manual.json + meta.manual
+    (d / "manual.json").write_text(dump(man), encoding="utf-8")
+    m = json.loads(mt0)
+    m["manual"] = "manual.json"
+    mp.write_text(dump(m), encoding="utf-8")
+    page.evaluate("() => { C01.state.manual = null; C01.state.manMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(700)
+    page.click("#help-open")
+    page.wait_for_timeout(800)
+    nsec = page.locator(".c01-man-sec").count()
+    toc = page.locator(".c01-man-toc a").count()
+    ok("R11G 使い方 = 매뉴얼 전체 (장 " + str(nsec) + " = manual.json · 목차 링크 · 판 · ✦)", nsec == len(man["sections"]) and toc == len(man["sections"])
+       and man["version"] in page.locator(".c01-modal-help .c01-mh").inner_text() and "✦ Powered by LEENAI Automation System" in page.locator("#help-body").inner_text(),
+       (nsec, toc))
+    ok("R11G 3 장 안 = 버튼 표 (tool_guide 와 같은 원본 · 「他社のコンテナ」 場所)", "この行の操作" in page.locator("#man-3-5").inner_text()
+       and page.locator("#man-3-1 .c01-man-btn").count() >= 10)
+    imgs = page.evaluate("() => [...document.querySelectorAll('.c01-man-fig img')].map(i => [i.getAttribute('src'), i.complete && i.naturalWidth > 0])")
+    page.locator("#man-1").scroll_into_view_if_needed()
+    page.wait_for_timeout(500)
+    imgs = page.evaluate("() => [...document.querySelectorAll('.c01-man-fig img')].map(i => i.getAttribute('src'))")
+    ok("R11G 그림 = docs/img (가명 화면) 3", sorted(imgs) == sorted("docs/" + x for x in man["images"]), imgs)
+    page.screenshot(path=str(shots / "r11g_manual.png"))
+    # 검색
+    page.fill("#man-q", "まとめる")
+    page.wait_for_timeout(200)
+    vis = page.evaluate("() => [...document.querySelectorAll('.c01-man-sec')].filter(e => !e.hidden).map(e => e.dataset.mansec)")
+    ok("R11G 검색 「まとめる」 = 3-4 보임 · 맞는 장만", "3-4" in vis and "2-4" not in vis and len(vis) < nsec and "件" in page.locator("#man-n").inner_text(), vis)
+    page.fill("#man-q", "")
+    page.wait_for_timeout(100)
+    page.click(".c01-man-toc a[data-mango='3-9']")
+    page.wait_for_timeout(200)
+    ok("R11G 목차 링크 → 그 장 (강조)", page.evaluate("() => (document.querySelector('.c01-man-sec.hit') || {}).id") == "man-3-9")
+    page.screenshot(path=str(shots / "r11g_manual_3-9.png"))
+    page.keyboard.press("Escape")
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    # ④ 카드 「？」 → 그 장
+    page.click("#tab-input")
+    page.wait_for_timeout(500)
+    q = page.locator(".c01-form-h .c01-manq")
+    want = q.get_attribute("data-man") if q.count() else None
+    ok("R11G 카드 머리 「？」 (작게 · 1개)", q.count() == 1 and want and q.inner_text() == "？", q.count())
+    if q.count():
+        q.click()
+        page.wait_for_timeout(400)
+        ok("R11G 카드 「？」 → 使い方 그 장 (" + str(want) + ")", page.evaluate("() => (document.querySelector('.c01-man-sec.hit') || {}).id") == "man-" + str(want))
+        page.keyboard.press("Escape")
+        page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    # ⑤ 전체 AI 相談 「？」 · 답의 参考 → 그 장 · 답 글 참고 줄 겹침 0
+    page.click("#tab-main")
+    page.click("#gask-open")
+    page.wait_for_timeout(300)
+    ok("R11G 전체 AI 相談 머리 「？」 = 5-2", page.locator("#gask-box .c01-askdr-h .c01-manq").get_attribute("data-man") == "5-2")
+    before = set(p.name for p in (root / "_actions" / "ask").rglob("*.json")) if (root / "_actions" / "ask").exists() else set()
+    page.fill("#gask-in", "行をまとめたい")
+    page.press("#gask-in", "Enter")
+    page.wait_for_timeout(500)
+    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
+    rep = {"ask_id": g.get("ask_id"), "scope": "global", "status": "ok", "kind": "guide", "suggestions": [], "approval_request": "", "improve": None,
+           "answer": "書類だけの行で 「✎ 修正」 から CT番号 を入れると 「n番の行にまとめる」 が出ます。\n参考: 使い方 3-4 まとめる\n調べた内容: なし",
+           "manual_given": ["3-4"], "manual_refs": [{"id": "3-4", "title": "まとめる"}, {"id": "../x", "title": "bad"}]}
+    (root / "_actions" / "ask_reply").mkdir(parents=True, exist_ok=True)
+    (root / "_actions" / "ask_reply" / f"{g.get('ask_id')}.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    page.evaluate("() => C01.app.tick()")
+    page.wait_for_timeout(800)
+    page.evaluate("() => C01.app.render()")
+    page.wait_for_timeout(300)
+    ref = page.locator("#gask-box .c01-ask-ref [data-man]")
+    txt = page.locator("#gask-box .c01-ask-txt").last.inner_text() if page.locator("#gask-box .c01-ask-txt").count() else ""
+    ok("R11G 답의 参考 = 링크 1 (잘못된 id 버림) · 답 글에 같은 줄 겹침 0 · 調べた内容 그대로",
+       ref.count() == 1 and ref.inner_text() == "参考: 使い方 3-4 まとめる" and "参考: 使い方" not in txt and "調べた内容" in txt, (ref.count(), txt[-80:]))
+    page.screenshot(path=str(shots / "r11g_ask_ref.png"))
+    if ref.count():
+        ref.click()
+        page.wait_for_timeout(400)
+        ok("R11G 参考 링크 → 使い方 3-4", page.evaluate("() => (document.querySelector('.c01-man-sec.hit') || {}).id") == "man-3-4")
+    page.keyboard.press("Escape")
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    page.evaluate("() => C01.app.gaskClose && C01.app.gaskClose()")
+    # ⑥ 휴대폰 폭
+    page.set_viewport_size({"width": 390, "height": 800})
+    page.wait_for_timeout(200)
+    page.evaluate("() => { var b = document.getElementById('help-open'); if (b) b.click(); }")
+    page.wait_for_timeout(500)
+    ov = page.evaluate("() => { var m = document.querySelector('.c01-modal-help'); var t = document.querySelector('.c01-man-toc'), b = document.querySelector('.c01-man-body');"
+                       " return m ? [Math.round(m.getBoundingClientRect().width), t && b ? t.getBoundingClientRect().bottom <= b.getBoundingClientRect().top + 1 : null,"
+                       " [...m.querySelectorAll('*')].every(e => e.getBoundingClientRect().right <= window.innerWidth + 1)] : null; }")
+    ok("R11G 휴대폰 폭 390 = 목차 위 · 본문 아래 · 가로 넘침 0", ov and ov[0] <= 392 and ov[1] is True and ov[2] is True, ov)
+    page.screenshot(path=str(shots / "r11g_manual_phone.png"))
+    page.keyboard.press("Escape")
+    page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; }")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    # 되돌림 (다음 시험 = 예전 상태)
+    mp.write_text(mt0, encoding="utf-8")
+    (d / "manual.json").unlink()
+    page.evaluate("() => { C01.state.manual = null; C01.state.view = 'main'; C01.app.tick(); }")
+    page.wait_for_timeout(400)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shots", default=str(TOOL / "tests" / "_shots"))
@@ -3900,11 +4028,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.57", page.title() == "LEENAI C-01 搬入票 v0.3.57", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.58", page.title() == "LEENAI C-01 搬入票 v0.3.58", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.57" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.58" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4434,6 +4562,7 @@ def main():
             r10w_checks(page, root, shots, a.engine, a.engine_r10u)
             r10x_checks(page, root, shots, a.engine_frz)
             r11f_checks(page, root, shots, a.engine)
+            r11g_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

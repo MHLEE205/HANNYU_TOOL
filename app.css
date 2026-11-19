@@ -567,3 +567,33 @@ body.c01-rdr-on #c01-main { margin-right: 416px; }
 .c01-evbox { position: absolute; border: 3px solid #e53935; box-shadow: 0 0 0 2px rgba(255,255,255,.7); border-radius: 3px; pointer-events: none; }
 @keyframes c01-flash { 0%, 60% { background: rgba(255, 213, 79, .55); } 100% { background: transparent; } }
 tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
+
+/* v0.3.58 (R11G · #320): 使い方マニュアル (目次 · 検索 · 章) · 「？」 · AI の参考リンク · 携帯の幅 */
+.c01-manq { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin: 0 4px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--read); color: var(--text); font-size: 11px; line-height: 1; cursor: pointer; vertical-align: middle; }
+.c01-manq:hover { border-color: var(--accent, #6aa0ff); }
+.c01-man-search { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; }
+.c01-man-search input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--read); color: var(--text); }
+.c01-man-wrap { display: grid; grid-template-columns: 240px 1fr; gap: 12px; align-items: start; }
+.c01-man-toc { position: sticky; top: 0; max-height: 70vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.c01-man-toc ul { margin: 2px 0; padding-left: 14px; }
+.c01-man-toc a { color: var(--text); text-decoration: none; }
+.c01-man-toc a:hover { text-decoration: underline; }
+.c01-man-body { max-height: 70vh; overflow: auto; }
+.c01-man-sec { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 0 0 8px; line-height: 1.7; overflow-wrap: anywhere; }
+.c01-man-sec.lv2 { border: none; padding: 4px 0 0; }
+.c01-man-sec.hit { outline: 2px solid var(--accent, #6aa0ff); }
+.c01-man-sec h3 { margin: 4px 0; font-size: 15px; } .c01-man-sec h4 { margin: 0 0 4px; font-size: 13px; }
+.c01-man-sec ol, .c01-man-sec ul { margin: 2px 0; padding-left: 20px; }
+.c01-man-btn { display: inline-block; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--read); font-weight: 600; white-space: nowrap; }
+.c01-man-fig { margin: 6px 0; } .c01-man-fig img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; }
+.c01-man-fig figcaption { font-size: 11px; color: var(--muted, #888); }
+.c01-ask-ref { margin: 4px 0; } .c01-linkbtn { background: none; border: none; padding: 0; color: var(--accent, #6aa0ff); cursor: pointer; text-decoration: underline; font-size: 12px; }
+@media (max-width: 700px) {
+  .c01-man-wrap { grid-template-columns: minmax(0, 1fr); }
+  .c01-man-toc { position: static; max-height: 30vh; }
+  .c01-man-body { max-height: none; overflow: visible; }
+  .c01-man-btn { white-space: normal; }
+  .c01-man-search input { font-size: 16px; }
+  .c01-modal.c01-modal-help { width: 100vw; }
+}
