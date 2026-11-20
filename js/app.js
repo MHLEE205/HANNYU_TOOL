@@ -3831,10 +3831,25 @@ window.C01 = window.C01 || {};
         }).join('') + '</div>';
       var sel = sl.filter(function (s) { return s.slot_guid === v.slot; })[0];
       if (sel && q.packer_guess && sel.packer && q.packer_guess.split('・').indexOf(sel.packer) < 0) h += '<p class="c01-warn2">書類の業者（' + esc(q.packer_guess) + '）と枠の業者（' + esc(sel.packer) + '）が違います</p>';
-      if (sel && used[sel.slot_guid]) h += '<p class="c01-warn2">この枠にはもう行があります（' + esc(used[sel.slot_guid].ct || 'CT 不明') + '）</p>';
+      var all = sel && linkScopeOn() && v.scope === 'packer_all';
+      if (sel && used[sel.slot_guid] && !all) h += '<p class="c01-warn2">この枠にはもう行があります（' + esc(used[sel.slot_guid].ct || 'CT 不明') + '）</p>';
+      if (sel && linkScopeOn()) h += linkScopeHtml(sl, used, sel, v);   /* v0.3.62 (R12B · 決定 #347) */
       if (faxCmpOn(q)) h += faxCmpHtml(q, iv);
     }
     return h + '<p class="c01-note2">連結すると この書類は選んだ IV · 枠のものとして次の判定（10 分ほど）で読みます。元に戻せます。</p></div>';
+  }
+  /* v0.3.62 (R12B Part 2 · 決定 #347 · エンジン s2_link_iv_all → meta.link_iv_scopes): 範囲 = 「この枠だけ」 (今まで) / 「業者の空き枠すべて」
+     (選んだ枠の業者 · そのブッキングの空き枠 全部 → エンジンが 1 台ずつ いつもの枠の決め方で入れる · 残った台 = 確認)。値は原本のまま (人は範囲だけ) */
+  function linkScopeOn() { return !!(S.meta && (S.meta.link_iv_scopes || []).indexOf('packer_all') >= 0); }
+  function linkFreeSlots(sl, used, pk) { return sl.filter(function (s) { return s.packer === pk && !used[s.slot_guid]; }); }
+  function linkScopeHtml(sl, used, sel, v) {
+    var fr = linkFreeSlots(sl, used, sel.packer), all = v.scope === 'packer_all';
+    return '<div class="c01-linkscope" id="link-scope"><div class="t2">範囲</div>' +
+      '<label><input type="radio" name="link-scope" value="one"' + (all ? '' : ' checked') + '> この枠だけ</label>' +
+      '<label' + (fr.length ? '' : ' class="dis"') + '><input type="radio" name="link-scope" value="packer_all"' + (all ? ' checked' : '') + (fr.length ? '' : ' disabled') + '> 業者の空き枠すべて（' +
+      esc(sel.packer || '') + ' · 空き ' + fr.length + '）</label>' +
+      (all ? '<p class="c01-note2">この書類 · 写真のコンテナを ' + esc(sel.packer || '') + ' の空き枠 ' + fr.length + ' つに 1 台ずつ入れます（いつもの枠の決め方 · 余った台 · 他の業者の行と同じ CT は入れない = 確認）。値は原本のまま。元に戻せます。</p>' :
+        (fr.length ? '' : '<p class="c01-note2">' + esc(sel.packer || '') + ' の空き枠がありません</p>')) + '</div>';
   }
   function bindLinkIv(q) {
     var inp = $('link-iv');
@@ -3851,6 +3866,9 @@ window.C01 = window.C01 || {};
     document.querySelectorAll('[data-linkiv]').forEach(function (b) { b.onclick = function () { setIv(b.getAttribute('data-linkiv')); }; });
     document.querySelectorAll('input[name="link-slot"]').forEach(function (r) {
       r.onchange = function () { (S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {})).slot = r.value; render(); };
+    });
+    document.querySelectorAll('input[name="link-scope"]').forEach(function (r) {   /* v0.3.62 (R12B · #347) */
+      r.onchange = function () { (S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {})).scope = r.value; render(); };
     });
   }
   /* ── v0.3.46 (R9X Part 00-2 · #295 · 형님 「IV 連結 をすると 同じ画面で値まで」): FAX で読んだ値 ↔ 選んだ IV の同じ CT の行の値 ──
@@ -3945,15 +3963,17 @@ window.C01 = window.C01 || {};
       if (!window.confirm('書類の業者（' + q.packer_guess + '）と枠の業者（' + sl.packer + '）が違います。この枠に連結しますか？')) return;
       warn.push('packer');
     }
+    var all = linkScopeOn() && v.scope === 'packer_all';             /* v0.3.62 (R12B · #347): 業者の空き枠すべて */
+    if (all && !linkFreeSlots(iv.slots || [], slotRows(iv), sl.packer).length) { S.qmsg[q.queue_id] = sl.packer + ' の空き枠がありません'; render(); return; }
     var used = slotRows(iv)[sl.slot_guid];
-    if (used) {
+    if (used && !all) {
       if (!window.confirm('この枠にはもう行があります（' + (used.ct || 'CT 不明') + '）。この枠に連結しますか？')) return;
       warn.push('slot_used');
     }
     var hs = (q.files || []).map(function (f) { return f.sha16; }).filter(function (h, i, a) { return h && a.indexOf(h) === i; });
     var a = mkAction('link_iv', { iv: iv.iv_no, ct: null, field: null, source: null, queue_id: q.queue_id,
       value: { sha16: hs, slot_guid: sl.slot_guid, bkg: iv.bkg_no || null, names: (q.files || []).map(function (f) { return f.name; }).filter(Boolean),
-        packer_guess: q.packer_guess || null, warn: warn,
+        packer_guess: q.packer_guess || null, warn: warn, scope: all ? 'packer_all' : undefined,
         fax: q.kind === '未分類FAX' ? { issuer: q.issuer || null, ct: (q.fax_read && q.fax_read.ct) || [], engine_cand: (q.candidates || []).indexOf(iv.iv_no) >= 0, past: !!iv.fromTarget } : null } });
     var cacts = [];
     if (withConfirm) {
@@ -3964,7 +3984,7 @@ window.C01 = window.C01 || {};
     var chain = writeAction(a);
     cacts.forEach(function (x) { chain = chain.then(function () { return writeAction(x); }); });
     chain.then(function () {
-      toast(cacts.length ? 'IV に連結して 値を ' + cacts.length + ' つ確認しました（元に戻す = 両方）' : 'IV に連結しました（次の判定で反映）', 'success');
+      toast(cacts.length ? 'IV に連結して 値を ' + cacts.length + ' つ確認しました（元に戻す = 両方）' : all ? 'IV に連結しました（業者の空き枠すべて · 次の判定で反映）' : 'IV に連結しました（次の判定で反映）', 'success');
       S.qsel = nextQueueId(q); render();
     });
   }

@@ -2,6 +2,11 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.62 (2026-11-20) — R12B (決定 #347): 「IVに連結」 範囲 「業者の空き枠すべて」
+- 「業者・IV未定」 · 「未分類FAX」 の 「IVに連結」 で枠を選ぶと 「範囲」 が出る (エンジン meta.link_iv_scopes に packer_all がある時だけ · エンジン設定 s2_link_iv_all)。「この枠だけ」 (最初 · 今まで通り) / 「業者の空き枠すべて（業者 · 空き n）」。
+- 「業者の空き枠すべて」 = action link_iv value.scope packer_all — エンジンが その業者の空き枠に 1 台ずつ いつもの枠の決め方で入れる (余った台 · 他の業者の行と同じ CT = 確認)。値は原本のまま。選んだ枠に行があっても 確認窓なし (空き枠だけ使う)。空き枠 0 = 選べない。元に戻す = 今まで通り。
+- 試験 tests/test_ui.py R12B 7 項目 (受け取り側の照合 = エンジン action スキーマ scope enum · meta.link_iv_scopes)。
+
 ## 0.3.61 (2026-11-20) — R12A (決定 #339): 「発信者未登録」 件名で対象外 (一覧 · 件名の語 · 管理者の追加 / 削除 · 元に戻す)
 - 送信元のメールが全部 「件名の語」 に合い、写真 · 搬入票 · コンテナ番号がない時 = エンジンがカードを出さない (senders.json excluded reason subject_words)。一覧の下 「件名で対象外 n件 · 件名の語 m」 (最初は閉じる)。
 - 件名の語 = エンジン skip_words + この画面の操作。追加 · 削除 = 管理者だけ (action sender_skip_word {op add / remove, word} · 3 文字以上 · 同じ語は書かない)。人が足した語 · 削除した語 = 元に戻す (undo)。エンジン出力に skip_words が無い時 (エンジン設定 off) は何も出さない。

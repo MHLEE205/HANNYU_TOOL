@@ -2545,6 +2545,101 @@ def r12a_checks(page, root, shots, engine):
     page.wait_for_timeout(500)
 
 
+def r12b_checks(page, root, shots, engine):
+    """v0.3.62 (R12B Part 2 · #347): 「IVに連結」 범위 — 엔진 meta.link_iv_scopes 에 packer_all 이 있을 때만 「業者の空き枠すべて」 (업체 · 빈 칸 수) ·
+    기본 = この枠だけ (scope 없음 = 지금 그대로) · 고르면 value.scope = packer_all · 이미 찬 칸 확인창 없음 · 元に戻す · 받는 쪽 대조 (엔진 action 스키마 scope enum)."""
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    eng = Path(engine)
+    asch = json.loads((eng / "engine" / "output" / "schema" / "action.schema.json").read_text(encoding="utf-8"))
+    msch = json.loads((eng / "engine" / "output" / "schema" / "meta.schema.json").read_text(encoding="utf-8"))
+    lv = next(x for x in asch["allOf"] if x.get("if", {}).get("properties", {}).get("action", {}).get("const") == "link_iv")
+    sc_enum = ((lv["then"]["properties"]["value"]["properties"].get("scope") or {}).get("enum") or [])
+    js = (TOOL / "js" / "app.js").read_text(encoding="utf-8")
+    ok("R12B 받는 쪽 대조: 엔진 link_iv value.scope enum · meta.link_iv_scopes = TOOL 이 쓰는 값 (packer_all)",
+       sc_enum == ["one", "packer_all"] and "link_iv_scopes" in msch["properties"] and "'packer_all'" in js and "link_iv_scopes" in js, (sc_enum,))
+    qp = root / "_data" / "queue.json"
+    mp = root / "_data" / "meta.json"
+    qt0, mt0 = qp.read_text(encoding="utf-8"), mp.read_text(encoding="utf-8")
+    qj = json.loads(qt0)
+    hq = next(x for x in qj["items"] if x["kind"] == "業者・IV未定")
+    page.evaluate("C01.RULES.linkIv = true; C01.app.tick()")
+    page.wait_for_timeout(500)
+    iv = page.evaluate("() => (C01.state.jik.ivs || []).filter(x => x.iv_no === 'TST2611-01').map(x => ({slots: x.slots.map(s => [s.slot_guid, s.packer]), "
+                       "used: (x.rows || []).filter(r => r.slot_guid).map(r => r.slot_guid)}))[0]")
+    pk = iv["slots"][0][1]
+    free = [g for g, p in iv["slots"] if p == pk and g not in iv["used"]]
+    used_same = [g for g, p in iv["slots"] if p == pk and g in iv["used"]]
+    hq["packer_guess"] = pk
+    qp.write_text(dump(qj), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(400)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_selector("#link-iv")
+    page.click(".c01-linkiv [data-linkiv='TST2611-01']")
+    page.wait_for_timeout(200)
+    pick = used_same[0] if used_same else free[0]
+    page.locator(f"input[name='link-slot'][value='{pick}']").check()
+    page.wait_for_timeout(200)
+    ok("R12B 엔진 meta 에 link_iv_scopes 없음 = 범위 고르기 없음 (지금 그대로)", page.locator("#link-scope").count() == 0, "")
+    mj = json.loads(mt0)
+    mj["link_iv_scopes"] = ["one", "packer_all"]
+    mp.write_text(dump(mj), encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(500)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_selector("#link-scope")
+    t = page.locator("#link-scope").inner_text()
+    ok("R12B 범위 = この枠だけ (기본 ✓) · 業者の空き枠すべて（업체 · 空き n）", page.locator("input[name='link-scope'][value='one']").is_checked()
+       and f"業者の空き枠すべて（{pk} · 空き {len(free)}）" in t, [t, pk, len(free)])
+    page.locator("input[name='link-scope'][value='packer_all']").check()
+    page.wait_for_timeout(200)
+    t2 = page.locator(".c01-linkiv").inner_text()
+    ok("R12B 業者の空き枠すべて = 안내 (1 台ずつ · 余った台 = 確認 · 値は原本) · 「もう行があります」 경고 없음",
+       "1 台ずつ" in t2 and "値は原本のまま" in t2 and "もう行があります" not in t2, t2[-260:])
+    page.screenshot(path=str(shots / "r12b_link_scope.png"))
+    ids0 = {x.get("action_id") for x in actions(root)}
+    dl = []
+
+    def acc(d):
+        dl.append(d.message)
+        d.accept()
+    page.on("dialog", acc)
+    page.click("#q-submit")
+    page.wait_for_timeout(600)
+    new = [x for x in actions(root) if x.get("action_id") not in ids0]
+    v = new[0]["value"] if new else {}
+    ok("R12B 저장 = link_iv value.scope packer_all · slot_guid = 고른 칸 · 확인창 0 (이미 찬 칸이어도)",
+       len(new) == 1 and new[0]["action"] == "link_iv" and v.get("scope") == "packer_all" and v.get("slot_guid") == pick and v.get("warn") == [] and dl == [], [new, dl])
+    page.evaluate("q => { C01.state.qkind = 'done'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_timeout(300)
+    page.click("#q-undo")
+    page.wait_for_timeout(400)
+    un = [x for x in actions(root) if x.get("action_id") not in ids0 and x["action"] == "undo"]
+    ok("R12B 元に戻す = undo (value.action_id = link_iv)", len(un) == 1 and new and un[0]["value"]["action_id"] == new[0]["action_id"], un)
+    page.remove_listener("dialog", acc)
+    page.evaluate("q => { C01.state.qkind = 'all'; C01.state.qsel = q; C01.app.render(); }", hq["queue_id"])
+    page.wait_for_selector("#link-iv")
+    page.click(".c01-linkiv [data-linkiv='TST2611-01']")
+    page.wait_for_timeout(200)
+    page.locator(f"input[name='link-slot'][value='{free[0]}']").check()
+    page.wait_for_timeout(200)
+    if page.locator("input[name='link-scope'][value='one']").count():
+        page.locator("input[name='link-scope'][value='one']").check()
+        page.wait_for_timeout(150)
+    ids1 = {x.get("action_id") for x in actions(root)}
+    page.on("dialog", acc)
+    page.click("#q-submit")
+    page.wait_for_timeout(600)
+    page.remove_listener("dialog", acc)
+    n2 = [x for x in actions(root) if x.get("action_id") not in ids1]
+    ok("R12B この枠だけ = scope 없음 (지금과 같은 기록)", len(n2) == 1 and n2[0]["action"] == "link_iv" and "scope" not in n2[0]["value"], n2)
+    page.evaluate("C01.RULES.linkIv = false; C01.state.qkind = 'all'")
+    qp.write_text(qt0, encoding="utf-8")
+    mp.write_text(mt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(300)
+
+
 def r9m_checks(page, root, shots, engine):
     """v0.3.40 (R9M Part A · #271 · #272 c): 確認・入力 「発信者未登録」 (枚数は別 · 強 → 弱 → 推定なし (閉じる) · 業者登録 · 登録しない (理由) · 元に戻す) ·
     Part B-1: 催促 「最近7日のメール」 一行 · Part B-2: 実況表 「催促 n回目（MM/DD）」 (試験は数えない · 行の高さ そのまま) · 받는 쪽 대조 (엔진 키 = TOOL 키)."""
@@ -4343,11 +4438,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.61", page.title() == "LEENAI C-01 搬入票 v0.3.61", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.62", page.title() == "LEENAI C-01 搬入票 v0.3.62", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.61" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.62" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4881,6 +4976,7 @@ def main():
             r11j_checks(page, root, shots, a.engine)
             r11r_checks(page, root, shots, a.engine)
             r12a_checks(page, root, shots, a.engine)
+            r12b_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
