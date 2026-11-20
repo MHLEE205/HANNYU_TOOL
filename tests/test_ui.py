@@ -2459,6 +2459,92 @@ def r9o_checks(page, root, shots, engine):
     # 自動推薦 막힌 줄 배지 (実況表 rowInfo) — 문구 확인 (함수 직접)
     ok("R9O 自動推薦発信者(人確認) 줄 = 「自動推薦」 배지 문구 (確認・入力 「発信者未登録」 안내)", "自動推薦発信者（人確認）" in js and "data-info=\"auto_sender\"" in js, "")
 
+def r12a_checks(page, root, shots, engine):
+    """v0.3.61 (R12A Part 1 · #339): 「発信者未登録」 件名で対象外 — 一覧 · 件名の語 · 管理者 追加 / 削除 · 元に戻す · 받는 쪽 대조 (엔진 스키마 · 코드 키)."""
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    eng = Path(engine)
+    ss = json.loads((eng / "engine" / "output" / "schema" / "senders.schema.json").read_text(encoding="utf-8"))
+    js = (TOOL / "js" / "app.js").read_text(encoding="utf-8")
+    sc = (eng / "engine" / "output" / "sender_cards.py").read_text(encoding="utf-8")
+    wk = set((ss["properties"].get("skip_words") or {}).get("items", {}).get("properties") or {})
+    en = (ss["properties"]["excluded"]["items"]["properties"]["reason"] or {}).get("enum") or []
+    ok("R12A 받는 쪽 대조: senders.json skip_words 키 (word · src · by · at · action_id) · 対象外 reason subject_words = TOOL 이 읽는 키 · 엔진 코드",
+       {"word", "src", "by", "at", "action_id"} <= wk and "subject_words" in en and "subject_words" in js and '"subject_words"' in sc and "skip_words" in js, (wk, en))
+    sp = root / "_data" / "senders.json"
+    s0 = sp.read_text(encoding="utf-8") if sp.exists() else None
+    sd = {"schema_version": 1, "kind": "sender_cards", "today": "2026-11-20", "cards": [], "counts": {"target_mails": 3, "card_mails": 0, "done_mails": 0, "cards": 0, "gap": 0},
+          "declined": [],
+          "excluded": [{"address": "order@po.example.invalid", "domain": "po.example.invalid", "name": None, "mails": 3, "reason": "subject_words", "last_at": "2026-11-19T10:00:00+09:00"},
+                       {"address": "noreply@ln.example.invalid", "domain": "ln.example.invalid", "name": None, "mails": 1, "reason": "no_reply", "last_at": None}],
+          "skip_words": [{"word": "空コンテナ搬出申込", "src": "master", "by": "t", "at": "2026-11-20", "why": None, "action_id": None},
+                         {"word": "ACL未着", "src": "human", "by": "staff_a@fake", "at": "2026-11-20T10:00:00+09:00", "why": None, "action_id": "hUmAn0000001"}]}
+    sys.path.insert(0, engine)
+    from engine.output import schema_check as SC  # noqa: E402
+    ok("R12A 시험 senders.json (skip_words · subject_words) = 엔진 스키마 통과", SC.check_obj(sd, "senders") == [], SC.check_obj(sd, "senders"))
+    sp.write_text(dump(sd), encoding="utf-8")
+    page.keyboard.press("Escape")
+    page.evaluate("() => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qsel = null; C01.state.sndMiss = 0; C01.state.sndSkipOpen = false; C01.app.tick(); }")
+    page.wait_for_timeout(900)
+    page.click("#tab-input")
+    page.wait_for_timeout(200)
+    page.evaluate("() => { C01.state.qkind = '発信者未登録'; C01.app.render(); }")
+    page.wait_for_timeout(300)
+    b = page.locator("#snd-skip")
+    ok("R12A 「件名で対象外 1件 · 件名の語 2」 (no_reply 対象外 는 안 셈) · 처음 접힘", b.count() == 1 and "件名で対象外 1件 · 件名の語 2" in b.inner_text()
+       and page.locator("#snd-skipbox").count() == 0, b.all_inner_texts())
+    page.evaluate("() => { C01.state._me0 = C01.state.me; C01.state.me = Object.assign({}, C01.state.me || {code: 'STAFF_A', email: 'staff_a@fake'}, {admin: false}); C01.app.render(); }")
+    page.click("#snd-skip")
+    page.wait_for_timeout(200)
+    bx = page.locator("#snd-skipbox").inner_text()
+    ok("R12A 펼침 = 対象外 도메인 · 메일 수 · 낱말 2 · 관리자 아님 = 追加 · 削除 없음 (안내 한 줄) · 사람이 더한 낱말 = 元に戻す",
+       "po.example.invalid" in bx and "ln.example.invalid" not in bx and "メール 3通" in bx and "空コンテナ搬出申込" in bx and "ACL未着" in bx
+       and page.locator("[data-sndskipdel]").count() == 0 and page.locator("#snd-skip-add").count() == 0 and "管理者だけ" in bx
+       and page.locator("#snd-skipbox [data-sndundo='hUmAn0000001']").count() == 1, bx[:300])
+    page.evaluate("() => { C01.state.me = Object.assign({}, C01.state.me, {admin: true}); C01.app.render(); }")
+    page.wait_for_timeout(200)
+    ok("R12A 관리자 = 낱말마다 「削除」 · 追加 칸", page.locator("[data-sndskipdel]").count() == 2 and page.locator("#snd-skip-add").count() == 1, "")
+    ids0 = {x.get("action_id") for x in actions(root)}
+    page.fill("#snd-skip-word", "ab")
+    page.click("#snd-skip-add")
+    page.wait_for_timeout(300)
+    ok("R12A 3자 미만 = 안 씀", not [x for x in actions(root) if x.get("action_id") not in ids0], "")
+    page.fill("#snd-skip-word", "空コンテナ 搬出申込")
+    page.click("#snd-skip-add")
+    page.wait_for_timeout(300)
+    ok("R12A 이미 있는 낱말 (빈칸 차이) = 안 씀", not [x for x in actions(root) if x.get("action_id") not in ids0], "")
+    page.fill("#snd-skip-word", "B/L DRAFT")
+    page.click("#snd-skip-add")
+    page.wait_for_timeout(500)
+    ad = [x for x in actions(root) if x.get("action_id") not in ids0]
+    ok("R12A 「追加」 = sender_skip_word {op add · word} · 엔진 스키마 통과 · 목록 3", len(ad) == 1 and ad[0]["action"] == "sender_skip_word" and ad[0]["value"] == {"op": "add", "word": "B/L DRAFT"}
+       and SC.check_obj(ad[0], "action") == [] and "件名の語 3" in page.locator("#snd-skip").inner_text(), ad)
+    page.click("[data-sndskipdel='空コンテナ搬出申込']")
+    page.wait_for_timeout(500)
+    rm = [x for x in actions(root) if x.get("action_id") not in ids0 and (x.get("value") or {}).get("op") == "remove"]
+    ok("R12A 「削除」 = sender_skip_word {op remove} · 엔진 스키마 통과 · 목록 2 · 「削除した語」 줄에 元に戻す", len(rm) == 1 and rm[0]["value"] == {"op": "remove", "word": "空コンテナ搬出申込"}
+       and SC.check_obj(rm[0], "action") == [] and "件名の語 2" in page.locator("#snd-skip").inner_text()
+       and page.locator(f"#snd-skipbox [data-sndundo='{rm[0]['action_id']}']").count() == 1, rm)
+    page.screenshot(path=str(shots / "r12a_sender_skip.png"))
+    page.click(f"#snd-skipbox [data-sndundo='{rm[0]['action_id']}']")
+    page.wait_for_timeout(500)
+    un = [x for x in actions(root) if x.get("action") == "undo" and (x.get("value") or {}).get("action_id") == rm[0]["action_id"]]
+    ok("R12A 削除の 元に戻す = undo · 엔진 스키마 통과 · 목록 3 으로", len(un) == 1 and SC.check_obj(un[0], "action") == [] and "件名の語 3" in page.locator("#snd-skip").inner_text(),
+       page.locator("#snd-skip").inner_text())
+    sd2 = dict(sd)
+    sd2.pop("skip_words")
+    sp.write_text(dump(sd2), encoding="utf-8")
+    page.evaluate("() => { C01.state.sndMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(800)
+    ok("R12A 엔진 끔 (skip_words 없음) = 「件名で対象外」 표시 0", page.locator("#snd-skip").count() == 0, "")
+    page.evaluate("() => { C01.state.me = C01.state._me0; delete C01.state._me0; C01.state.qkind = 'all'; C01.state.sndSkipOpen = false; C01.app.render(); }")
+    if s0 is None:
+        sp.unlink()
+    else:
+        sp.write_text(s0, encoding="utf-8")
+    page.evaluate("() => { C01.state.sndMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(500)
+
+
 def r9m_checks(page, root, shots, engine):
     """v0.3.40 (R9M Part A · #271 · #272 c): 確認・入力 「発信者未登録」 (枚数は別 · 強 → 弱 → 推定なし (閉じる) · 業者登録 · 登録しない (理由) · 元に戻す) ·
     Part B-1: 催促 「最近7日のメール」 一行 · Part B-2: 実況表 「催促 n回目（MM/DD）」 (試験は数えない · 行の高さ そのまま) · 받는 쪽 대조 (엔진 키 = TOOL 키)."""
@@ -4257,11 +4343,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.60", page.title() == "LEENAI C-01 搬入票 v0.3.60", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.61", page.title() == "LEENAI C-01 搬入票 v0.3.61", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.60" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.61" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4794,6 +4880,7 @@ def main():
             r11g_checks(page, root, shots, a.engine)
             r11j_checks(page, root, shots, a.engine)
             r11r_checks(page, root, shots, a.engine)
+            r12a_checks(page, root, shots, a.engine)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

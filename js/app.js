@@ -3530,6 +3530,51 @@ window.C01 = window.C01 || {};
     });
     return out.sort(function (a, b) { return String(b.at || '').localeCompare(String(a.at || '')); });
   }
+  /* v0.3.61 (R12A Part 1 · 決定 #339): 件名で対象外 — その送信元のメールが全部 「件名の語」 に合い · 写真 0 · 搬入票 0 · CT 0 = カードを出さない (エンジン excluded reason subject_words)。
+     件名の語 = エンジンの skip_words + この画面の追加 / 削除 (エンジン反映前) · 追加 · 削除 = 管理者だけ (sender_skip_word) · 人が足した / 消した語は 元に戻す (undo) */
+  function sndSkipOn() { return !!(S.snd && S.snd.skip_words); }
+  function sndSkipWords() {
+    if (!sndSkipOn()) return [];
+    var undone = sndLocal().undone, nz = function (w) { return String(w || '').replace(/\s+/g, '').toUpperCase(); };
+    var out = {};
+    (S.snd.skip_words || []).forEach(function (w) { out[nz(w.word)] = { word: w.word, src: w.src, by: w.by, at: w.at, action_id: w.action_id }; });
+    allActions().forEach(function (a) {
+      if (a.action !== 'sender_skip_word' || !a.value || undone[a.action_id]) return;
+      var k = nz(a.value.word);
+      if (a.value.op === 'remove') { delete out[k]; } else if (!out[k]) { out[k] = { word: a.value.word, src: 'human', by: a.by, at: a.at, action_id: a.action_id, mine: true }; }
+    });
+    return Object.keys(out).map(function (k) { return out[k]; });
+  }
+  function sndSkipRemoved() {
+    var undone = sndLocal().undone;
+    return allActions().filter(function (a) { return a.action === 'sender_skip_word' && a.value && a.value.op === 'remove' && !undone[a.action_id]; });
+  }
+  function sndSkipExcl() { return ((S.snd && S.snd.excluded) || []).filter(function (x) { return x.reason === 'subject_words'; }); }
+  function sndSkipHtml() {
+    if (!sndSkipOn()) return '';
+    var ex = sndSkipExcl(), ws = sndSkipWords(), rm = sndSkipRemoved(), adm = isAdmin();
+    var h = '<button class="c01-btn-ghost2 c01-sndnone" id="snd-skip" aria-expanded="' + (S.sndSkipOpen ? 'true' : 'false') + '">' + (S.sndSkipOpen ? '▾ ' : '▸ ') +
+      '件名で対象外 ' + ex.length + '件 · 件名の語 ' + ws.length + '</button>';
+    if (!S.sndSkipOpen) return h;
+    h += '<div class="c01-snddone" id="snd-skipbox"><p class="t2">メールが全部 下の語の件名で、写真 · 搬入票 · コンテナ番号がない送信元はカードを出しません（メールは保存 · 判定はそのまま）。1 通でも違えば今までどおりカードが出ます。</p>' +
+      ex.map(function (x) {
+        return '<div class="c01-snddrow"><span class="k">対象外</span> <span class="mono">' + esc(x.domain || '') + '</span> <span class="t2">メール ' + (x.mails || 0) + '通' +
+          (x.last_at ? ' · 受信 ' + esc(md(String(x.last_at).slice(0, 10))) : '') + '</span></div>';
+      }).join('') +
+      '<div class="c01-snddrow"><span class="k">件名の語</span></div>' +
+      ws.map(function (w) {
+        return '<div class="c01-snddrow c01-skipword"><span class="mono">' + esc(w.word) + '</span> <span class="t2">' + (w.src === 'human' ? esc(staffName(w.by) + ' ' + md(String(w.at || '').slice(0, 10))) : '最初の語') + '</span>' +
+          (adm ? ' <button class="c01-btn-ghost2" data-sndskipdel="' + esc(w.word) + '">削除</button>' : '') +
+          (S.me && w.src === 'human' && w.action_id ? ' <button class="c01-btn-ghost2" data-sndundo="' + esc(w.action_id) + '">元に戻す</button>' : '') + '</div>';
+      }).join('') +
+      rm.map(function (a) {
+        return '<div class="c01-snddrow"><span class="t2">削除した語</span> <span class="mono">' + esc(a.value.word) + '</span> <span class="t2">' + esc(staffName(a.by) + ' ' + md(String(a.at || '').slice(0, 10))) + '</span>' +
+          (S.me ? ' <button class="c01-btn-ghost2" data-sndundo="' + esc(a.action_id) + '">元に戻す</button>' : '') + '</div>';
+      }).join('') +
+      (adm ? '<div class="c01-snddrow"><input id="snd-skip-word" class="c01-input" maxlength="40" placeholder="件名の語（3文字以上）"> <button class="c01-btn-ghost2" id="snd-skip-add">追加</button></div>'
+        : '<p class="t2">語の追加 · 削除は管理者だけです</p>') + '</div>';
+    return h;
+  }
   function sndBadgeN() { return sndCards().length; }
   /* 見出し · 칩 = カードがある時 (または 元に戻せる記録 · この一覧を見ている時) だけ — 0 件の日は出さない */
   function sndShow() { return sndOn() && !!S.snd && (sndBadgeN() > 0 || sndDoneList().length > 0 || S.qkind === SND); }
@@ -3562,6 +3607,7 @@ window.C01 = window.C01 || {};
             (S.me ? ' <button class="c01-btn-ghost2" data-sndundo="' + esc(d.action_id) + '">元に戻す</button>' : '') + '</div>';
         }).join('') + '</div>' : '');
     }
+    h += sndSkipHtml();
     return h;
   }
   function sndOf(id) { return ((S.snd && S.snd.cards) || []).filter(function (c) { return c.queue_id === id; })[0] || null; }
@@ -3691,6 +3737,24 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-snd]').forEach(function (el) { el.onclick = function () { S.sndSel = el.getAttribute('data-snd'); render(); }; });
     if ($('snd-none')) $('snd-none').onclick = function () { S.sndNoneOpen = !S.sndNoneOpen; render(); };
     if ($('snd-done')) $('snd-done').onclick = function () { S.sndDoneOpen = !S.sndDoneOpen; render(); };
+    if ($('snd-skip')) $('snd-skip').onclick = function () { S.sndSkipOpen = !S.sndSkipOpen; render(); };     /* v0.3.61 R12A Part 1 */
+    root.querySelectorAll('[data-sndskipdel]').forEach(function (el) {
+      el.onclick = function () {
+        if (!isAdmin()) return;
+        var w = el.getAttribute('data-sndskipdel');
+        writeAction(mkAction('sender_skip_word', { iv: null, ct: null, field: null, source: null, queue_id: null, value: { op: 'remove', word: w } }))
+          .then(function () { toast('件名の語を削除しました（次の出力で カードがまた出ることがあります）', 'success'); render(); });
+      };
+    });
+    if ($('snd-skip-add')) $('snd-skip-add').onclick = function () {
+      if (!isAdmin()) return;
+      var w = String(($('snd-skip-word') || {}).value || '').trim();
+      if (w.replace(/\s+/g, '').length < 3 || w.length > 40) { toast('3文字以上 · 40文字以下で入れてください', 'error'); return; }
+      var nz = function (x) { return String(x || '').replace(/\s+/g, '').toUpperCase(); };
+      if (sndSkipWords().some(function (x) { return nz(x.word) === nz(w); })) { toast('もうあります', 'error'); return; }
+      writeAction(mkAction('sender_skip_word', { iv: null, ct: null, field: null, source: null, queue_id: null, value: { op: 'add', word: w } }))
+        .then(function () { toast('件名の語を追加しました（次の出力で 対象外 になります）', 'success'); render(); });
+    };
     root.querySelectorAll('[data-sndundo]').forEach(function (el) {
       el.onclick = function () {
         if (!S.me) return;
