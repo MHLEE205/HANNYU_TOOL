@@ -122,7 +122,8 @@ window.C01 = window.C01 || {};
   var IDIFF = '入力後の差異';
   var IDIFF_WHY = { record: 'Compass入力の記録と、今の行の値・枠が違います', new_doc: 'Compass入力の後で届いた書類・写真の値が、入力した値と違います',
     compass_slot: 'Compass入力の後で、COMPASS ではこの CT が別の枠に入っています',
-    merge_undo: 'まとめを元に戻しました — Compass 入力値は そのまま（入力済）' };   /* v0.3.67 (R12Y5 · 決定 #365 · エンジン act_merge_undo_keep_freeze) */
+    merge_undo: 'まとめを元に戻しました — Compass 入力値は そのまま（入力済）',   /* v0.3.67 (R12Y5 · 決定 #365 · エンジン act_merge_undo_keep_freeze) */
+    compass_edited: 'Compass入力の後で、COMPASS の画面で直接 直されています' };   /* v0.3.69 (R12Y9 · #370 · エンジン cycle_input_value_check) */
   var IDIFF_FIELDS = [['slot', '枠'], ['ct', 'CT番号'], ['seal', 'シール番号'], ['n_w', '正味重量'], ['t_w', '風袋重量'], ['bales', 'ベール数']];
   var FROZEN_LABEL = '入力済';   /* v0.3.60 (R11R · #334): 絞り込みの名前 = 入力済 (自動OK · 確認済 の両方) · 行は 「自動OK ✓入力済」 / 「確認済 ✓入力済」 */
   /* v0.3.60 (R11R · 決定 #334): 自動OK (エンジン = 緑) と 確認済 (人の手 = 青) を 画面全体で分ける — 規則はこの 1 か所だけ。
@@ -145,12 +146,24 @@ window.C01 = window.C01 || {};
     var seq = slotSeq(iv), order = Object.keys(seq).sort(function (a, b) { return seq[a] - seq[b]; }).indexOf(g);
     return (order >= 0 ? (order + 1) + '番目の枠' : '枠') + (s.work_date ? ' · 予定 ' + md(s.work_date) : '') + (s.type ? ' · ' + s.type : '');
   }
+  function idiffWhoText(d) {   /* v0.3.69 (R12Y9 · #370): COMPASS で直した人 · 時刻 (エンジン input_diff[f].by · at) */
+    var x = Object.keys(d).map(function (f) { return d[f]; }).filter(function (v) { return v && v.why === 'compass_edited'; })[0];
+    if (!x) return '';
+    var t = x.at ? new Date(x.at) : null, ok = t && !isNaN(t.getTime());
+    var ts = ok ? new Date(t.getTime() + 9 * 3600 * 1000).toISOString().slice(5, 16).replace('-', '/').replace('T', ' ') : '';
+    return '（' + [x.by || '', ts].filter(Boolean).join(' ') + '）';
+  }
+  function idiffCompassOnly(q) {   /* v0.3.69 (R12Y9 · #370): 違いが 「COMPASS で直接 直された値」 (why compass_edited) だけのカード */
+    var d = q.input_diff || {}, ks = Object.keys(d);
+    return ks.length > 0 && ks.every(function (k) { return (d[k] || {}).why === 'compass_edited'; });
+  }
+  C01.idiffCompassOnly = idiffCompassOnly;
   function idiffHtml(q, iv, row) {
     var d = q.input_diff || {}, whys = [];
     Object.keys(d).forEach(function (f) { var w = (d[f] || {}).why; if (w && whys.indexOf(w) < 0) whys.push(w); });
     var cur = function (f) { return row ? (f === 'slot' ? row.slot_guid : row[f]) : null; };
     var show = function (f, v) { return f === 'slot' ? idiffSlotText(iv, v) : (v == null || v === '' ? '（空）' : String(v)); };
-    var h = '<div class="c01-hold c01-idiff"><div><span class="k">理由</span> ' + esc(whys.map(function (w) { return IDIFF_WHY[w] || w; }).join(' · ') || '入力値と新しい値が違います') + '</div>' +
+    var h = '<div class="c01-hold c01-idiff"><div><span class="k">理由</span> ' + esc(whys.map(function (w) { return (IDIFF_WHY[w] || w) + (w === 'compass_edited' ? idiffWhoText(d) : ''); }).join(' · ') || '入力値と新しい値が違います') + '</div>' +
       '<table class="c01-same c01-idtab" id="q-idtab"><thead><tr><th></th><th>Compass入力値</th><th>新しい値</th></tr></thead><tbody>';
     IDIFF_FIELDS.forEach(function (fl) {
       var f = fl[0], x = d[f];
@@ -158,7 +171,9 @@ window.C01 = window.C01 || {};
       if (!x && (a == null || a === '')) return;
       h += '<tr' + (x ? ' class="d" data-idf="' + f + '"' : '') + '><th>' + esc(fl[1]) + '</th><td class="mono">' + esc(show(f, a)) + '</td><td class="mono">' + esc(show(f, b)) + '</td></tr>';
     });
-    h += '</tbody></table><p class="c01-note2">原本（書類 · 写真）を見てください。Compass に入れた値で良ければ 「入力値のまま」、新しい値が正しければ 「新しい値でCompass再入力」（Compass入力 の画面が開きます）。</p>';
+    h += '</tbody></table><p class="c01-note2">' + (idiffCompassOnly(q) ?
+      '原本（書類 · 写真）を見てください。COMPASS で直した値が正しければ 「COMPASSの値を正とする」（この行の値を COMPASS の値にします · 写真フォルダ名も CT に合わせます · 元に戻せます）、Compass に入れた値が正しければ 「入力値のまま」（COMPASS は直しません — 必要なら COMPASS の画面で戻してください）。' :
+      '原本（書類 · 写真）を見てください。Compass に入れた値で良ければ 「入力値のまま」、新しい値が正しければ 「新しい値でCompass再入力」（Compass入力 の画面が開きます）。') + '</p>';
     if (row && iv) {
       var nd = rowDocList(row).length;
       h += '<div class="row">' + (nd ? '<button class="c01-btn-sub" id="q-iddocs" title="この行の値の出典書類を新しいタブで表示">📄 原本の書類 ' + nd + '</button>' : '<span class="t2">出典書類なし</span>') +
@@ -774,10 +789,14 @@ window.C01 = window.C01 || {};
     if (st === '再確認') {
       var open = ((S.queue && S.queue.items) || []).filter(function (q) { return q.container_id === r.container_id && !queueState(q, ov).done; });
       var had = ((S.queue && S.queue.items) || []).some(function (q) { return q.container_id === r.container_id; });
-      if (had && !open.length && Object.keys(human).length) st = '確認済';
+      /* v0.3.69 (R12Y9 · #370 · エンジン out_confirm_all_fields): 行の need_fields (再確認の理由の項目) が全部 人の値になってから 確認済 (1 項目だけの確認で Compass入力 にならない) */
+      var needLeft = (r.need_fields || []).filter(function (f) { return !human[f]; });
+      if (had && !open.length && Object.keys(human).length && !needLeft.length) st = '確認済';
     }
     return { st: st, human: human };
   }
+  C01.statusOf = statusOf;   /* v0.3.69 (R12Y9): 試験用 (行の表示状態 · overlay と一緒に) */
+  C01.overlay = function () { return overlay(); };
   /* v0.3.9: 枠 GUID → 並び順 (COMPASS seq が全部あれば seq · 無ければ slots の並び) */
   function slotSeq(iv) {
     var m = {}, sl = iv.slots || [];
@@ -3136,7 +3155,8 @@ window.C01 = window.C01 || {};
         '<div class="row"><button id="q-skip" class="c01-btn-ghost2">スキップ（あとで）</button>' +
         (q.kind === FOREIGN && !st.done ? '<button id="q-ours" class="c01-btn-ghost2" title="当社の書類です（値をもう一度使います · 元に戻せます）">当社の書類</button>' : '') +
         (q.kind === IDIFF && !st.done && idiffSlotOnly(q) ? '<button id="q-idslot" class="c01-btn-ghost2" title="COMPASS で今入っている枠を正しいとして この行の枠を変えます（値は そのまま）">COMPASSの配置を正とする</button>' : '') +   /* v0.3.53 (R10X · #309) */
-        (q.kind === IDIFF && !st.done && !idiffSlotOnly(q) ? '<button id="q-idtake" class="c01-btn-ghost2" title="この行の固定を外して 新しい値で Compass に入れ直します（Compass入力 の画面が開きます）">新しい値でCompass再入力</button>' : '') +
+        (q.kind === IDIFF && !st.done && idiffCompassOnly(q) ? '<button id="q-idcedit" class="c01-btn-ghost2" title="COMPASS の画面で直した値を正しいとして この行の値を変えます（手入力 · 元に戻せます）">COMPASSの値を正とする</button>' : '') +   /* v0.3.69 (R12Y9 · #370) */
+        (q.kind === IDIFF && !st.done && !idiffSlotOnly(q) && !idiffCompassOnly(q) ? '<button id="q-idtake" class="c01-btn-ghost2" title="この行の固定を外して 新しい値で Compass に入れ直します（Compass入力 の画面が開きます）">新しい値でCompass再入力</button>' : '') +
         (q.kind === IDIFF && st.done && st.act === 'input_diff_take' && q.iv_no ? '<button id="q-idcompass" class="c01-btn-ghost2">Compass入力 を開く</button>' : '') +
         (q.kind === SAME && !st.done ? '<button id="q-notsame" class="c01-btn-ghost2" title="この 2 行は別のコンテナです（候補を出さなくなります · 元に戻せます）">別のコンテナ</button>' : '') +
         (canNot ? '<button id="q-notours" class="c01-btn-ghost2 danger" title="この書類は搬入票ではありません（ファイルは消しません · 元に戻せます）">搬入票ではない</button>' : '') +
@@ -3226,6 +3246,8 @@ window.C01 = window.C01 || {};
     if (ns) ns.onclick = function () { sameAction(q, 'not_same'); };
     var ids = $('q-idslot');                                         /* v0.3.53 (R10X · #309) */
     if (ids) ids.onclick = function () { idiffAction(q, 'input_slot_take'); };
+    var ice = $('q-idcedit');                                        /* v0.3.69 (R12Y9 · #370) */
+    if (ice) ice.onclick = function () { idiffCompassTake(q); };
     var idt = $('q-idtake');                                         /* v0.3.52 (R10W · #307) */
     if (idt) idt.onclick = function () { idiffAction(q, 'input_diff_take'); };
     var idc = $('q-idcompass');
@@ -3395,6 +3417,23 @@ window.C01 = window.C01 || {};
       S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render();
       toast(act === 'input_slot_take' ? 'COMPASS の枠を正としました（次の判定で反映）' : '入力値のままにしました（次の判定で反映）', 'success');
     });
+  }
+  /* v0.3.69 (R12Y9 · #370): 「COMPASSの値を正とする」 = 違う項目ごとに 手入力 (mode edit · 同じ queue_id) — エンジン actions_value_edit · 元に戻す = 各項目の 「元に戻す」 */
+  function idiffCompassTake(q) {
+    if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }
+    var d = q.input_diff || {}, fs = Object.keys(d).filter(function (f) { return f !== 'slot' && (d[f] || {}).why === 'compass_edited'; });
+    if (!fs.length) return;
+    var txt = fs.map(function (f) { return (IDIFF_FIELDS.filter(function (x) { return x[0] === f; })[0] || [f, f])[1] + ': ' + String(d[f].input == null ? '（空）' : d[f].input) + ' → ' + String(d[f].new); }).join('\n');
+    if (!window.confirm('COMPASS の画面で直した値を正しいとして、この行の値を変えます。\n' + txt + '\nよろしいですか？')) return;
+    var acts = [];
+    for (var i = 0; i < fs.length; i++) {
+      var v = C01.validate.field(fs[i], d[fs[i]].new);
+      if (!v.ok) { S.qmsg[q.queue_id] = FIELD_LABEL[fs[i]] + ': ' + v.error; render(); return; }
+      acts.push(mkAction('manual_input', { iv: q.iv_no, ct: q.ct, field: fs[i], value: v.value, source: '手入力', queue_id: q.queue_id, mode: 'edit', override: v.override }));
+    }
+    var chain = Promise.resolve();
+    acts.forEach(function (a) { chain = chain.then(function () { return writeAction(a); }); });
+    chain.then(function () { S.qsel = nextQueueId(q); S.zoom = 100; S.rot = 0; S.rotKey = null; render(); toast('COMPASS の値を正としました（次の判定で反映）', 'success'); });
   }
   function reviewKeep(q) {      /* v0.3.47 (R9Y Part 0-2): 「このまま（確認済）」 = _actions review_keep (値 · 判定は そのまま · 元に戻す) */
     if (!S.me) { S.qmsg[q.queue_id] = '担当者を選んでください（右上）'; render(); return; }

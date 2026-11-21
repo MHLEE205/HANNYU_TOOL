@@ -3928,6 +3928,85 @@ def r11f_checks(page, root, shots, engine):
     page.evaluate("() => { if (window.__cf11) window.confirm = window.__cf11; }")
 
 
+def r12y9_checks(page, root, shots, engine_new):
+    """v0.3.69 (R12Y9 · #370 · 엔진 v0.5.162): ① 「入力後の差異」 why compass_edited = 고친 사람 · 시각 · 「COMPASSの値を正とする」 (칸마다 手入力 mode edit ·
+    같은 queue_id) · 「新しい値でCompass再入力」 없음 ② 줄 need_fields = 이유 칸 모두 사람 값일 때만 確認済 (1 칸만 = 再確認)."""
+    sys.path.insert(0, engine_new)
+    from engine.output import schema_check as SC  # noqa: E402
+    sch = {nm: json.loads((Path(engine_new) / "engine" / "output" / "schema" / f"{nm}.schema.json").read_text(encoding="utf-8")) for nm in ("action", "queue", "jikkyou")}
+    ok("R12Y9 엔진 v0.5.162 스키마 = why compass_edited · need_fields 있음", "compass_edited" in json.dumps(sch["queue"]) and "need_fields" in json.dumps(sch["jikkyou"]))
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    jp, qp = d / "jikkyou.json", d / "queue.json"
+    jt0, qt0 = jp.read_text(encoding="utf-8"), qp.read_text(encoding="utf-8")
+    gone = {(x.get("value") or {}).get(k) for x in actions(root) if x.get("action") in ("other_ct", "merge_rows") for k in ("container_id", "from_container_id")}
+    j = json.loads(jt0)
+    qcid = {x.get("container_id") for x in json.loads(qt0)["items"]}
+    elig = lambda iv_: [r for r in iv_["rows"] if r.get("ct") and r.get("slot_guid") and r["container_id"] not in gone and r["container_id"] not in qcid and not r.get("human")]   # noqa: E731
+    iv1 = next(x for x in j["ivs"] if len(elig(x)) >= 2)
+    ivn, ra, rb = iv1["iv_no"], elig(iv1)[0], elig(iv1)[1]
+    ra.update({"status": "確認済", "engine_status": "自動OK", "reasons": [], "info": list(ra.get("info") or []) + ["INPUT_FROZEN"],
+               "input_frozen": {"at": "2026-11-08T10:00:00+09:00", "done_at": "2026-11-08T09:58:00+09:00", "action_id": "r12y9cd00001", "src": "apply"}})
+    iv1["compass_input"] = [{"action_id": "r12y9cd00001", "by": "staff.a@example.invalid", "at": "2026-11-08T09:58:00+09:00", "value": {"cells": [], "failed": []}}]
+    new_ct = ra["ct"][:4] + ("1" if ra["ct"][4] != "1" else "2") + ra["ct"][5:]
+    rb.update({"status": "再確認", "engine_status": "再確認", "reasons": ["SOURCE_MISMATCH", "MIN_SOURCES"], "need_fields": ["ct", "n_w"],
+               "human": {"n_w": {"value": rb.get("n_w") or 20000, "source": "搬入票", "by": "staff.a@example.invalid", "at": "2026-11-08T11:00:00+09:00", "action_id": "r12y9hv00001"}}})
+    jp.write_text(dump(j), encoding="utf-8")
+    qa = {"queue_id": "7e7e7e7e7e7e7ed9", "kind": "入力後の差異", "iv_no": ivn, "ct": ra["ct"], "field": None, "container_id": ra["container_id"], "values": {},
+          "candidates": [], "files": [], "note": "ct", "resolved": None, "superseded": [], "cy_cut": iv1.get("cy_cut"), "cy_open": iv1.get("cy_open"), "issuer": None,
+          "field_sources": {}, "field_source_text": {},
+          "input_diff": {"ct": {"input": ra["ct"], "new": new_ct, "why": "compass_edited", "by": "Staff A", "at": "2026-11-08T08:58:43Z"}}}
+    qb = {"queue_id": "7e7e7e7e7e7e7eda", "kind": "値の違い", "iv_no": ivn, "ct": rb["ct"], "field": "n_w", "container_id": rb["container_id"], "values": {"搬入票": [1, 2]},
+          "candidates": [], "files": [], "note": "SOURCE_MISMATCH",
+          "resolved": {"action_id": "r12y9hv00001", "by": "staff.a@example.invalid", "at": "2026-11-08T11:00:00+09:00", "action": "confirm_value"},
+          "superseded": [], "cy_cut": iv1.get("cy_cut"), "cy_open": iv1.get("cy_open"), "issuer": None, "field_sources": {}, "field_source_text": {}}
+    q2 = json.loads(qt0)
+    q2["items"] += [qa, qb]
+    q2["kinds"] = list(dict.fromkeys(list(q2.get("kinds") or []) + ["入力後の差異", "値の違い"]))
+    q2.setdefault("count", {})["入力後の差異"] = 1
+    qp.write_text(dump(q2), encoding="utf-8")
+    qe = SC.errors({**q2, "items": [qa, qb]}, sch["queue"])
+    je = SC.errors({**j, "ivs": [iv1]}, sch["jikkyou"])
+    ok("R12Y9 시험 카드 · 줄 = 엔진 v0.5.162 queue · jikkyou 스키마 (오류 0)", not qe and not je, (qe[:3], je[:3]))
+    page.keyboard.press("Escape")
+    page.evaluate("() => { Object.assign(C01.state, {qedit: null, sel: null, editRow: null, filter: 'all', view: 'main', qkind: 'all'}); C01.app.tick(); }")
+    page.wait_for_timeout(800)
+    st = page.evaluate("""c => { var iv = C01.state.jik.ivs.filter(function (x) { return x.rows.some(function (r) { return r.container_id === c; }); })[0];
+        var r = iv.rows.filter(function (r) { return r.container_id === c; })[0]; var ov = C01.overlay();
+        var a = C01.statusOf(r, iv, ov).st;
+        var b = C01.statusOf(Object.assign({}, r, {need_fields: ['n_w']}), iv, ov).st;
+        var r3 = Object.assign({}, r); delete r3.need_fields; var c3 = C01.statusOf(r3, iv, ov).st; return [a, b, c3]; }""", rb["container_id"])
+    ok("R12Y9 ② need_fields [ct, n_w] 에 n_w 만 사람 값 = 再確認 · need_fields [n_w] = 確認済 · need_fields 없음 (옛 엔진) = 確認済 (지금 그대로)", st == ["再確認", "確認済", "確認済"], st)
+    page.evaluate("q => { C01.state.view = 'input'; C01.state.qkind = 'all'; C01.state.qiv = null; C01.state.qsel = q; C01.app.render(); }", qa["queue_id"])
+    page.wait_for_selector("#q-idtab")
+    it = page.locator(".c01-idiff").inner_text()
+    ok("R12Y9 ① 까닭 = 「COMPASS の画面で直接 直されています（Staff A 11/08 17:58）」 · 빨강 = CT 1",
+       "COMPASS の画面で直接" in it and "Staff A 11/08 17:58" in it and page.locator("#q-idtab tr.d[data-idf='ct']").count() == 1 and page.locator("#q-idtab tr.d").count() == 1, it[:240])
+    ok("R12Y9 ① 버튼 = 「入力値のまま」 · 「COMPASSの値を正とする」 · 「新しい値でCompass再入力」 · 「COMPASSの配置を正とする」 없음",
+       page.locator("#q-submit").inner_text() == "入力値のまま" and page.locator("#q-idcedit").count() == 1 and page.locator("#q-idcedit").inner_text() == "COMPASSの値を正とする"
+       and page.locator("#q-idtake").count() == 0 and page.locator("#q-idslot").count() == 0, [page.locator("#q-idcedit").count(), page.locator("#q-idtake").count()])
+    page.screenshot(path=str(shots / "r12y9_idiff_compass_edited.png"))
+    ids1 = {x.get("action_id") for x in actions(root)}
+    page.evaluate("() => { window.__cfX = window.confirm; window.__cf = []; window.confirm = m => { window.__cf.push(m); return false; }; }")
+    page.click("#q-idcedit")
+    page.wait_for_timeout(300)
+    n_cancel = len([x for x in actions(root) if x.get("action_id") not in ids1])
+    page.evaluate("() => { window.confirm = m => { window.__cf.push(m); return true; }; }")
+    page.click("#q-idcedit")
+    page.wait_for_timeout(1200)
+    dl = page.evaluate("() => window.__cf")
+    nt = [x for x in actions(root) if x.get("action_id") not in ids1]
+    te = SC.errors(nt[0], sch["action"]) if nt else ["no"]
+    ok("R12Y9 ① 「COMPASSの値を正とする」 = 확인 창 (취소 = 기록 0 · CT 전 → 후) → manual_input 1 (ct · 새 값 · 手入力 · mode edit · queue_id) · 엔진 스키마",
+       n_cancel == 0 and len(dl) == 2 and new_ct in dl[0] and len(nt) == 1 and nt[0]["action"] == "manual_input" and nt[0]["field"] == "ct" and nt[0]["value"] == new_ct
+       and nt[0]["source"] == "手入力" and nt[0].get("mode") == "edit" and nt[0]["queue_id"] == qa["queue_id"] and nt[0]["iv"] == ivn and not te, [len(dl), nt, te])
+    page.evaluate("() => { if (window.__cfX) window.confirm = window.__cfX; C01.state.qkind = 'all'; C01.state.view = 'main'; C01.state.filter = 'all'; }")
+    jp.write_text(jt0, encoding="utf-8")
+    qp.write_text(qt0, encoding="utf-8")
+    page.evaluate("C01.app.tick()")
+    page.wait_for_timeout(800)
+
+
 def r10x_checks(page, root, shots, engine_frz):
     """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
     「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
@@ -4543,11 +4622,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.68", page.title() == "LEENAI C-01 搬入票 v0.3.68", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.69", page.title() == "LEENAI C-01 搬入票 v0.3.69", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.68" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.69" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -5083,6 +5162,7 @@ def main():
             r12a_checks(page, root, shots, a.engine)
             r12b_checks(page, root, shots, a.engine)
             r12x_checks(page, root, shots, a.engine_r12x)
+            r12y9_checks(page, root, shots, a.engine_r12x)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
