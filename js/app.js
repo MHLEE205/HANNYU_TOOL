@@ -1597,11 +1597,19 @@ window.C01 = window.C01 || {};
   /* v0.3.24 (R7X Part A · 형님 17:1x): 再確認 の行 = 「このまま確認（OK）」 — 値は変えずに 確認済 (今の値で confirm_value · queue_id = その項目 ·
      元に戻す = 各項目の 「元に戻す」)。空欄 · CT 不明 · 他の種類の項目が残っている時は できない理由を出す */
   var KEEP_SRC = { '搬入票': 1, '写真': 1, 'Excel': 1 };
+  /* v0.3.71 (R12Y11): action の出所 = エンジン meta.sources.action (エンジンが受け取る出所の名前 · 一か所) · 無い (古いエンジン) = KEEP_SRC (0.3.70 のまま) ·
+     手入力 は いつも 可 · 名前に無い出所 (業者フォルダ名 · 配送報告書（参考…） など) = 呼ぶ側で 手入力 */
+  function actSrcOk(s) {
+    if (s === '手入力') return true;
+    var a = S.meta && S.meta.sources && S.meta.sources.action;
+    return Array.isArray(a) && a.length ? a.indexOf(s) >= 0 : !!KEEP_SRC[s];
+  }
+  C01.actSrc = function (s) { return actSrcOk(s) ? s : '手入力'; };
   function keepSrc(q, fd, val) {
     var s0 = null;
     Object.keys((q && q.values) || {}).forEach(function (k) { if (!s0 && (q.values[k] || []).some(function (v) { return String(v) === String(val); })) s0 = k; });
     if (!s0) (((q && q.field_sources) || {})[fd] || []).forEach(function (x) { if (!s0 && x.agree) s0 = x.src; });
-    return KEEP_SRC[s0] ? s0 : '搬入票';
+    return (s0 && s0 !== '手入力' && actSrcOk(s0)) ? s0 : '搬入票';
   }
   function keepPlan(iv, r, ov) {
     var x = statusOf(r, iv, ov), acts = [], block = [];
@@ -2512,7 +2520,7 @@ window.C01 = window.C01 || {};
         var fd = needPick[k], q = diffQ[fd];
         var typed = needPick.length === 1 ? S.panelInput.trim() : '';
         var val = typed || S.picks[fd][1], src = typed ? '手入力' : S.picks[fd][0];
-        if (!KEEP_SRC[src]) src = '手入力';      /* v0.3.70 (R12Y10): 「業者フォルダ名」 · 「配送報告書（参考…）」 などは エンジンの出所の名前に無い → 手入力 (人の値) */
+        if (!actSrcOk(src)) src = '手入力';      /* v0.3.71 (R12Y11): 名前の一覧 = エンジン meta.sources.action · v0.3.70 (R12Y10): 「業者フォルダ名」 · 「配送報告書（参考…）」 などは エンジンの出所の名前に無い → 手入力 (人の値) */
         var v = C01.validate.field(fd, val);
         if (!v.ok) { toast(FIELD_LABEL[fd] + ': ' + v.error, 'error'); return; }
         acts.push(mkAction('confirm_value', { iv: iv.iv_no, ct: r.ct, field: fd, value: v.value, source: src, queue_id: q.queue_id }));

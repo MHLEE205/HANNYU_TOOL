@@ -4007,6 +4007,29 @@ def r12y9_checks(page, root, shots, engine_new):
     page.wait_for_timeout(800)
 
 
+def r12y11_checks(page, root, shots, engine_new):
+    """v0.3.71 (R12Y11 · 엔진 v0.5.164 out_meta_sources): action 출처 = 엔진 meta.sources.action 목록 · 목록 밖 (業者フォルダ名 · 配送報告書（参考…）) = 手入力 ·
+    meta 에 목록 없음 (옛 엔진) = 0.3.70 그대로 (搬入票 · 写真 · Excel · 手入力 만)."""
+    # 다른 판 engine 이 이미 import 돼 있음 → 엔진 v0.5.164 목록은 따로 프로세스로 읽음 (r12x 방식)
+    pr = subprocess.run([sys.executable, "-c", "import json;from engine.actions import apply as A;from engine.output import data_json as D;"
+                         "print(json.dumps({'action': list(A.ACTION_SOURCES), 'values': list(D.VALUE_SOURCES)}, ensure_ascii=True))"],
+                        cwd=engine_new, capture_output=True, text=True, encoding="utf-8")
+    srcs = json.loads(pr.stdout.strip().splitlines()[-1])
+    ok("R12Y11 엔진 v0.5.164 출처 목록 읽힘 (action 에 業者フォルダ名 없음 · values 에 있음)", "業者フォルダ名" in srcs["values"] and "業者フォルダ名" not in srcs["action"], srcs)
+    names = list(dict.fromkeys(srcs["values"] + srcs["action"] + ["なにか"]))
+    got = page.evaluate("""a => { var keep = C01.state.meta; var out = {};
+        C01.state.meta = Object.assign({}, keep || {}, {sources: a[0]}); out.on = a[1].map(function (s) { return C01.actSrc(s); });
+        C01.state.meta = Object.assign({}, keep || {}, {sources: {action: ['搬入票', '手入力'], values: a[0].values}}); out.narrow = a[1].map(function (s) { return C01.actSrc(s); });
+        var m2 = Object.assign({}, keep || {}); delete m2.sources; C01.state.meta = m2; out.off = a[1].map(function (s) { return C01.actSrc(s); });
+        C01.state.meta = keep; return out; }""", [srcs, names])
+    want_on = [s if s in srcs["action"] else "手入力" for s in names]
+    want_off = [s if s in ("搬入票", "写真", "Excel", "手入力") else "手入力" for s in names]
+    want_narrow = [s if s in ("搬入票", "手入力") else "手入力" for s in names]
+    ok("R12Y11 meta.sources 있음 = 엔진 action 목록 밖 출처 (業者フォルダ名 · 配送報告書（参考…） · 모르는 이름) → 手入力 · 목록 안 = 그대로", got["on"] == want_on, (names, got["on"]))
+    ok("R12Y11 meta.sources 없음 (옛 엔진) = 0.3.70 그대로 (搬入票 · 写真 · Excel · 手入力)", got["off"] == want_off and got["off"] == got["on"], got["off"])
+    ok("R12Y11 엔진 목록이 좁으면 (가상 · 搬入票 · 手入力) TOOL 도 그 목록을 따름 (한 곳)", got["narrow"] == want_narrow, got["narrow"])
+
+
 def r10x_checks(page, root, shots, engine_frz):
     """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
     「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
@@ -4622,11 +4645,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.70", page.title() == "LEENAI C-01 搬入票 v0.3.70", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.71", page.title() == "LEENAI C-01 搬入票 v0.3.71", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.70" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.71" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -5163,6 +5186,7 @@ def main():
             r12b_checks(page, root, shots, a.engine)
             r12x_checks(page, root, shots, a.engine_r12x)
             r12y9_checks(page, root, shots, a.engine_r12x)
+            r12y11_checks(page, root, shots, a.engine_r12x)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
