@@ -2109,7 +2109,7 @@ window.C01 = window.C01 || {};
     manLoad(sid);
     S.modal = { kind: 'help' };
     var html = '<div class="c01-mh"><b>使い方</b>' +
-      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb c01-help" id="help-body">' + manLeadHtml() +
       '<p class="c01-help-lead">この TOOL の画面は <b>「見る」（実況表）</b> と <b>「確認・入力」</b> です。<br>' +
       (remindLive() ? '<span class="c01-live">本番</span> 「催促」 の 「送信」 は <b>押した職員のメールから業者へ</b> 送ります（エンジンからは送りません）。' + esc(REMIND_LIVE_NOTE) + ' ' :
         (remindTest() ? '「催促」 の 「送信（試験）」 は試験用アドレスにだけ届きます（業者には送りません）。 ' : '「催促」 は下書きの表示です（この画面からは送りません）。 ')) +
@@ -2142,6 +2142,14 @@ window.C01 = window.C01 || {};
   /* ── v0.3.58 (R11G · 決定 #320): 使い方マニュアル = エンジン _data/manual.json (engine/ask/manual_ja.md · AI 相談と同じ原本 · ここでは書かない)。
      目次 · 検索 · 章リンク · 「？」 (data-man) → その章へ · 画像 = docs/img (仮名データの画面) · 無い (エンジン 切) = 今までの 使い方 ── */
   var MAN_ID = /^\d+(-\d+)?$/;
+  /* v0.3.64 (R12X Part 01 · 決定 #360): 使い方 の一番上 = AI 相談 の案内 (右上 「AI 相談」 ボタンがある時だけ)。
+     文 = エンジン manual.json lead (engine/ask/manual_ja.md · AI 相談と同じ原本) · 無い (古いエンジン) = 下の同じ文 */
+  var MAN_LEAD = 'わからないことは、画面右上の [btn:AI 相談] にそのまま聞いてください。使える言語：日本語・韓国語・英語・中国語・インドネシア語 など';
+  function manLeadHtml() {
+    if (!gaskOn()) return '';
+    var t = (S.manual && S.manual.lead) || MAN_LEAD;
+    return '<p class="c01-man-lead" id="man-lead" role="note">💬 ' + manInline(esc(t)) + '</p>';
+  }
   function manOn() { return !!(S.meta && S.meta.manual); }
   function manLoad(sid) {
     if (S.manual || !manOn() || (S.manMiss && Date.now() - S.manMiss < 300000) || !S.src || !S.src.getJson || S.manBusy) return;
@@ -2211,7 +2219,7 @@ window.C01 = window.C01 || {};
     }).join('');
     var html = '<div class="c01-mh"><b>使い方</b> <span class="t2">' + esc(M.title || '') + ' · ' + esc(M.version || '') + ' · ' + esc(M.date || '') + '</span>' +
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div>' +
-      '<div class="c01-mb c01-help c01-man" id="help-body"><div class="c01-man-search"><input id="man-q" type="search" placeholder="使い方を検索（例: まとめる · 催促 · 他社）" aria-label="使い方を検索">' +
+      '<div class="c01-mb c01-help c01-man" id="help-body">' + manLeadHtml() + '<div class="c01-man-search"><input id="man-q" type="search" placeholder="使い方を検索（例: まとめる · 催促 · 他社）" aria-label="使い方を検索">' +
       '<span class="t2" id="man-n"></span></div><div class="c01-man-wrap"><nav class="c01-man-toc" aria-label="目次"><b>目次</b><ul>' + toc + '</ul></nav>' +
       '<div class="c01-man-body" id="man-body">' + body + '<p class="c01-powered">✦ Powered by LEENAI Automation System</p></div></div></div>';
     showModal(html, 'c01-modal-help');

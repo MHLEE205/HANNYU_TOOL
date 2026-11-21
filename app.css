@@ -585,6 +585,9 @@ tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
   border: 1px solid var(--border); background: var(--read); color: var(--text); font-size: 11px; line-height: 1; cursor: pointer; vertical-align: middle; }
 .c01-manq:hover { border-color: var(--accent, #6aa0ff); }
 .c01-man-search { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; }
+/* v0.3.64 (R12X · #360): 使い方 一番上の AI 相談 案内 */
+.c01-man-lead { margin: 0 0 10px; padding: 10px 14px; background: #fff7d6; border: 2px solid #e0a800; border-radius: 8px; font-size: 1.08em; font-weight: 600; line-height: 1.6; color: #3d2f00; }
+.c01-man-lead .c01-man-btn { font-weight: 700; }
 .c01-man-search input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--read); color: var(--text); }
 .c01-man-wrap { display: grid; grid-template-columns: 240px 1fr; gap: 12px; align-items: start; }
 .c01-man-toc { position: sticky; top: 0; max-height: 70vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; }

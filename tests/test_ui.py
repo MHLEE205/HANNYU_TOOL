@@ -4238,6 +4238,91 @@ def r11r_checks(page, root, shots, engine):
     page.wait_for_timeout(600)
 
 
+def r12x_checks(page, root, shots, engine_r12x):
+    """v0.3.64 (R12X Part 01 · 決定 #360): 使い方 の一番上 = AI 相談 の案内 · 文 = エンジン manual.json lead (engine/ask/manual_ja.md) ·
+    lead 無し (古いエンジン) = TOOL の同じ文 · ボタン名 = 実際の右上ボタンの字 (#320 自動照合) · AI 相談 切 = 出さない · 携帯 幅. 仮名データだけ."""
+    import subprocess
+    dump = lambda o: json.dumps(o, ensure_ascii=False, indent=1) + chr(10)   # noqa: E731
+    d = root / "_data"
+    mp = d / "meta.json"
+    mt0 = mp.read_text(encoding="utf-8")
+    r = subprocess.run([sys.executable, "-c", "import json,sys;sys.stdout.reconfigure(encoding='utf-8');from engine.ask import manual as M;print(json.dumps(M.output(),ensure_ascii=False))"],
+                       cwd=engine_r12x, capture_output=True, text=True, encoding="utf-8")
+    man = {"schema_version": 1, "kind": "manual", **json.loads(r.stdout)}
+    lead = man.get("lead") or ""
+    ok("R12X 엔진 manual.json lead (AI 相談 · 言語 5 · など)", lead.startswith("わからないことは、画面右上の [btn:AI 相談] にそのまま聞いてください。")
+       and "日本語・韓国語・英語・中国語・インドネシア語 など" in lead and "AI 相談" in man["buttons"], lead[:40])
+    app = (TOOL / "js" / "app.js").read_text(encoding="utf-8")
+    ok("R12X TOOL 의 같은 문 (lead 없을 때) = 엔진 lead 와 글자 같음", ("var MAN_LEAD = '" + lead + "';") in app)
+
+    def close():
+        page.keyboard.press("Escape")
+        page.evaluate("() => { var m = document.getElementById('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } C01.state.modal = null; C01.state.view = 'main'; C01.app.render(); }")
+
+    def open_help():
+        page.click("#help-open")
+        page.wait_for_timeout(700)
+    close()
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    # ① 매뉴얼 있음 (엔진 lead) — 맨 위 · 검색 칸 위 · 버튼 이름 = 실제 버튼
+    (d / "manual.json").write_text(dump(man), encoding="utf-8")
+    m = json.loads(mt0)
+    m["manual"] = "manual.json"
+    mp.write_text(dump(m), encoding="utf-8")
+    page.evaluate("() => { C01.state.manual = null; C01.state.manMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(800)
+    open_help()
+    gbtn = page.locator("#gask-open").inner_text().strip() if page.locator("#gask-open").count() else None
+    info = page.evaluate("() => { var b = document.getElementById('help-body'), l = document.getElementById('man-lead'), s = document.querySelector('.c01-man-search');"
+                         " return l ? [b.firstElementChild === l, !!(s && (l.compareDocumentPosition(s) & 4)), l.innerText, (l.querySelector('.c01-man-btn') || {}).innerText,"
+                         " getComputedStyle(l).fontWeight, l.getBoundingClientRect().top - b.getBoundingClientRect().top] : null; }")
+    ok("R12X 使い方 첫 줄 = AI 相談 안내 (help-body 첫 칸 · 검색 칸 위)", info and info[0] is True and info[1] is True and info[5] < 20, info)
+    ok("R12X 안내 글 = lead (버튼 표시 「AI 相談」 · 언어 목록)", info and "画面右上の" in info[2] and "使える言語：日本語・韓国語・英語・中国語・インドネシア語 など" in info[2], info and info[2])
+    ok("R12X 안내의 버튼 이름 = 실제 오른쪽 위 버튼 글자 (" + str(gbtn) + ")", info and gbtn and info[3] == gbtn == "AI 相談", (info and info[3], gbtn))
+    pos = page.evaluate("() => { var g = document.getElementById('gask-open').getBoundingClientRect(); return [g.left > window.innerWidth / 2, g.top < 120]; }")
+    ok("R12X 「AI 相談」 버튼 = 화면 오른쪽 위 (안내 문 「右上」 와 같음)", pos == [True, True], pos)
+    ok("R12X 눈에 띄게 (굵게)", info and int(info[4]) >= 600, info and info[4])
+    page.screenshot(path=str(shots / "r12x_manual_lead.png"))
+    close()
+    # ② 옛 엔진 (lead 없음) = TOOL 같은 문
+    man2 = dict(man)
+    man2.pop("lead", None)
+    (d / "manual.json").write_text(dump(man2), encoding="utf-8")
+    page.evaluate("() => { C01.state.manual = null; C01.state.manMiss = 0; C01.app.tick(); }")
+    page.wait_for_timeout(800)
+    open_help()
+    t2 = page.locator("#man-lead").inner_text() if page.locator("#man-lead").count() else ""
+    ok("R12X lead 없는 엔진 = TOOL 같은 문", "にそのまま聞いてください" in t2 and "インドネシア語" in t2 and page.locator(".c01-man-sec").count() == len(man["sections"]), t2[:30])
+    close()
+    # ③ 매뉴얼 없음 (예전 使い方) 에도 맨 위
+    mp.write_text(mt0, encoding="utf-8")
+    (d / "manual.json").unlink()
+    page.evaluate("() => { C01.state.manual = null; C01.app.tick(); }")
+    page.wait_for_timeout(600)
+    open_help()
+    first = page.evaluate("() => { var b = document.getElementById('help-body'); return b && b.firstElementChild ? b.firstElementChild.id : null; }")
+    ok("R12X 예전 使い方 (매뉴얼 없음) 도 첫 줄 = 안내", first == "man-lead" and page.locator(".c01-man").count() == 0, first)
+    close()
+    # ④ AI 相談 끔 = 안내 없음 (없는 버튼을 가리키지 않음)
+    page.evaluate("() => { C01.__g = C01.ASK.global; C01.ASK.global = false; C01.app.render(); }")
+    page.wait_for_timeout(200)
+    open_help()
+    ok("R12X AI 相談 끔 = 안내 없음 · 버튼 없음", page.locator("#man-lead").count() == 0 and page.locator("#gask-open").count() == 0,
+       (page.locator("#man-lead").count(), page.locator("#gask-open").count()))
+    close()
+    page.evaluate("() => { C01.ASK.global = C01.__g; delete C01.__g; C01.app.render(); }")
+    # ⑤ 휴대폰 폭
+    page.set_viewport_size({"width": 390, "height": 800})
+    page.wait_for_timeout(200)
+    page.evaluate("() => { var b = document.getElementById('help-open'); if (b) b.click(); }")
+    page.wait_for_timeout(500)
+    ph = page.evaluate("() => { var l = document.getElementById('man-lead'); return l ? [l.getBoundingClientRect().right <= window.innerWidth + 1, l.getBoundingClientRect().top >= 0] : null; }")
+    ok("R12X 휴대폰 폭 390 = 안내 보임 · 가로 넘침 0", ph == [True, True], ph)
+    page.screenshot(path=str(shots / "r12x_manual_lead_phone.png"))
+    close()
+    page.set_viewport_size({"width": 1440, "height": 1000})
+
+
 def r11g_checks(page, root, shots, engine):
     """v0.3.58 (R11G · #320): 使い方 = エンジン manual.json (目次 · 検索 · 章リンク) · カード / AI 相談 の 「？」 → その章 ·
     AI の答えの 参考 (manual_refs) → その章 · マニュアルのボタン名 = TOOL の画面の字 (公開前の自動照合) · 画像 = docs/img ·
@@ -4373,6 +4458,7 @@ def main():
     ap.add_argument("--no-wait30", action="store_true")
     ap.add_argument("--engine-r10u", default=r"C:\LEENAI_C01_PROD\code")   # v0.3.52 (R10W): 엔진 v0.5.122 스키마 (input_keep · 入力後の差異)
     ap.add_argument("--engine-box", default=r"C:\LEENAI_C01_PROD\code")   # R10X: 엔진 v0.5.124 photos.schema (box)
+    ap.add_argument("--engine-r12x", default=r"C:\LEENAI_C01_V2\engine")   # v0.3.64 (R12X): 엔진 v0.5.154 manual.json lead
     ap.add_argument("--engine-frz", default=r"C:\LEENAI_C01_PROD\code")   # R10X: 엔진 v0.5.125 스키마 (input_slot_take · why compass_slot)
     a = ap.parse_args()
     if not (TOOL / "fixtures" / "_data" / "jikkyou.json").is_file():
@@ -4438,11 +4524,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.62", page.title() == "LEENAI C-01 搬入票 v0.3.62", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.64", page.title() == "LEENAI C-01 搬入票 v0.3.64", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.62" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.64" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4977,6 +5063,7 @@ def main():
             r11r_checks(page, root, shots, a.engine)
             r12a_checks(page, root, shots, a.engine)
             r12b_checks(page, root, shots, a.engine)
+            r12x_checks(page, root, shots, a.engine_r12x)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
