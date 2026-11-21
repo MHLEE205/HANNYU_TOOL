@@ -656,5 +656,8 @@ tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
 .c01-cpodsub { font-size: 11px; margin-top: 2px; }
 .c01-cnamesrc { margin: 0 0 4px; font-size: 11px; }
 .c01-csenderr { margin-top: 8px; }
+/* v0.3.68 (R12Y7 · #367): 宛先の提案 (直せる) · 国内販売 (L インボイス) */
+.c01-caddr { width: 100%; min-width: 460px; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--surface2, transparent); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; }
+button.c01-csend-dom { min-height: 30px; display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 6px; border: 1px dashed var(--border); background: transparent; color: var(--text2); font-size: 12px; font-family: inherit; cursor: help; }
 .c01-cerr { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10050; max-width: 760px; display: flex; gap: 12px; align-items: center;
   background: #fff1f1; color: var(--err, #c62828); border: 2px solid var(--err, #e5484d); border-radius: 8px; padding: 10px 14px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }

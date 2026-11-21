@@ -1252,7 +1252,8 @@ window.C01 = window.C01 || {};
       var a = m.action;
       if (a.action === 'compass_done' && a.iv === iv.iv_no && !xs.some(function (x) { return x.action_id === a.action_id; })) xs.push({ action_id: a.action_id, by: a.by, at: a.at, value: a.value || {} });
     });
-    return xs.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+    /* v0.3.68 (R12Y7): 同じ時刻 (秒) = 元に戻した記録 (undo_of) を新しい方に (確認 → すぐ取り消し で 入力済 が残らない) */
+    return xs.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)) || ((b.value.undo_of === a.action_id) - (a.value.undo_of === b.action_id)); });
   }
   function compassIsDone(iv) {
     var last = compassRecords(iv)[0];
@@ -1325,15 +1326,20 @@ window.C01 = window.C01 || {};
       var last = recs[0];
       if (recs.length) {
         html += '<div class="c01-chist" id="compass-hist"><b>入力の記録</b>' + recs.slice(0, 5).map(function (x) {
-          return '<div>' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + ' · ' + esc(staffName(x.by)) + ' · ' + (x.value.undo_of ? '元に戻した ' : '入力 ') +
-            ((x.value.cells || []).length) + '行' + (x.value.failed && x.value.failed.length ? ' · 失敗 ' + x.value.failed.length + '行' : '') + '</div>';
+          return '<div>' + esc(String(x.at || '').slice(5, 16).replace('T', ' ')) + ' · ' + esc(staffName(x.by)) + ' · ' + (x.value.verify_only ? (x.value.undo_of ? '一致の確認を取り消した' : 'COMPASS と一致を確認 ' + ((x.value.checked || []).length) + '行') : (x.value.undo_of ? '元に戻した ' : '入力 ') +
+            ((x.value.cells || []).length) + '行') + (x.value.failed && x.value.failed.length ? ' · 失敗 ' + x.value.failed.length + '行' : '') + '</div>';
         }).join('') + '</div>';
       }
       html += '</div><div class="c01-mf">';
+      /* v0.3.68 (R12Y7 · #367 Part 0): 全部 COMPASS と同じ (PATCH 0 · 警告 0 · 違い 0) で 入力済 の記録が無い = 「COMPASS と一致を確認（入力済にする）」 */
+      var vp = live && !compassIsDone(iv) ? C01.compass.verifyPlan(res) : { ok: false };
+      S.modal.verify = vp.ok ? vp : null;
       if (live) {
-        html += '<span class="t2">チェックした行を COMPASS に入力（If-Match → もう一度読んで確認 → 記録）· 入力する人 = ' + esc((S.me && S.me.name) || '') + '</span><span class="c01-flex"></span>' +
-          (last && !last.value.undo_of && (last.value.cells || []).length ? '<button id="compass-undo" class="c01-btn-ghost2" title="この IV の最後の入力を 前の値 に戻します">元に戻す</button>' : '') +
-          '<button id="compass-send" class="c01-btn-pri">Compass に入力 (<span id="compass-n">0</span>行)</button>';
+        html += '<span class="t2">' + (vp.ok ? 'COMPASS の値は 実況表と全部同じです（入力する値なし）— 確認すると 入力済 になり 行が固定されます · 確認する人 = ' + esc((S.me && S.me.name) || '')
+          : 'チェックした行を COMPASS に入力（If-Match → もう一度読んで確認 → 記録）· 入力する人 = ' + esc((S.me && S.me.name) || '')) + '</span><span class="c01-flex"></span>' +
+          (last && !last.value.undo_of && ((last.value.cells || []).length || last.value.verify_only) ? '<button id="compass-undo" class="c01-btn-ghost2" title="' + (last.value.verify_only ? 'この IV の 一致の確認 を取り消します（COMPASS は変えません）' : 'この IV の最後の入力を 前の値 に戻します') + '">元に戻す</button>' : '') +
+          (vp.ok ? '<button id="compass-verify" class="c01-btn-pri" data-cverify>COMPASS と一致を確認（入力済にする）</button>'
+            : '<button id="compass-send" class="c01-btn-pri">Compass に入力 (<span id="compass-n">0</span>行)</button>');
       } else {
         html += '<span class="t2">If-Match (etag) 付きで入力 → もう一度読んで確認 → compass_done を記録（R7 以降・職員ログイン）</span><span class="c01-flex"></span>' +
           '<button id="compass-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 はローカル DRY">DRY — 送信しません</button>';
@@ -1341,6 +1347,11 @@ window.C01 = window.C01 || {};
       html += '</div>';
       showModal(html, 'c01-compass');
       if (!live) return;
+      if (vp.ok) {
+        $('compass-verify').onclick = function () { compassVerify(ivNo); };
+        if ($('compass-undo')) $('compass-undo').onclick = function () { compassUndo(ivNo, last); };
+        return;
+      }
       var upd = function () {
         var n = Object.keys(S.modal.pick).filter(function (k) { return S.modal.pick[k]; }).length;
         $('compass-n').textContent = n;
@@ -1408,9 +1419,38 @@ window.C01 = window.C01 || {};
       });
     }).catch(function (e) { m.busy = false; toast('COMPASS 入力: ' + e.message, 'error'); });
   }
+  /* v0.3.68 (R12Y7 · #367 Part 0): COMPASS と一致を確認 = PATCH なし · compass_done (cells [] · verify_only · checked · その時 GET した値の sha · 押した人) */
+  function compassVerify(ivNo) {
+    var m = S.modal;
+    if (!m || m.kind !== 'compass' || !m.live || m.busy || !m.verify) return;
+    var checked = m.verify.checked;
+    if (!window.confirm('COMPASS の値は 実況表と全部同じです（' + checked.length + ' 行）。COMPASS は変えずに 入力済 にします（' + ((S.me && S.me.name) || '') + '）。よろしいですか？')) return;
+    m.busy = true;
+    $('compass-verify').disabled = true;
+    var ivx = ivById(ivNo);
+    C01.compass.shaText(JSON.stringify(checked)).then(function (sha) {
+      var a = C01.compass.verifyAction(actionId(), ivNo, S.me.email, jstNow(), checked, sha);
+      a.value.trial = compassTrial();
+      if ((C01.COMPASS || {}).form_bales && ivx) a.value.formtype_blank = C01.compass.formTypeBlank(m.cells || {});   /* #361: 通関書類送付 の条件 (読んだ値のまま) */
+      return writeAction(a);
+    }).then(function () {
+      m.busy = false;
+      toast('COMPASS と一致を確認しました — ' + ivNo + ' 入力済', 'success');
+      closeModal(); render();
+    }).catch(function (e) { m.busy = false; toast('一致の確認: ' + e.message, 'error'); });
+  }
   function compassUndo(ivNo, last) {
     var m = S.modal;
     if (!m || m.busy || !last) return;
+    if (last.value.verify_only) {                    /* v0.3.68: 一致の確認 の取り消し = 記録だけ (COMPASS は変えない) */
+      if (!window.confirm('この IV の 一致の確認 (' + staffName(last.by) + ') を取り消します（COMPASS は変えません）。よろしいですか？')) return;
+      m.busy = true;
+      var u = C01.compass.compassDoneAction(actionId(), ivNo, S.me.email, jstNow(), []);
+      u.value.verify_only = true; u.value.undo_of = last.action_id;
+      writeAction(u).then(function () { m.busy = false; toast('一致の確認を取り消しました', 'success'); closeModal(); render(); },
+        function (e) { m.busy = false; toast('元に戻す: ' + e.message, 'error'); });
+      return;
+    }
     var cells = last.value.cells || [];
     if (!window.confirm('この IV の最後の入力 (' + cells.length + '行 · ' + staffName(last.by) + ') を 前の値 に戻します。よろしいですか？')) return;
     m.busy = true;

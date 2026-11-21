@@ -4,6 +4,8 @@
       다른 사람이 먼저 바꾼 행 (etag 바뀜) = 그 행만 「他の人が先に変更」 · 다른 행 계속 · 다시 읽어 확인 ·
       _actions 에 compass_done (전 값 · 후 값 · 누가 · 언제 · 실패 행) · 実況表 「✓ 入力済」 ·
       「元に戻す」 = 마지막 입력을 전 값으로 (지금 값 = 넣은 값인 항목만) · 기록 undo_of · 実況表 다시 「Compass入力」 · 콘솔 오류 0.
+      v0.3.68 (R12Y7 · #367 Part 0): COMPASS 가 이미 다 같음 = 「COMPASS と一致を確認（入力済にする）」 (PATCH 0 · compass_done cells [] · verify_only · checked · sha) ·
+      하나라도 다르면 지금 버튼 · 확인 뒤 入力済 · 「元に戻す」 = 기록만 (COMPASS 요청 = GET 뿐) · 기록 = 엔진 스키마.
 사용: python tests/test_compass_live.py"""
 import json
 import re
@@ -252,6 +254,70 @@ def main():
             pt2 = json.loads(page.locator("#compass-patch").text_content())
             ok("45R 아닌 선사 + 같은 부킹 다른 칸 빈칸 = タイプ 45GP (FILL)", page.locator('td.c01-cell.CHOOSE').count() == 0 and pt2 and all(x["body"].get("crcf9_type") == "45GP" for x in pt2),
                [x["body"].get("crcf9_type") for x in pt2])
+            page.locator("[data-close]").first.click()
+            # ── v0.3.68 (R12Y7 · #367 Part 0): COMPASS と一致を確認 ──
+            page.evaluate('''() => { const A = C01.app._api(); const iv = A.S.jik.ivs.find(x => x.iv_no === 'TST2611-01');
+                iv.rows.forEach(r => { r.status = '自動OK'; r.engine_status = '自動OK'; r.reasons = []; });
+                iv.compass_input = []; A.S.mine = (A.S.mine || []).filter(m => !(m.action.action === 'compass_done' && m.action.iv === 'TST2611-01')); A.render(); }''')
+            page.locator('[data-compass="TST2611-01"]').first.click()
+            page.wait_for_selector("#compass-table", timeout=15000)
+            res0 = page.evaluate("C01.app._api().S.modal.res")
+            ok("P0 값이 다른 칸이 있음 = 지금 버튼 (Compass に入力) · 「一致を確認」 없음", page.locator("#compass-send").count() == 1 and page.locator("[data-cverify]").count() == 0,
+               res0["count"])
+            for x in res0["patches"]:                              # 가짜 COMPASS 를 実況表 값과 같게 (다른 길로 이미 입력된 IV 흉내)
+                c = cells[x["ct_id"]]
+                for k, v in x["body"].items():
+                    if k == BIND:
+                        c["_crcf9_form_value"] = re.search(r"\(([^)]+)\)", v).group(1)
+                    else:
+                        c[k] = v
+            page.locator("[data-close]").first.click()
+            page.locator('[data-compass="TST2611-01"]').first.click()
+            page.wait_for_selector("#compass-table", timeout=15000)
+            res1 = page.evaluate("C01.app._api().S.modal.res")
+            vb = page.locator("[data-cverify]")
+            ok("P0 다 같음 (PATCH 0 · 경고 0) = 「COMPASS と一致を確認（入力済にする）」 · 입력 버튼 없음", vb.count() == 1 and vb.inner_text() == "COMPASS と一致を確認（入力済にする）"
+               and page.locator("#compass-send").count() == 0 and res1["count"]["patch_rows"] == 0, [res1["count"], [r["warnings"] for r in res1["rows"]], [r["skip"] for r in res1["rows"]]])
+            n0 = len(REQ)
+            vb.click()
+            page.wait_for_function("() => !document.getElementById('compass-table')", timeout=20000)
+            page.wait_for_timeout(300)
+            sent3 = REQ[n0:]
+            ok("P0 확인 = COMPASS 쓰기 0 (PATCH · DELETE · POST 0)", not [r for r in sent3 if r[0] != "GET"], [(r[0], r[1][-20:]) for r in sent3])
+            acts = sorted((root / "_actions").rglob("*.json"), key=lambda x: x.stat().st_mtime)
+            vrec = json.loads(acts[-1].read_text(encoding="utf-8"))
+            vv = vrec.get("value") or {}
+            nrow = sum(1 for r in res1["rows"] if not r["skip"])
+            ok("P0 기록 = compass_done · cells [] · verify_only · checked (행마다 같은 칸 · 전 = 후) · compass_sha 16 · 누른 사람",
+               vrec.get("action") == "compass_done" and vv.get("cells") == [] and vv.get("verify_only") is True and len(vv.get("checked") or []) == nrow
+               and all(c["before"] == c["after"] and "crcf9_container_no" in c["fields"] for c in vv["checked"]) and re.fullmatch(r"[0-9a-f]{16}", vv.get("compass_sha") or "")
+               and vrec.get("by") == "staff.a@example.invalid", {k: (v if k != "checked" else len(v)) for k, v in vv.items()})
+            ok("P0 기록 = 엔진 action.schema.json (오류 0)", not schema_check.errors(vrec, sch), schema_check.errors(vrec, sch))
+            hdr3 = page.locator('tbody[data-iv="TST2611-01"]').first.inner_text()
+            ok("P0 実況表 「✓ 入力済」", "入力済" in hdr3, hdr3[:120])
+            page.locator('tbody[data-iv="TST2611-01"] .c01-done[data-compass]').first.click()
+            page.wait_for_selector("#compass-table", timeout=15000)
+            ok("P0 기록 표시 「COMPASS と一致を確認 n行」 · 「元に戻す」 · 확인 버튼 다시 안 나옴", f"COMPASS と一致を確認 {nrow}行" in page.locator("#compass-hist").inner_text()
+               and page.locator("#compass-undo").count() == 1 and page.locator("[data-cverify]").count() == 0, page.locator("#compass-hist").inner_text())
+            n1 = len(REQ)
+            page.locator("#compass-undo").click()
+            page.wait_for_function("() => !document.getElementById('compass-table')", timeout=20000)
+            page.wait_for_timeout(300)
+            acts = sorted((root / "_actions").rglob("*.json"), key=lambda x: x.stat().st_mtime)
+            urec = json.loads(acts[-1].read_text(encoding="utf-8"))
+            ok("P0 확인 되돌리기 = COMPASS 요청 0 · 기록 undo_of · cells [] · verify_only", len(REQ) == n1 and (urec.get("value") or {}).get("undo_of") == vrec["action_id"]
+               and urec["value"].get("cells") == [] and urec["value"].get("verify_only") is True and not schema_check.errors(urec, sch), urec.get("value"))
+            try:
+                page.wait_for_function("() => { const t = document.querySelector('tbody[data-iv=\"TST2611-01\"] [data-compass]'); return t && !t.classList.contains('c01-done'); }", timeout=10000)
+            except Exception:
+                pass
+            hdr4 = page.locator('tbody[data-iv="TST2611-01"] [data-compass]').first.inner_text()
+            ok("P0 되돌린 뒤 実況表 = 다시 「Compass入力」", "入力済" not in hdr4 and "Compass入力" in hdr4, hdr4[:120])
+            cell1 = next(iter(cells.values()))
+            cell1["crcf9_seal_no"] = "DIFFSEAL9"
+            page.locator('[data-compass="TST2611-01"]').first.click()
+            page.wait_for_selector("#compass-table", timeout=15000)
+            ok("P0 한 칸이라도 다름 = 확인 버튼 없음 (지금 입력 길)", page.locator("[data-cverify]").count() == 0 and page.locator("#compass-send").count() == 1)
             page.locator("[data-close]").first.click()
             errs = [e for e in G.RES["console_errors"] if not ("Failed to load resource" in e and ("404" in e or "409" in e or "500" in e or "ERR_FAILED" in e))]
             ok("콘솔 오류 0 (가짜 서버 404 빼고)", not errs, errs[:3])

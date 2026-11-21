@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.67',
+  version: '0.3.68',
   date: '2026-11-21',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -86,7 +86,9 @@ C01.CUSTOMS = {
   body: '{broker}\n{person} 様\n\nいつもお世話になっております。\n通関用の書類を送付いたしますので、ご確認の程お願い致します。\n\n宜しくお願い致します。',
   /* 署名 = 押した職員 (職員マスターの名前 · メール) + 会社 */
   signature: '----------------------------------------\n{name}\n株式会社リニア (LEENEAR CORPORATION)\nTEL : +81-3-3528-9850 / FAX : +81-3-3528-9851\n{email}',
-  footer: '✦ Powered by LEENAI Automation System'
+  footer: '✦ Powered by LEENAI Automation System',
+  /* v0.3.68 (R12Y7 · #367 Part 1 · #218): この文字で始まる IV = 国内販売 (L インボイス) — 送付ボタンの代わりに 「国内販売（通関書類は買い手側）」 */
+  domesticPrefix: 'L'
 };
 
 /* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 催促 送信直前の確認 — エンジン notify/remind.guard と同じ決まり (エンジンが下書きに付けた allow を使う)。

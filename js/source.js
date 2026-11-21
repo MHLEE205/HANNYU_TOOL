@@ -424,7 +424,7 @@ C01.sources = (function () {
     var C = C01.CUSTOMS || {};
     var test = C.sendTest !== false;
     var low = function (a) { return String(a || '').trim().toLowerCase(); };
-    if (!C.enabled || !m || !m.replyToId || !m.pdf_b64 || !m.file) return Promise.reject(new Error('送信の条件がそろっていません — 送信しません'));
+    if (!C.enabled || !m || !(m.replyToId || m.newMail) || (m.replyToId && m.newMail) || !m.pdf_b64 || !m.file) return Promise.reject(new Error('送信の条件がそろっていません — 送信しません'));
     var me = low((LEENAI.user || {}).email);
     var to = (m.to || []).map(low).filter(Boolean), cc = (m.cc || []).map(low).filter(Boolean);
     if (test) { to = [me]; cc = []; if (!/^\[test\] /.test(m.subject || '')) return Promise.reject(new Error('試験モードの件名ではありません — 送信しません')); }
@@ -440,13 +440,17 @@ C01.sources = (function () {
     };
     var draft = null;
     var bytes = Math.floor(m.pdf_b64.length * 3 / 4);
-    return J('POST', 'me/messages/' + encodeURIComponent(m.replyToId) + '/createReplyAll', {}).then(function (d) {
-      draft = d;
-      var html = String((d.body || {}).content || '');
-      var mine = '<div>' + m.html + '</div>';
-      html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, function (x) { return x + mine; }) : mine + html;
-      return J('PATCH', 'me/messages/' + encodeURIComponent(d.id), { subject: m.subject, body: { contentType: 'HTML', content: html }, toRecipients: rcp(to), ccRecipients: rcp(cc), bccRecipients: [] });
-    }).then(function () {
+    /* v0.3.68 (R12Y7 · #367 Part 2): newMail = ① が自分のメールボックスに無い時 — 新しい下書き (me/messages) · 本文 = 確認窓の本文 (+ ① の引用は呼ぶ側が html に入れる) */
+    var first = m.newMail ? J('POST', 'me/messages', { subject: m.subject, body: { contentType: 'HTML', content: '<html><body><div>' + m.html + '</div></body></html>' },
+      toRecipients: rcp(to), ccRecipients: rcp(cc), bccRecipients: [] }).then(function (d) { draft = d; })
+      : J('POST', 'me/messages/' + encodeURIComponent(m.replyToId) + '/createReplyAll', {}).then(function (d) {
+        draft = d;
+        var html = String((d.body || {}).content || '');
+        var mine = '<div>' + m.html + '</div>';
+        html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, function (x) { return x + mine; }) : mine + html;
+        return J('PATCH', 'me/messages/' + encodeURIComponent(d.id), { subject: m.subject, body: { contentType: 'HTML', content: html }, toRecipients: rcp(to), ccRecipients: rcp(cc), bccRecipients: [] });
+      });
+    return first.then(function () {
       if (bytes <= 2900000) {
         return J('POST', 'me/messages/' + encodeURIComponent(draft.id) + '/attachments', { '@odata.type': '#microsoft.graph.fileAttachment', name: m.file, contentType: 'application/pdf', contentBytes: m.pdf_b64 });
       }

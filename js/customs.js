@@ -3,7 +3,10 @@
    - PDF = D-03 自動モード (同じ出所 · ?auto=1 · 押した担当者のログイン · COMPASS は読むだけ)
    - メール = ① 通関依頼 の会話の一番新しいメールに 全員に返信 (押した担当者のメール · js/source.js customsSend)
    - 試験モード (C01.CUSTOMS.sendTest) = 宛先は押した本人 1 人だけ · 件名の前に [test]
-   - 送ったら _actions customs_sent (IV · 誰 · いつ · メール ID · PDF sha256 · 選んだ値) */
+   - 送ったら _actions customs_sent (IV · 誰 · いつ · メール ID · PDF sha256 · 選んだ値)
+   v0.3.68 (R12Y7 · #367): 宛先の道 (route) — ① 自分のメールボックスの ① に 全員に返信 (s1_reply) → ② 無ければ 会社のメールボックスの ① の会話
+   (エンジン customs_s1.json) と同じ宛先へ 新しいメール · ① を引用 (s1_shared) → ③ それも無ければ 「この港へ最近送った宛先」 の提案 (proposal · 直せる) → ④ 宛先 0 = 止める。
+   L インボイス (国内販売 · #218) = 送付ボタンの代わりに 「国内販売（通関書類は買い手側）」 */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -50,9 +53,16 @@ C01.customs = (function () {
     if (!iv.bkg_no) out.push('BKG なし');
     return out;
   }
+  /* v0.3.68 (R12Y7 · #367 Part 1): L インボイス = 国内販売 (#218 · 荷主 = 買い手 · S/I なし · 通関は買い手側) — 6 か月の送付 0 件 */
+  function domestic(iv) {
+    var pre = (C01.CUSTOMS && C01.CUSTOMS.domesticPrefix) || 'L';
+    return String((iv && iv.iv_no) || '').toUpperCase().indexOf(pre) === 0;
+  }
+  var DOM_TEXT = '国内販売（L インボイス）です。荷主は買い手で、通関は買い手側の通関業者が行います — S/I はなく、こちらから 通関書類 を送りません。';
   function headerBtn(g) {
     if (!on()) return '';
     var a = api(), iv = g.iv, esc = a.esc;
+    if (domestic(iv)) return '<button class="c01-csend-dom" data-csend="' + esc(iv.iv_no) + '" data-csend-off="1" title="' + esc(DOM_TEXT) + '">国内販売（通関書類は買い手側）</button>';
     a.S.customsG = a.S.customsG || {};
     a.S.customsG[iv.iv_no] = g;
     var l = lastLive(iv), t = lastTest(iv);
@@ -60,7 +70,7 @@ C01.customs = (function () {
     var miss = lacks(g);
     var tmark = t ? ' <small class="c01-ctest" title="' + esc('試験送付 ' + String(t.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(t.by)) + '">試験済 ' + esc(a.md(String(t.at).slice(0, 10))) + '</small>' : '';
     if (miss.length) return '<button class="c01-blocked c01-csend-off" data-csend="' + esc(iv.iv_no) + '" data-csend-off="1" title="' + esc('まだ送れません: ' + miss.join(' · ')) + '">通関書類送付</button>' + tmark;
-    return '<button class="c01-btn-pri c01-csend" data-csend="' + esc(iv.iv_no) + '" title="D-03 で IV・PL・SI を作り、① 通関依頼 のメールに 全員に返信 します（送る前に確認窓）">✉ 通関書類送付</button>' + tmark;
+    return '<button class="c01-btn-pri c01-csend" data-csend="' + esc(iv.iv_no) + '" title="D-03 で IV・PL・SI を作り、① 通関依頼 の宛先へ送ります（送る前に確認窓）">✉ 通関書類送付</button>' + tmark;
   }
 
   /* ── COMPASS (読むだけ) — バイヤー · 前回の B/L ── */
@@ -231,11 +241,12 @@ C01.customs = (function () {
   function brokerSig(mail, gs) {
     var a = api(), src = a.S.src;
     if ((gs.broker && gs.person) || !gs.dom || !mail || typeof src.customsMailText !== 'function') return Promise.resolve(gs);
-    var bm = ((mail.conv || []).slice().reverse().filter(function (m) { return domOf(m.from) === gs.dom; }))[0];
+    var bm = ((mail.conv || []).slice().reverse().filter(function (m) { return domOf(m.from) === gs.dom; }))[0] ||
+      (!(mail.conv || []).length && mail.last && domOf(mail.last.from) === gs.dom ? mail.last : null);     /* v0.3.68: 道 2 = 会社のメールボックスの ① の最新 (本文の GET はしない) */
     if (!bm) return Promise.resolve(gs);
     var nm = cleanName(bm.from_name);
     if (!gs.person && nm && nm.indexOf('@') < 0) { gs.person = nm; gs.src.person = '通関業者のメールの送信者名（' + a.md(String(bm.at).slice(0, 10)) + '）'; }
-    if (gs.broker) return Promise.resolve(gs);
+    if (gs.broker || !bm.id) return Promise.resolve(gs);
     return src.customsMailText(bm.id).then(function (t) {
       var co = sigCompany(t);
       if (co) { gs.broker = co; gs.src.broker = '通関業者のメールの署名（' + a.md(String(bm.at).slice(0, 10)) + '）'; }
@@ -257,9 +268,10 @@ C01.customs = (function () {
     var a = api();
     var iv = a.ivById(ivNo), g = (a.S.customsG || {})[ivNo];
     if (!on() || !iv || !g) return;
+    if (domestic(iv)) { a.toast(DOM_TEXT, 'info'); return; }
     if (off) { a.toast('まだ送れません: ' + lacks(g).join(' · '), 'error'); return; }
     st = { iv: ivNo, g: g, step: '準備中', mail: null, sent: [], d03: null, err: [], bl: '', blWhy: '', over: {}, ack: false, again: false, busy: false, body: null, broker: '', person: '',
-      si: undefined, nameSrc: null, sendErr: '' };
+      si: undefined, nameSrc: null, sendErr: '', route: '', shared: null, prop: null, addStaff: true, editTo: '', editCc: '', ackTo: false };
     a.S.modal = { kind: 'customs', iv: ivNo };
     draw();
     var src = a.S.src;
@@ -276,14 +288,17 @@ C01.customs = (function () {
       encodeURIComponent('_crcf9_booking_id_value eq ' + iv.booking_guid)).then(function (j) {
       var cells = {}; (j.value || []).forEach(function (c, i) { cells[i] = c; }); return C01.compass.formTypeBlank(cells);
     }).catch(function () { return null; }) : Promise.resolve(null)) : Promise.resolve(0);
-    Promise.all([pMail, pSent, pBl, pFt, pCb]).then(function (r) {
+    /* v0.3.68 (R12Y7 · #367 Part 2): customs_s1.json = エンジンの meta.customs_s1 がある時だけ読む (会社のメールボックスの ① · 最近の宛先) */
+    var pS1 = a.S.meta && a.S.meta.customs_s1 ? src.getJson(String(a.S.meta.customs_s1)).then(function (x) { a.S.customsS1 = x; }, function () { a.S.customsS1 = a.S.customsS1 || null; }) : Promise.resolve();
+    Promise.all([pMail, pSent, pBl, pFt, pCb, pS1]).then(function (r) {
       if (!st || st.iv !== ivNo) return;
       st.mail = r[0]; st.sent = r[1] || []; st.buyer = (r[2] || {}).buyer || ''; st.si = (r[2] || {}).si; st.ftBlank = r[3];
+      pickRoute(iv);
       var h = st.buyer ? blHistory(st.buyer, ivNo) : [];
       var pb = pickBl(h);
       st.bl = pb.v; st.blWhy = pb.why;
       st.prevCons = h.length ? (h[h.length - 1].cons || '') : null;
-      return brokerSig(st.mail, brokerGuess(st.mail)).then(function (gs) {
+      return brokerSig(mailLike(), brokerGuess(mailLike())).then(function (gs) {
         if (!st || st.iv !== ivNo) return;
         st.broker = gs.broker; st.person = gs.person; st.brokerDom = gs.dom; st.nameSrc = gs.src;
         st.step = 'D-03';
@@ -311,27 +326,100 @@ C01.customs = (function () {
       draw();
     }).catch(function (e) { if (st && st.iv === ivNo) { st.d03 = { ok: false, error: e.message }; st.step = '完了'; draw(); } });
   }
+  /* v0.3.68 (R12Y7 · #367 Part 2): 宛先の道を決める (確認窓を開いた時 1 回) */
+  function pickRoute(iv) {
+    if (st.mail) { st.route = 's1_reply'; return; }
+    var S = api().S, sh = S.customsS1 && S.customsS1.ivs && S.customsS1.ivs[st.iv];
+    if (sh && sh.last) { st.route = 's1_shared'; st.shared = sh; return; }
+    var p = proposal(iv, st.buyer);
+    if (p) {
+      st.route = 'proposal'; st.prop = p;
+      var me = String((S.me || {}).email || '').toLowerCase();
+      var fmt = function (xs) { return (xs || []).filter(function (x) { return x.a && x.a !== me; }).map(function (x) { return x.a; }).join(', '); };
+      st.editTo = fmt(p.to); st.editCc = fmt(p.cc);
+      return;
+    }
+    st.route = '';
+  }
+  /* 「この港へ最近送った宛先」: ① TOOL の送付記録 (試験を除く) で 同じ POL · 同じバイヤー の一番新しいもの → ② 無ければ エンジンの by_pol (同じ POL の一番新しい ① · バイヤーは分からない = 赤) */
+  function proposal(iv, buyer) {
+    var S = api().S, best = null, pol = String((iv && iv.pol) || '').toUpperCase();
+    if (!pol) return null;
+    var ad = function (xs) { return (xs || []).map(function (a) { return typeof a === 'string' ? { a: a.toLowerCase(), n: '' } : a; }); };
+    if (buyer) {
+      ((S.jik && S.jik.ivs) || []).forEach(function (x) {
+        if (String(x.pol || '').toUpperCase() !== pol || x.iv_no === iv.iv_no) return;
+        records(x).forEach(function (r) {
+          var v = r.value;
+          if (v.test || v.buyer_id !== buyer || !(v.to || []).length) return;
+          if (!best || String(r.at) > String(best.at)) best = { at: String(r.at), to: ad(v.to), cc: ad(v.cc), src: 'buyer', iv: x.iv_no };
+        });
+      });
+    }
+    if (best) return best;
+    var bp = S.customsS1 && S.customsS1.by_pol && S.customsS1.by_pol[pol];
+    if (bp && (bp.to || []).length) return { at: bp.at, to: ad(bp.to), cc: ad(bp.cc), src: 'pol', n: bp.n };
+    return null;
+  }
+  /* 宛名さがし (brokerGuess) 用 — 道 2 · 3 でも ① と同じ形 */
+  function mailLike() {
+    if (st.mail) return st.mail;
+    if (st.route === 's1_shared') return { s1: { subject: st.shared.s1.subject, to: [] }, last: st.shared.last, conv: [] };
+    if (st.route === 'proposal') return { s1: null, last: { from: '', from_name: '', to: st.prop.to, cc: st.prop.cc }, conv: [] };
+    return null;
+  }
+  var ADDR_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
+  function parseAddrs(t) { return String(t || '').split(/[\s,;、，]+/).map(function (x) { return x.trim().toLowerCase(); }).filter(Boolean); }
   function recips() {
     var me = String((api().S.me || {}).email || '').toLowerCase();
-    var L = st.mail && st.mail.last;
-    if (!L) return { to: [], cc: [] };
     var seen = {};
     var pick = function (xs) { return xs.filter(function (x) { var k = x.a; if (!k || k === me || seen[k]) return false; seen[k] = 1; return true; }); };
+    if (st.route === 'proposal') {
+      return { to: pick(parseAddrs(st.editTo).map(function (a) { return { a: a, n: '' }; })), cc: pick(parseAddrs(st.editCc).map(function (a) { return { a: a, n: '' }; })) };
+    }
+    var L = st.route === 's1_reply' ? st.mail && st.mail.last : st.route === 's1_shared' ? st.shared.last : null;
+    if (!L) return { to: [], cc: [] };
     var to = pick([{ a: L.from, n: L.from_name }].concat(L.to || []));
-    var cc = pick(L.cc || []);
+    var ccs = (L.cc || []).slice();
+    /* 道 2: ① の担当職員を CC に (既定 · 外せる) — 他の職員の会話に入るので 担当者にも見えるように */
+    if (st.route === 's1_shared' && st.addStaff && st.shared.staff) ccs.push({ a: st.shared.staff, n: st.shared.staff_name || '' });
+    var cc = pick(ccs);
     return { to: to, cc: cc };
   }
+  function stripRe(s) { return String(s || '').replace(/^\s*((re|fw|fwd|返信|転送)\s*[:：]\s*)+/i, '').trim(); }
   function subject() {
+    var t = (testMode() ? '[test] ' : '') + '【通関書類送付_' + st.iv + '】';
+    if (st.route === 's1_shared') return t + 'RE: ' + stripRe(st.shared.s1.subject);
+    if (st.route === 'proposal') { var iv = api().ivById(st.iv) || {}; return t + 'BKG#' + (iv.bkg_no || '') + ' CUT ' + api().md(iv.cy_cut); }
     var s1 = st.mail && st.mail.s1;
-    var base = s1 ? s1.subject.replace(/^\s*((re|fw|fwd|返信|転送)\s*[:：]\s*)+/i, '').trim() : '';
-    return (testMode() ? '[test] ' : '') + '【通関書類送付_' + st.iv + '】Re: ' + base;
+    return t + 'Re: ' + (s1 ? stripRe(s1.subject) : '');
+  }
+  /* 自社の外のドメイン (宛先 · CC) */
+  function extDoms(rc) {
+    var our = String((C01.CUSTOMS && C01.CUSTOMS.ourDomain) || 'leenearcorp.com').toLowerCase(), d = {};
+    rc.to.concat(rc.cc).forEach(function (x) { var k = domOf(x.a); if (k && k !== our) d[k] = 1; });
+    return Object.keys(d).sort();
+  }
+  /* 道 2: 本文の下に ① の一番新しいメールを引用 (エンジンが GET した本文 · 文字) */
+  function quoteHtml(L) {
+    var esc = api().esc, line = function (xs) { return (xs || []).map(function (x) { return x.n ? x.n + ' <' + x.a + '>' : x.a; }).join('; '); };
+    var head = '-----Original Message-----\nFrom: ' + (L.from_name ? L.from_name + ' <' + L.from + '>' : L.from) + '\nSent: ' + String(L.at || '').replace('T', ' ').slice(0, 16) +
+      '\nTo: ' + line(L.to) + (L.cc && L.cc.length ? '\nCc: ' + line(L.cc) : '') + '\nSubject: ' + (L.subject || '') + '\n\n';
+    return '<div style="font-family:\'Meiryo\',\'Yu Gothic\',sans-serif;font-size:10pt;color:#333;border-top:1px solid #b5c4df;margin-top:12pt;padding-top:6pt">' +
+      esc(head + String(L.body || '')).replace(/\n/g, '<br>') + '</div>';
   }
   /* 送れない理由 (送信ボタンを止める) */
   function blockers() {
     var a = api(), out = [];
     var r = st.d03;
     if (!a.graphMode() || !(a.S.me && a.S.me.email) || typeof a.S.src.customsSend !== 'function') out.push('Microsoft 365 でログインした職員だけ送信できます');
-    if (!st.mail) out.push('通関依頼メールが見つかりません（あなたのメールボックスに ① 通関依頼 がありません）');
+    if (!st.route) out.push('宛先がありません（① 通関依頼 も 最近この港へ送った宛先 もありません）');
+    if (st.route === 's1_shared' && !st.shared.last.body_ok) out.push('① の本文をまだ読めていません — 数分後に もう一度開いてください');
+    if (st.route === 'proposal') {
+      var badA = parseAddrs(st.editTo).concat(parseAddrs(st.editCc)).filter(function (x) { return !ADDR_RE.test(x); });
+      if (badA.length) out.push('アドレスの形が違います（' + badA.join(' / ') + '）');
+      if (!st.ackTo) out.push('宛先を確認して 「宛先を確認しました」 にチェックしてください');
+    }
     if (!r || !r.ok) out.push('PDF がありません' + (r && r.error ? '（' + r.error + '）' : ''));
     if (r && r.ok) {
       if (r.iv !== st.iv) out.push('D-03 の IV が違います（' + r.iv + '）');
@@ -345,7 +433,7 @@ C01.customs = (function () {
       else if (st.ftBlank > 0) out.push('形態・タイプ が空欄 ' + st.ftBlank + '台 — Compass入力 で入れてください');
     }
     var rc = recips();
-    if (st.mail && !rc.to.length) out.push('宛先がありません');
+    if (st.route && !rc.to.length) out.push('宛先がありません');
     if (/（通関業者の会社名）|（担当者名）/.test(st.body || '')) out.push('本文の （通関業者の会社名） · （担当者名） を書き換えてください');
     if (/このメールは担当者確認後に送信してください/.test(st.body || '')) out.push('本文に 下書きの案内文 が残っています');
     if ((lastLive(a.ivById(st.iv)) || st.sent.some(function (x) { return !x.test; })) && !st.again) out.push('送付済みです — 再送付する時は 「もう一度送る」 にチェック');
@@ -375,20 +463,38 @@ C01.customs = (function () {
     }
     // 宛先
     var rc = recips();
-    h += '<section class="c01-csec"><h4>宛先（① 通関依頼 の会話の一番新しいメールに 全員に返信）</h4>';
-    if (!st.mail) {
-      h += ready ? '<p class="c01-warn2">通関依頼メールが見つかりません — 送れません（自動の送信はしません）。① がほかの人のメールボックスにある時は その人が送ってください。</p>' + suggest() : '<p class="t2">確認中…</p>';
+    var RH = { s1_reply: '宛先（① 通関依頼 の会話の一番新しいメールに 全員に返信）', s1_shared: '宛先（① の会話と同じ宛先へ 新しいメール · ① を引用）', proposal: '宛先（この港へ最近送った宛先 · 直せます）' };
+    h += '<section class="c01-csec" data-croute="' + esc(st.route || (ready ? 'none' : '')) + '"><h4>' + esc(RH[st.route] || '宛先') + '</h4>';
+    var addrs = function (xs) { return xs.map(function (x) { return esc(x.n ? x.n + ' <' + x.a + '>' : x.a); }).join('<br>') || '—'; };
+    if (!ready && !st.route) {
+      h += '<p class="t2">確認中…</p>';
+    } else if (!st.route) {
+      h += '<p class="c01-warn2" data-cnoroute>宛先がありません — 送れません（① 通関依頼 が見つからず、この港 ' + esc(iv.pol || '') + ' へ最近送った宛先もありません）。</p>';
+    } else if (st.route === 'proposal') {
+      var P = st.prop;
+      h += P.src === 'buyer' ? '<p class="c01-cy" data-cprop="buyer">①がありません — 宛先を確認してください（同じ港 · 同じバイヤーへ ' + esc(a.md(String(P.at).slice(0, 10))) + ' に送った宛先）</p>'
+        : '<p class="c01-cr" data-cprop="pol">①がありません — 宛先を必ず確認（同じ港 ' + esc(iv.pol || '') + ' の一番新しい ① 通関依頼 ' + esc(a.md(String(P.at).slice(0, 10))) + ' の宛先 · バイヤーは確かめていません）</p>';
+      h += '<table class="c01-ctab"><tr><th>To</th><td><textarea class="c01-caddr" data-cedit="to" rows="2">' + esc(st.editTo) + '</textarea></td></tr>' +
+        '<tr><th>CC</th><td><textarea class="c01-caddr" data-cedit="cc" rows="3">' + esc(st.editCc) + '</textarea></td></tr></table>' +
+        '<p class="t2">アドレスは 「,」 か 改行 で区切ります。</p><label class="c01-cack"><input type="checkbox" data-cackto' + (st.ackTo ? ' checked' : '') + '> 宛先を確認しました</label>';
     } else {
-      h += '<table class="c01-ctab"><tr><th>To</th><td>' + rc.to.map(function (x) { return esc(x.n ? x.n + ' <' + x.a + '>' : x.a); }).join('<br>') + '</td></tr>' +
-        '<tr><th>CC</th><td>' + (rc.cc.map(function (x) { return esc(x.n ? x.n + ' <' + x.a + '>' : x.a); }).join('<br>') || '—') + '</td></tr>' +
-        '<tr><th>返信先</th><td class="t2">' + esc(String(st.mail.last.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(st.mail.last.from_name || st.mail.last.from) + ' · 会話 ' + st.mail.n_conv + ' 通</td></tr></table>';
+      var L = st.route === 's1_reply' ? st.mail.last : st.shared.last;
+      h += (st.route === 's1_shared' ? '<p class="c01-cy" data-cshared>① は ' + esc(st.shared.staff_name || a.staffName(st.shared.staff) || st.shared.staff) + ' のメールにあります — 新しいメールとして同じ宛先に送ります</p>' : '') +
+        '<table class="c01-ctab"><tr><th>To</th><td>' + addrs(rc.to) + '</td></tr><tr><th>CC</th><td>' + addrs(rc.cc) + '</td></tr>' +
+        '<tr><th>' + (st.route === 's1_reply' ? '返信先' : '① の最新') + '</th><td class="t2">' + esc(String(L.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(L.from_name || L.from) + ' · 会話 ' + (st.route === 's1_reply' ? st.mail.n_conv : st.shared.n_conv) + ' 通</td></tr></table>';
+      if (st.route === 's1_shared' && st.shared.staff) h += '<label class="t2"><input type="checkbox" data-cstaff' + (st.addStaff ? ' checked' : '') + '> 担当の ' + esc(st.shared.staff_name || st.shared.staff) + ' を CC に入れる</label>';
+      if (st.route === 's1_shared' && !st.shared.last.body_ok) h += '<p class="c01-warn2">① の本文をまだ読めていません（エンジンの次の周期で読みます）</p>';
+    }
+    if (st.route) {
+      var xd = extDoms(rc);
+      if (xd.length >= 2) h += '<p class="c01-cy" data-cdoms>宛先に 会社の外のドメインが ' + xd.length + ' つあります（' + esc(xd.join(' · ')) + '）— 通関業者 以外が入っていないか確認してください</p>';
       if (testMode()) h += '<p class="c01-trial">試験モード: 実際は ' + esc((a.S.me || {}).email || '') + ' だけに送ります（上の宛先には送りません）</p>';
     }
     h += '</section>';
     // 件名 · 本文
-    if (st.body == null && st.mail) st.body = bodyText(st);
-    h += '<section class="c01-csec"><h4>件名</h4><div class="mono c01-csubj">' + esc(st.mail ? subject() : '—') + '</div>' +
-      '<h4>本文（直せます · 下に 返信の元のメールが付きます）</h4>' + nameSrcLine() + '<textarea class="c01-cbodytxt" data-cbody rows="12">' + esc(st.body || '') + '</textarea></section>';
+    if (st.body == null && st.route && ready) st.body = bodyText(st);
+    h += '<section class="c01-csec"><h4>件名</h4><div class="mono c01-csubj">' + esc(st.route ? subject() : '—') + '</div>' +
+      '<h4>本文（直せます' + (st.route === 's1_reply' ? ' · 下に 返信の元のメールが付きます' : st.route === 's1_shared' ? ' · 下に ① の一番新しいメールを引用します' : '') + '）</h4>' + nameSrcLine() + '<textarea class="c01-cbodytxt" data-cbody rows="12">' + esc(st.body || '') + '</textarea></section>';
     // 選んだ値
     h += '<section class="c01-csec"><h4>D-03 の選択（既定と理由 · 変えると PDF を作り直します）</h4>';
     if (r && r.ok) {
@@ -424,15 +530,6 @@ C01.customs = (function () {
     a.showModal(h, 'c01-customs');
     bind();
   }
-  function suggest() {
-    /* #352: ① が無い時 = 「同じ港へ最近送った宛先」 を提案として出すだけ (自動の送信はしない) */
-    var a = api(), esc = a.esc, iv = a.ivById(st.iv) || {}, seen = {}, out = [];
-    ((a.S.jik && a.S.jik.ivs) || []).forEach(function (x) {
-      if (x.pol !== iv.pol || x.iv_no === iv.iv_no) return;
-      records(x).forEach(function (r) { if (!r.value.test) (r.value.to || []).concat(r.value.cc || []).forEach(function (m) { if (!seen[m]) { seen[m] = 1; out.push(m); } }); });
-    });
-    return out.length ? '<p class="t2">参考（同じ港 ' + esc(iv.pol || '') + ' へ最近送った宛先 · 提案だけ）: ' + out.slice(0, 8).map(esc).join(' · ') + '</p>' : '<p class="t2">参考: 同じ港へ最近送った記録はありません</p>';
-  }
   function bind() {
     var m = document.getElementById('c01-modal');
     if (!m) return;
@@ -448,6 +545,13 @@ C01.customs = (function () {
     if (ag) ag.onchange = function () { st.again = ag.checked; draw(); };
     var ak = q('[data-cack]');
     if (ak) ak.onchange = function () { st.ack = ak.checked; draw(); };
+    var sf = q('[data-cstaff]');
+    if (sf) sf.onchange = function () { st.addStaff = sf.checked; draw(); };
+    var at = q('[data-cackto]');
+    if (at) at.onchange = function () { st.ackTo = at.checked; draw(); };
+    m.querySelectorAll('[data-cedit]').forEach(function (el) {
+      el.onchange = function () { if (el.getAttribute('data-cedit') === 'to') st.editTo = el.value; else st.editCc = el.value; st.ackTo = false; draw(); };
+    });
     m.querySelectorAll('[data-cpick]').forEach(function (el) { el.onchange = function () { st.over[el.getAttribute('data-cpick')] = +el.value; st.ack = false; makePdf(); }; });
     m.querySelectorAll('[data-cpod]').forEach(function (el) {
       el.onchange = function () {
@@ -469,13 +573,16 @@ C01.customs = (function () {
     var r = st.d03, rc = recips(), iv = a.ivById(st.iv), test = testMode();
     var again = !!(lastLive(iv) || st.sent.some(function (x) { return !x.test; }));
     var subj = subject();
+    var RW = { s1_reply: '① に 全員に返信', s1_shared: '① と同じ宛先へ 新しいメール（① は ' + ((st.shared && (st.shared.staff_name || st.shared.staff)) || '') + ' のメール）', proposal: '最近この港へ送った宛先（提案 · 確認済み）' };
     var msg = (test ? '【試験】 あなた (' + a.S.me.email + ') だけに送ります。' : st.iv + ' の通関書類を 宛先 ' + rc.to.length + ' 件 · CC ' + rc.cc.length + ' 件 に送ります（あなたのメールから）。') +
-      '\n件名: ' + subj + '\n添付: ' + r.file + '（' + r.pages + ' ページ）\nよろしいですか？';
+      '\n宛先の道: ' + RW[st.route] + '\n件名: ' + subj + '\n添付: ' + r.file + '（' + r.pages + ' ページ）\nよろしいですか？';
     if (!window.confirm(msg)) return;
     if (again && !window.confirm('この IV はすでに送付済みです。本当にもう一度送りますか？')) return;
     st.busy = true; st.sendErr = ''; draw();
     var ivNo = st.iv;
-    a.S.src.customsSend({ replyToId: st.mail.last.id, conv: null, subject: subj, html: bodyHtml(st.body || ''), pdf_b64: r.pdf_b64, file: r.file,
+    var route = st.route;
+    a.S.src.customsSend({ replyToId: route === 's1_reply' ? st.mail.last.id : null, newMail: route !== 's1_reply', conv: null, subject: subj,
+      html: bodyHtml(st.body || '') + (route === 's1_shared' ? quoteHtml(st.shared.last) : ''), pdf_b64: r.pdf_b64, file: r.file,
       to: rc.to.map(function (x) { return x.a; }), cc: rc.cc.map(function (x) { return x.a; }) }).then(function (res) {
       return a.writeAction(a.mkAction('customs_sent', { iv: ivNo, ct: null, field: null, source: null,
         value: { test: res.test, again: again, subject: subj, to: res.to, cc: res.cc, to_n: res.to.length, cc_n: res.cc.length,
@@ -484,7 +591,9 @@ C01.customs = (function () {
           bl: r.picks.bl.v, buyer_id: (r.info || {}).buyer_id || st.buyer || '', consignee: (r.info || {}).consignee || '',
           red: (r.warnings || []).filter(function (w) { return w.red; }).map(function (w) { return w.item; }),
           real_to_n: rc.to.length, real_cc_n: rc.cc.length, broker_dom: st.brokerDom || '', broker_line: String(st.body || '').split(/\r?\n/)[0].trim(),
-          broker_person: personLine(st.body), name_src: st.nameSrc || null } }));
+          broker_person: personLine(st.body), name_src: st.nameSrc || null, route: route,
+          s1_k: route === 's1_shared' ? st.shared.last.k : undefined, s1_staff: route === 's1_shared' ? st.shared.staff : undefined,
+          prop_src: route === 'proposal' ? st.prop.src : undefined } }));
     }).then(function () {
       a.toast((test ? '試験送信しました（あなた宛て）' : '送信しました') + ' — ' + ivNo, 'ok');
       st = null; a.closeModal(); a.render();
@@ -535,5 +644,6 @@ C01.customs = (function () {
     return '<div class="c01-cpods">' + h + '</div>' + (sub ? '<div class="t2 c01-cpodsub" data-cpodsub>' + esc(sub) + '</div>' : '');
   }
   return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
-    _greeting: greeting, _sigCompany: sigCompany };
+    _greeting: greeting, _sigCompany: sigCompany, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
+    _subject: function () { return st ? subject() : null; } };
 })();

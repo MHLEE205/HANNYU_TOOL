@@ -328,6 +328,49 @@
     if (isNaN(until) || typeof nowMs !== 'number' || isNaN(nowMs)) return true;
     return nowMs < until;
   }
+  /* v0.3.68 (R12Y7 · #367 Part 0): COMPASS が もう実況表と同じ IV (他の道で入力済) = 「COMPASS と一致を確認（入力済にする）」。
+     条件: 全員 自動OK・確認済 (all_ok) · スキップ行 0 · PATCH 0 · 警告 0 · DIFF/CHOOSE/FILL/PLAN 0 · 各行 SAME 1 つ以上 (CT は SAME)。
+     checked = 行ごとの SAME の項目 (before = after = 今の COMPASS の値) → エンジンは 入力の時と同じく 行を固定 (#307) · cells は [] (PATCH なし) */
+  var VERIFY_BAD = ['DIFF', 'CHOOSE', 'FILL', 'PLAN'];
+  function verifyPlan(res) {
+    var rows = (res && res.rows) || [];
+    if (!res || !res.all_ok) return { ok: false, why: (res && res.button && res.button.reason) || '自動OK・確認済 でない行があります', checked: [] };
+    if (!rows.length) return { ok: false, why: '行がありません', checked: [] };
+    var checked = [], why = null;
+    rows.forEach(function (r) {
+      if (why) return;
+      if (r.skip) { why = 'COMPASS と比べられない行があります'; return; }
+      if (Object.keys(r.patch || {}).length) { why = '入力する値があります'; return; }
+      if ((r.warnings || []).length) { why = '警告のある行があります'; return; }
+      if (r.cells.some(function (c) { return VERIFY_BAD.indexOf(c.state) >= 0; })) { why = 'COMPASS と違う値・空欄があります'; return; }
+      var same = r.cells.filter(function (c) { return c.state === 'SAME'; });
+      if (!same.some(function (c) { return c.field === 'ct'; })) { why = 'CT が COMPASS と同じではありません'; return; }
+      var v = {};
+      same.forEach(function (c) { v[c.dv_field] = c.now === undefined ? null : c.now; });
+      checked.push({ ct_id: r.ct_id, fields: Object.keys(v).sort(), before: JSON.parse(JSON.stringify(v)), after: v });
+    });
+    if (why) return { ok: false, why: why, checked: [] };
+    checked.sort(function (a, b) { return String(a.ct_id).localeCompare(String(b.ct_id)); });
+    return { ok: true, why: null, checked: checked };
+  }
+  /* 確認した値の sha (記録用 · 16 桁 · crypto.subtle が無い時は FNV-1a 64) */
+  function shaText(text) {
+    var s = String(text);
+    var C = (typeof crypto !== 'undefined' && crypto.subtle) ? crypto : null;
+    if (C && typeof TextEncoder !== 'undefined') {
+      return C.subtle.digest('SHA-256', new TextEncoder().encode(s)).then(function (buf) {
+        return Array.prototype.map.call(new Uint8Array(buf), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('').slice(0, 16);
+      });
+    }
+    var h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (var i = 0; i < s.length; i++) { h1 = Math.imul(h1 ^ s.charCodeAt(i), 0x01000193) >>> 0; h2 = Math.imul(h2 ^ s.charCodeAt(i), 0x85ebca6b) >>> 0; }
+    return Promise.resolve(('00000000' + h1.toString(16)).slice(-8) + ('00000000' + h2.toString(16)).slice(-8));
+  }
+  function verifyAction(actionId, iv, by, at, checked, sha) {
+    var a = compassDoneAction(actionId, iv, by, at, []);
+    a.value.verify_only = true; a.value.checked = checked; a.value.compass_sha = sha;
+    return a;
+  }
   function compassDoneAction(actionId, iv, by, at, cells) {
     return { schema_version: 1, action_id: actionId, action: 'compass_done', iv: iv, ct: null, field: null,
       value: { cells: cells, rules_version: RULES_VERSION, mode: 'graph' }, source: null, by: by, at: at, queue_id: null };
@@ -335,7 +378,7 @@
 
   var api = { RULES_VERSION: RULES_VERSION, FIELDS: FIELDS, STATES: STATES, WARN_CODES: WARN_CODES, toInt: toInt, normText: normText,
     putText: putText, normCode: normCode, nowValue: nowValue, targetType: targetType, compareRow: compareRow, ivAllOk: ivAllOk,
-    compareIv: compareIv, followTarget: followTarget, sameCond: sameCond, FOLLOW_OPT: FOLLOW_OPT, Writer: Writer, compassDoneAction: compassDoneAction, trialAt: trialAt, NumInvalid: NumInvalid,
+    compareIv: compareIv, followTarget: followTarget, sameCond: sameCond, FOLLOW_OPT: FOLLOW_OPT, Writer: Writer, compassDoneAction: compassDoneAction, verifyPlan: verifyPlan, verifyAction: verifyAction, shaText: shaText, trialAt: trialAt, NumInvalid: NumInvalid,
     FORM_DV: FORM_DV, FORM_BIND: FORM_BIND, formBind: formBind, bindGuid: bindGuid, formTypeBlank: formTypeBlank, typeHint: typeHint };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.C01 = root.C01 || {};
