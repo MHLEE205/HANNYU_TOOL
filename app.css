@@ -324,6 +324,11 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-suspect { display: inline-block; padding: 0 6px; border-radius: 4px; border: 1px solid var(--over-chip); color: var(--over-chip); font-size: 10.5px; font-weight: 800; cursor: help; }
 .c01-overhead { font-size: 12px; }
 .lg.over { background: var(--row-over); border: 1px solid var(--row-over-b); }
+/* v0.3.65 (R12Y Part 1 · 구멍 6): 枠未定 (B) = 薄い色 (本当の枠外 (A) の濃い赤 と分ける) */
+.c01-wakumi, .c01-wakumi-head { display: inline-block; padding: 1px 7px; border-radius: 4px; background: #fde8c8; color: #8a4b00; border: 1px solid #f0c27a; font-size: 11px; font-weight: 700; }
+.c01-wakumi-head { font-size: 12px; }
+tr.c01-row.wakumi > td { background: #fffaf0; }
+.lg.wakumi { background: #fffaf0; border: 1px solid #f0c27a; }
 .lg.hum { background: var(--row-hum); border: 1px solid var(--row-hum-b); }   /* v0.3.60 (R11R) */
 .c01-row.over td .st-hum { color: var(--row-over-t); }
 /* v0.3.15 (R7N Part G): 原本 = 行と結び付いた書類だけ · 候補 · 搬入票なし（待ち） · 向き補正 · ✎ 修正 */

@@ -876,6 +876,11 @@ window.C01 = window.C01 || {};
       var freeCnt = free.filter(function (x) { return !x.wakuSkip; });
       var over = nSlots ? freeCnt.length : 0;
       if (over) freeCnt.forEach(function (x) { x.over = true; });
+      /* v0.3.65 (R12Y Part 1 · 구멍 6 · 형님 #354): エンジン rows[].waku_ab (out_waku_ab) — A = 本当の枠外 (業者の空き枠なし · 合う枠なし) /
+         B = 枠未定 (空き枠はある · 枠がまだ決まらない)。エンジンに無い = 前のまま (全部 COMPASS 枠外) */
+      var overB = over ? freeCnt.filter(function (x) { return x.r.waku_ab === 'B'; }) : [];
+      overB.forEach(function (x) { x.wakuB = true; });
+      var overA = over - overB.length;
       var freeIn = free.filter(function (x) { return !x.over; }), freeOver = free.filter(function (x) { return x.over; });
       /* v0.3.11 (R7J Part C-2): 同じブッキングに枠の決まっていない行があれば、空き枠は「未着」ではなく「割当待ち」 (行の数まで · 枠外の行は数えない) */
       unarr.slice(0, freeIn.length).forEach(function (x) { x.st = '割当待ち'; x.wait = '割当待ち'; x.waitTitle = 'このブッキングに枠の決まっていない行（未割当）があります — メールは届いている可能性'; });
@@ -888,7 +893,7 @@ window.C01 = window.C01 || {};
       list.forEach(function (x) { ivNo += 1; x.no = ivNo; no += 1; });
       var okN = rows.filter(function (x) { return isOk(x) && !x.over; }).length;
       var total = nSlots || rows.length + unarr.length;
-      out.push({ iv: iv, rows: list, okN: okN, total: total, over: over, nFree: free.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
+      out.push({ iv: iv, rows: list, okN: okN, total: total, over: over, overA: overA, overB: overB.length, nFree: free.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
     });
     return { groups: out, cnt: cnt, ov: ov };
   }
@@ -1021,7 +1026,8 @@ window.C01 = window.C01 || {};
         '<span class="mono">' + esc(iv.iv_no) + '</span>' +
         '<span class="t2">BKG ' + esc(iv.bkg_no || '') + '</span>' +
         '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
-        (g.over ? '<span class="c01-overhead" title="' + esc('行が COMPASS の枠 ' + g.total + ' を超える — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違い · COMPASS の入力漏れの可能性（赤の行）' + wakuWhy(g.iv)) + '">枠外 ' + g.over + '</span>' : '') +
+        (g.overA ? '<span class="c01-overhead" title="' + esc('行が COMPASS の枠 ' + g.total + ' を超える — 枠のない行 ' + g.overA + ' 行 = 間違って作られた行 · 割り当ての間違い · COMPASS の入力漏れの可能性（赤の行）' + wakuWhy(g.iv)) + '">枠外 ' + g.overA + '</span>' : '') +
+        (g.overB ? '<span class="c01-wakumi-head" title="' + esc('空き枠はありますが、まだ枠が決まっていない行 ' + g.overB + ' 行（品目 · 営業所などで枠を選べない — 写真 · 書類が届くと決まることがあります。急ぐ時は 「枠変更」 で枠を選んでください）') + '">枠未定 ' + g.overB + '</span>' : '') +
         '<span class="c01-flex"></span>' +
         (holdOpenN(iv.iv_no, ov) ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + holdOpenN(iv.iv_no, ov) + ')</button>' : '') +
         (otherList(iv, ov).length ? '<button class="c01-btn-sub c01-otherct" data-otherct="' + esc(iv.iv_no) + '" title="「他社のコンテナ」にした行（写真・書類をこの IV から外しています · 元に戻せます）">他社のコンテナ ' + otherList(iv, ov).length + '</button>' : '') +
@@ -1060,7 +1066,8 @@ window.C01 = window.C01 || {};
             '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>');
         if (x.dup_seal) stCell = '<span class="c01-over" title="' + esc('同じシール番号の行があります（' + x.dup_seal.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 入力の間違い · 読み違いの可能性') + '">シール重複</span> ' + stCell;
         if (x.dup_ct) stCell = '<span class="c01-over" title="' + esc('同じ CT 番号の行があります（' + x.dup_ct.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 同じコンテナの再送 · 読み違いの可能性') + '">CT重複</span> ' + stCell;
-        if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
+        if (x.over && x.wakuB) stCell = '<span class="c01-wakumi" title="空き枠はありますが、この行の枠がまだ決まっていません（品目 · 営業所などで選べない）— 写真 · 書類が届くと決まることがあります · 急ぐ時は 「枠変更」（台数には数えません）">枠未定</span> ' + stCell;   /* v0.3.65 (R12Y Part 1) */
+        else if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
         else if (x.wakuSkip) stCell = '<span class="c01-unassigned c01-wakuskip" title="CT が読めない写真の束です（行ではなく候補 · 枠外には数えません）— 確認・入力 の 「写真の CT」 でどのコンテナか選んでください">CTが読めない写真 · 候補あり</span> ' + stCell;   /* v0.3.45 (R9W 0-4b) */
         else if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         if (r.confirmed_suspect && x.st === '確認済') stCell += ' ' + suspectBadge(r);      /* v0.3.47 (R9Y Part 0-1): 確認済 でも 他社の疑い (値 · 状態は そのまま) */
@@ -1068,7 +1075,7 @@ window.C01 = window.C01 || {};
           esc(r.same_cand.role === 'fax' ? '写真の行と同じコンテナかもしれません（FAX の CT・シールの読み違い）— クリックで確認' : 'FAX の行と同じコンテナかもしれません — クリックで確認') + '">同一候補</button>';
         stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '') +
           (otherCtOn() && r.container_id ? ' <button class="c01-slotbtn c01-rowmenu" data-rowmenu="' + esc(x.key) + '" title="この行の操作（他社のコンテナ など）" aria-label="この行の操作">⋯</button>' : '');   /* v0.3.45 (R9W 0-3 · #290): 全ての行 (自動OK · 確認済 · 再確認 · 受信中) */
-        html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over ? ' over' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"' + (x.frozen ? ' data-frozen="1"' : '') + '><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
+        html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over && !x.wakuB ? ' over' : '') + (x.wakuB ? ' wakumi' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"' + (x.frozen ? ' data-frozen="1"' : '') + '><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
           '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r), wdSrc(r, x.human.work_date), x.st === '受信中' && r.has_docs === false) +
@@ -1083,7 +1090,8 @@ window.C01 = window.C01 || {};
     if (!b.groups.length) html += '<tbody><tr><td colspan="15" class="c01-empty">表示する IV がありません（担当港・絞り込みを確認してください）</td></tr></tbody>';
     html += '</table></div>';
     html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK（エンジン）</span><span><i class="lg hum"></i>確認済（人が確認）</span><span><small class="c01-inmark">✓入力済</small> = Compass入力 済み</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
-      (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠のない行 · 行が枠の数を超える）</span>' : '') +
+      (b.groups.some(function (g) { return g.overA; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠のない行 · 業者の空き枠なし）</span>' : '') +
+      (b.groups.some(function (g) { return g.overB; }) ? '<span><i class="lg wakumi"></i>枠未定（空き枠あり · 枠がまだ決まらない）</span>' : '') +
       '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった行だけ差し替え (スクロール位置そのまま) */
     var root = $('c01-main');

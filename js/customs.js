@@ -37,7 +37,8 @@ C01.customs = (function () {
     if (g.okN !== g.total) out.push(g.okN + '/' + g.total + '台');
     if (notOk) out.push('未完了 ' + notOk + '台');
     if (nMiss) out.push('メール未着 ' + nMiss + '台');
-    if (g.over) out.push('枠外 ' + g.over);
+    if (g.overA !== undefined ? g.overA : g.over) out.push('枠外 ' + (g.overA !== undefined ? g.overA : g.over));
+    if (g.overB) out.push('枠未定 ' + g.overB);              /* v0.3.65 (R12Y Part 1) */
     if (rows.some(function (x) { return x.dup_ct; })) out.push('CT重複');
     if (rows.some(function (x) { return x.dup_seal; })) out.push('シール重複');
     if (!g.compassDone) out.push('Compass入力未完了 ' + rows.filter(function (x) { return !x.frozen; }).length + '台');

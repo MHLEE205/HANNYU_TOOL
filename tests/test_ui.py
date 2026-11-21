@@ -4340,7 +4340,7 @@ def r11g_checks(page, root, shots, engine):
     man = {"schema_version": 1, "kind": "manual", **MAN.output()}
     ok("R11G manual.json = 엔진 스키마", SC.errors(man, SC.load("manual")) == [])
     # ① 매뉴얼 버튼 이름 = TOOL 화면 글자 (공개 전 자동 대조 · #305)
-    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "photo.html"))
+    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "js/customs.js", "photo.html"))   # customs.js = v0.3.65 (通関書類送付 버튼)
     miss = [b for b in man["buttons"] if b not in src]
     ok("R11G 매뉴얼 버튼 이름 = TOOL 화면 글자 (" + str(len(man["buttons"])) + "개 · 없음 0)", not miss and len(man["buttons"]) >= 20, miss)
     imiss = [x for x in man["images"] if not (TOOL / "docs" / x).is_file()]
@@ -4418,6 +4418,12 @@ def r11g_checks(page, root, shots, engine):
     page.evaluate("() => C01.app.tick()")
     page.wait_for_timeout(800)
     page.evaluate("() => C01.app.render()")
+    try:                                     # v0.3.65 (R12Y): 답이 화면에 뜰 때까지 (최대 8초) — 고정 800ms 는 통관 · 枠 출력이 늘어 tick 이 늦을 때 모자람
+        page.wait_for_function("() => document.querySelector('#gask-box .c01-ask-ref [data-man]')", timeout=8000)
+    except Exception:  # noqa: BLE001 — 안 뜨면 아래 ok 가 NG
+        page.evaluate("() => C01.app.tick()")
+        page.wait_for_timeout(1500)
+        page.evaluate("() => C01.app.render()")
     page.wait_for_timeout(300)
     ref = page.locator("#gask-box .c01-ask-ref [data-man]")
     txt = page.locator("#gask-box .c01-ask-txt").last.inner_text() if page.locator("#gask-box .c01-ask-txt").count() else ""
@@ -4626,7 +4632,7 @@ def main():
             ok("비교표 칸 색 (SAME · FILL · DIFF)", {"SAME", "FILL", "DIFF"} <= states, sorted(states))
             # v0.3.24 (R7X Part D · #214): 形態 = 入力しない (NOINPUT · TYPE_42_22 경고 없음) · CT 빈 칸 예정값 = PLAN
             ok("경고 표시 (EXISTING_DIFF · CT_DUP) · 形態 경고 없음", {"EXISTING_DIFF", "CT_DUP"} <= warns and "TYPE_42_22" not in warns, sorted(warns))
-            ok("v0.3.24 形態 = 入力しない (NOINPUT · PATCH 에 crcf9_type 없음)", "NOINPUT" in states and
+            ok("v0.3.65 (#361) タイプ 값 있는 칸 = そのまま (KEEPNOW · PATCH 에 crcf9_type 없음 · 예전 v0.3.24 NOINPUT 대신)", "KEEPNOW" in states and "NOINPUT" not in states and
                "crcf9_type" not in page.evaluate("JSON.stringify(C01.state.modal.res.patches)"), sorted(states))
             sb = page.locator("#compass-send")
             ok("送信 비활성 「DRY — 送信しません」", sb.is_disabled() and "DRY" in sb.inner_text(), sb.inner_text())
