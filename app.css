@@ -406,6 +406,10 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 .c01-linkscope { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: 4px 0 6px; font-size: 12px; } .c01-linkscope label { cursor: pointer; } .c01-linkscope label.dis { opacity: .5; cursor: default; } .c01-linkscope .c01-note2 { flex-basis: 100%; margin: 2px 0 0; }   /* v0.3.62 (R12B · #347): IVに連結 範囲 */
 .c01-free { color: var(--ok); font-weight: 600; }
 .c01-slotopt { grid-template-columns: 18px 22px 1fr auto auto auto; } .c01-slotopt.match { background: var(--accent-soft, rgba(80,140,255,.10)); } .c01-match { color: var(--accent); font-weight: 600; white-space: nowrap; }   /* v0.3.28 (R8D Part A): FAX の CT と同じ枠 */
+/* v0.3.67 (R12Y5 · #356 穴 3): IVに連結 「この書類は どれ？」 (a) 行 · (b) 移す空き枠 · 条件の違い */
+.c01-linkab { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; font-size: 12px; } .c01-linkab label { cursor: pointer; } .c01-linkab .c01-note2 { margin: 2px 0 0; }
+.c01-linkrows, .c01-linkmove { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; max-height: 260px; overflow-y: auto; } .c01-linkrows .c01-slotopt { grid-template-columns: 18px 40px auto 1fr auto auto; }
+.c01-conddiff { color: var(--warn, #b26b00); font-size: 11px; white-space: nowrap; }
 /* v0.3.24 (R7X Part B · #212): 理由 = 説明 1 行 + 「?」 (やること = hover · クリック / タッチで横に 1 行) · Part A: 「このまま確認（OK）」 */
 .c01-rdesc { display: inline; }
 .c01-rq { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; margin-left: 3px; border-radius: 50%; border: 1px solid var(--line, #bbb); background: transparent; color: var(--text2, #666); font-size: 10px; line-height: 1; cursor: pointer; vertical-align: 1px; }

@@ -121,7 +121,8 @@ window.C01 = window.C01 || {};
      「入力値のまま」 = _actions input_keep · 「新しい値でCompass再入力」 = input_diff_take → Compass入力 の画面 (エンジンの設定が off なら このカードは出ない) */
   var IDIFF = '入力後の差異';
   var IDIFF_WHY = { record: 'Compass入力の記録と、今の行の値・枠が違います', new_doc: 'Compass入力の後で届いた書類・写真の値が、入力した値と違います',
-    compass_slot: 'Compass入力の後で、COMPASS ではこの CT が別の枠に入っています' };
+    compass_slot: 'Compass入力の後で、COMPASS ではこの CT が別の枠に入っています',
+    merge_undo: 'まとめを元に戻しました — Compass 入力値は そのまま（入力済）' };   /* v0.3.67 (R12Y5 · 決定 #365 · エンジン act_merge_undo_keep_freeze) */
   var IDIFF_FIELDS = [['slot', '枠'], ['ct', 'CT番号'], ['seal', 'シール番号'], ['n_w', '正味重量'], ['t_w', '風袋重量'], ['bales', 'ベール数']];
   var FROZEN_LABEL = '入力済';   /* v0.3.60 (R11R · #334): 絞り込みの名前 = 入力済 (自動OK · 確認済 の両方) · 行は 「自動OK ✓入力済」 / 「確認済 ✓入力済」 */
   /* v0.3.60 (R11R · 決定 #334): 自動OK (エンジン = 緑) と 確認済 (人の手 = 青) を 画面全体で分ける — 規則はこの 1 か所だけ。
@@ -3225,6 +3226,13 @@ window.C01 = window.C01 || {};
   }
   function submitLabel(q) {
     if (VALUE_KINDS[q.kind]) return '未入力の項目があります';
+    if ((q.kind === HOLD || faxLinkOn(q)) && linkIvOn() && linkAbOn() && linkIvOf(q)) {     /* v0.3.67 (R12Y5) */
+      var lp = linkPlanOf(q, linkIvOf(q));
+      if (lp.block) return 'この枠には連結できません';
+      if (lp.need === 'ab') return 'この書類は どれ？ を選んでください';
+      if (lp.need === 'row') return '追加書類を付ける行を選んでください';
+      if (lp.need === 'move') return '今の行を移す空き枠を選んでください';
+    }
     if (q.kind === HOLD || faxLinkOn(q)) return linkIvOn() ? 'IV と枠を選んでください' : 'IV 連結は準備中';
     return '選んでください';
   }
@@ -3244,13 +3252,13 @@ window.C01 = window.C01 || {};
     if (q.kind === '写真のCT') return S.qchoice[q.queue_id] !== undefined || !!String(v.ct || '').trim();
     if (q.kind === PHOTO_SET) return !!q.ct;
     if (q.kind === VCHK) { var vr = rowByCid(q.container_id); return !!(vr && vr.r && (vr.r.ct || q.ct)); }
-    if (faxLinkOn(q)) return !!linkIvOf(q) && !!v.slot && (q.files || []).some(function (f) { return f.sha16; });
+    if (faxLinkOn(q)) return linkReady(q);                       /* v0.3.67 (R12Y5): (a)/(b) も同じ判断 (linkPlanOf) */
     if (q.kind === '未分類FAX') return S.qchoice[q.queue_id] !== undefined || !!String(v.iv || '').trim();
     if (q.kind === SAME) return !!q.same;
     if (q.kind === FOREIGN) return (q.files || []).some(function (f) { return f.sha16; });
     if (q.kind === REVIEW) return !!q.container_id;
     if (q.kind === IDIFF) return !!q.container_id;
-    if (q.kind === HOLD) return linkIvOn() && !!linkIvOf(q) && !!v.slot && (q.files || []).some(function (f) { return f.sha16; });
+    if (q.kind === HOLD) return linkIvOn() && linkReady(q);
     return false;
   }
   function noteOf(q, nv) {
@@ -3898,26 +3906,96 @@ window.C01 = window.C01 || {};
         cands.map(function (x) { return '<button class="c01-chip" data-linkiv="' + esc(x) + '" title="エンジンの候補">' + esc(x) + '</button>'; }).join('') + '</div>' : '');
     if (v.iv && !iv) h += '<p class="c01-err">この BKG / IV は進行中のブッキングにありません（選べません）' + (q.kind === '未分類FAX' && q.link_target ? ' · 終わったブッキングは 候補の IV だけ選べます' : '') + '</p>';
     if (iv) {
-      var used = slotRows(iv), seq = slotSeq(iv);
+      var used = slotRows(iv), seq = slotSeq(iv), ab = linkAbOn();
       var sl = (iv.slots || []).slice().sort(function (a, b) { return (seq[a.slot_guid] || 0) - (seq[b.slot_guid] || 0); });
-      h += '<div class="c01-linkslots"><div class="t2">' + esc(iv.iv_no + ' · BKG ' + (iv.bkg_no || '') + ' · 枠 ' + sl.length) + ' — 枠を選んでください（必須）</div>' +
-        sl.map(function (s, i) {
-          var r = used[s.slot_guid];
-          var on = v.slot === s.slot_guid;
-          var mt = q.kind === '未分類FAX' ? slotMatch(q, iv, s, r) : [];
-          return '<label class="c01-slotopt' + (r ? ' used' : ' free') + (on ? ' on' : '') + (mt.length ? ' match' : '') + '"><input type="radio" name="link-slot" value="' + esc(s.slot_guid) + '"' + (on ? ' checked' : '') + '>' +
-            '<span>' + (i + 1) + '</span><span>' + esc(s.packer || '') + ' ' + esc(s.plant || '') + '</span><span class="t2">' + esc((s.item || '') + ' · ' + md(s.work_date || '')) + '</span>' +
-            '<span class="' + (r ? 'c01-over' : 'c01-free') + '">' + (r ? '使用中 ' + esc(r.ct || '（CT 不明）') : '空き') + '</span>' +
-            (mt.length ? '<span class="c01-match" title="この枠の今の行の CT が FAX の CT と同じ">★ FAX の CT と同じ</span>' : '') + '</label>';
-        }).join('') + '</div>';
       var sel = sl.filter(function (s) { return s.slot_guid === v.slot; })[0];
-      if (sel && q.packer_guess && sel.packer && q.packer_guess.split('・').indexOf(sel.packer) < 0) h += '<p class="c01-warn2">書類の業者（' + esc(q.packer_guess) + '）と枠の業者（' + esc(sel.packer) + '）が違います</p>';
-      var all = sel && linkScopeOn() && v.scope === 'packer_all';
-      if (sel && used[sel.slot_guid] && !all) h += '<p class="c01-warn2">この枠にはもう行があります（' + esc(used[sel.slot_guid].ct || 'CT 不明') + '）</p>';
-      if (sel && linkScopeOn()) h += linkScopeHtml(sl, used, sel, v);   /* v0.3.62 (R12B · 決定 #347) */
+      if (ab) h += linkAskHtml(v);                                  /* v0.3.67 (R12Y5 · #356 穴 3): 枠の前に 「この書類は どれ？」 */
+      if (ab && v.ab === 'a') h += linkRowsHtml(q, iv, v, sl);
+      if (!ab || v.ab === 'b') {
+        h += '<div class="c01-linkslots"><div class="t2">' + esc(iv.iv_no + ' · BKG ' + (iv.bkg_no || '') + ' · 枠 ' + sl.length) + ' — 枠を選んでください（必須）</div>' +
+          sl.map(function (s, i) {
+            var r = used[s.slot_guid];
+            var on = v.slot === s.slot_guid;
+            var mt = q.kind === '未分類FAX' ? slotMatch(q, iv, s, r) : [];
+            var cd = ab && sel && s !== sel ? C01.linkAb.condDiff(sel, s) : [];
+            return '<label class="c01-slotopt' + (r ? ' used' : ' free') + (on ? ' on' : '') + (mt.length ? ' match' : '') + '"><input type="radio" name="link-slot" value="' + esc(s.slot_guid) + '"' + (on ? ' checked' : '') + '>' +
+              '<span>' + (i + 1) + '</span><span>' + esc(s.packer || '') + ' ' + esc(s.plant || '') + '</span><span class="t2">' + esc((s.item || '') + ' · ' + md(s.work_date || '')) + '</span>' +
+              '<span class="' + (r ? 'c01-over' : 'c01-free') + '">' + (r ? (ab ? esc(linkRowState(iv, r)) : '使用中 ' + esc(r.ct || '（CT 不明）')) : '空き') + '</span>' +
+              (cd.length ? '<span class="c01-conddiff" title="選んだ枠と条件が違います">違い: ' + esc(cd.join(' · ')) + '</span>' : '') +
+              (mt.length ? '<span class="c01-match" title="この枠の今の行の CT が FAX の CT と同じ">★ FAX の CT と同じ</span>' : '') + '</label>';
+          }).join('') + '</div>';
+        if (sel && q.packer_guess && sel.packer && q.packer_guess.split('・').indexOf(sel.packer) < 0) h += '<p class="c01-warn2">書類の業者（' + esc(q.packer_guess) + '）と枠の業者（' + esc(sel.packer) + '）が違います</p>';
+        var all = sel && linkScopeOn() && v.scope === 'packer_all';
+        if (sel && used[sel.slot_guid] && !all && !ab) h += '<p class="c01-warn2">この枠にはもう行があります（' + esc(used[sel.slot_guid].ct || 'CT 不明') + '）</p>';
+        if (sel && linkScopeOn()) h += linkScopeHtml(sl, used, sel, v);   /* v0.3.62 (R12B · 決定 #347) */
+        if (ab && sel && !all) h += linkMoveHtml(q, iv, v, sl, sel);
+      }
       if (faxCmpOn(q)) h += faxCmpHtml(q, iv);
     }
     return h + '<p class="c01-note2">連結すると この書類は選んだ IV · 枠のものとして次の判定（10 分ほど）で読みます。元に戻せます。</p></div>';
+  }
+  /* ── v0.3.67 (R12Y5 · 決定 #356 穴 3 · エンジン act_link_iv_ab → meta.link_iv_ab): 「この書類は どれ？」
+     (a) 既にある行の追加書類 = 行を選ぶ (書類で読んだ CT · シール · 重量が近い順 · ★ おすすめ) → その行の 参考の書類 (値 · 枠 · 判定は変わらない · 新しい行 0)
+     (b) 新しいコンテナ = 枠を選ぶ · 使用中の枠なら 今の行を移す空き枠を選ぶ (必須 · 連結 + 移動 = 1 つの記録 · 元に戻す = 両方) ·
+         入力済 (Compass入力 で固定) の行は動かせない · 空き枠が無ければ連結しない。計算 = js/linkab.js (C01.linkAb · node で試験)。
+     エンジン meta に link_iv_ab が無い (設定 off · 古いエンジン) = 今までの画面のまま ── */
+  function linkAbOn() { var m = (S.meta && S.meta.link_iv_ab) || []; return !!C01.linkAb && m.indexOf('attach') >= 0 && m.indexOf('move_to_slot') >= 0; }
+  function linkReads(q) {
+    var out = [];
+    (((q && q.fax_read) || {}).pages || []).forEach(function (p) { (p.rows || []).forEach(function (r) { out.push(r); }); });
+    return out;
+  }
+  function linkFrozen(iv) { var m = {}; (iv.rows || []).forEach(function (r) { if (r.input_frozen) m[r.container_id] = 1; }); return m; }
+  function linkPlanOf(q, iv) {
+    var v = S.qvals[q.queue_id] || {};
+    return C01.linkAb.plan({ ab: v.ab, rowId: v.row, slot: v.slot, move: v.move, scopeAll: linkScopeOn() && v.scope === 'packer_all',
+      slots: iv.slots || [], used: slotRows(iv), rows: iv.rows || [], frozen: linkFrozen(iv) });
+  }
+  /* 枠の行の状態: 使用中 CT · 自動OK / 確認済 / 再確認 / 受信中 · 入力済 (エンジン input_frozen) */
+  function linkRowState(iv, r) {
+    var st = r.input_frozen ? FROZEN_LABEL : statusOf(r, iv, overlay()).st;
+    return '使用中 ' + (r.ct || '（CT 不明）') + ' · ' + st;
+  }
+  function linkAskHtml(v) {
+    return '<div class="c01-linkab" id="link-ab"><div class="k">この書類は どれ？</div>' +
+      '<label><input type="radio" name="link-ab" value="a"' + (v.ab === 'a' ? ' checked' : '') + '> (a) 既にある行の追加書類（同じコンテナの書類）</label>' +
+      '<label><input type="radio" name="link-ab" value="b"' + (v.ab === 'b' ? ' checked' : '') + '> (b) 新しいコンテナ（枠を選ぶ）</label>' +
+      (v.ab ? '' : '<p class="c01-note2">先に どちらか選んでください</p>') + '</div>';
+  }
+  function linkSlotNo(sl, g) { for (var i = 0; i < sl.length; i++) if (sl[i].slot_guid === g) return i + 1; return null; }
+  function linkRowsHtml(q, iv, v, sl) {
+    var reads = linkReads(q), rk = C01.linkAb.rank(reads, iv.rows || []);
+    if (!rk.length) return '<p class="c01-note2" id="link-rows">CT のある行がありません — 新しいコンテナなら (b)</p>';
+    var p = linkPlanOf(q, iv);
+    return '<div class="c01-linkrows" id="link-rows"><div class="t2">どの行の追加書類ですか？' + (reads.length ? '（書類で読んだ CT · シール · 重量が近い順）' : '（書類の値が読めていないので 行の順）') + '</div>' +
+      rk.map(function (x) {
+        var r = x.row, on = v.row === r.container_id, no = linkSlotNo(sl, r.slot_guid);
+        var vals = [r.seal, r.n_w != null && r.n_w !== '' ? 'N/W ' + r.n_w : '', r.t_w != null && r.t_w !== '' ? 'T/W ' + r.t_w : ''].filter(Boolean).join(' · ');
+        return '<label class="c01-slotopt' + (on ? ' on' : '') + (x.rec ? ' match' : '') + '" data-rowct="' + esc(r.container_id) + '"><input type="radio" name="link-row" value="' + esc(r.container_id) + '"' + (on ? ' checked' : '') + '>' +
+          '<span>' + (no ? '枠 ' + no : '枠なし') + '</span><span class="mono">' + esc(r.ct) + '</span><span class="t2">' + esc(vals) + '</span>' +
+          '<span class="c01-over">' + esc(r.input_frozen ? FROZEN_LABEL : statusOf(r, iv, overlay()).st) + '</span>' +
+          (x.rec ? '<span class="c01-match" title="書類で読んだ値に近い行">★ おすすめ' + (x.why.length ? '（' + esc(x.why.join(' · ')) + '）' : '') + '</span>' :
+            x.why.length ? '<span class="t2">' + esc(x.why.join(' · ')) + '</span>' : '') + '</label>';
+      }).join('') + (p.block ? '<p class="c01-err" id="link-block">' + esc(p.block) + '</p>' : '') +
+      '<p class="c01-note2">選んだ行の 参考の書類 として付けます（新しい行は作りません · 枠 · 値 · 判定は変わりません）。元に戻せます。</p></div>';
+  }
+  function linkMoveHtml(q, iv, v, sl, sel) {
+    var u = slotRows(iv)[sel.slot_guid];
+    if (!u) return '';
+    var p = linkPlanOf(q, iv);
+    if (p.block) return '<p class="c01-err" id="link-block">' + esc(p.block) + '</p>';
+    var tg = p.targets || [];
+    var pick = tg.filter(function (s) { return s.slot_guid === v.move; })[0];
+    var cdp = pick ? C01.linkAb.condDiff(sel, pick) : [];
+    return '<div class="c01-linkmove" id="link-move"><p class="c01-warn2">この枠には ' + esc(u.ct || 'CT 不明の行') + ' が入っています。' + esc(u.ct || 'この行') + ' をどの枠に移しますか？（必須）</p>' +
+      tg.map(function (s) {
+        var on = v.move === s.slot_guid, cd = C01.linkAb.condDiff(sel, s);
+        return '<label class="c01-slotopt free' + (on ? ' on' : '') + '"><input type="radio" name="link-move" value="' + esc(s.slot_guid) + '"' + (on ? ' checked' : '') + '>' +
+          '<span>' + (linkSlotNo(sl, s.slot_guid) || '') + '</span><span>' + esc(s.packer || '') + ' ' + esc(s.plant || '') + '</span><span class="t2">' + esc((s.item || '') + ' · ' + md(s.work_date || '')) + '</span>' +
+          '<span class="c01-free">空き</span>' + (cd.length ? '<span class="c01-conddiff">違い: ' + esc(cd.join(' · ')) + '</span>' : '') + '</label>';
+      }).join('') +
+      (cdp.indexOf('作業予定日') >= 0 ? '<p class="c01-warn2">作業予定日の違う枠です — エンジンが移さないことがあります（その時は 枠変更 で）</p>' : '') +
+      '<p class="c01-note2">連結と 枠の移動を 1 つの記録にします（元に戻す = 両方）。</p></div>';
   }
   /* v0.3.62 (R12B Part 2 · 決定 #347 · エンジン s2_link_iv_all → meta.link_iv_scopes): 範囲 = 「この枠だけ」 (今まで) / 「業者の空き枠すべて」
      (選んだ枠の業者 · そのブッキングの空き枠 全部 → エンジンが 1 台ずつ いつもの枠の決め方で入れる · 残った台 = 確認)。値は原本のまま (人は範囲だけ) */
@@ -3938,7 +4016,7 @@ window.C01 = window.C01 || {};
     var setIv = function (t) {
       var v = S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {});
       if (v.iv === t) return;                                      /* Enter → blur の change で 2 回描かない */
-      v.iv = t; v.slot = null;
+      v.iv = t; v.slot = null; v.row = null; v.move = null;
       setTimeout(render, 0);
     };
     inp.onchange = function () { setIv(inp.value); };
@@ -3946,11 +4024,16 @@ window.C01 = window.C01 || {};
     if (faxCmpOn(q)) bindFaxCmp(q);                                /* v0.3.46 (R9X Part 00-2) */
     document.querySelectorAll('[data-linkiv]').forEach(function (b) { b.onclick = function () { setIv(b.getAttribute('data-linkiv')); }; });
     document.querySelectorAll('input[name="link-slot"]').forEach(function (r) {
-      r.onchange = function () { (S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {})).slot = r.value; render(); };
+      r.onchange = function () { var x = S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {}); x.slot = r.value; x.move = null; render(); };
     });
     document.querySelectorAll('input[name="link-scope"]').forEach(function (r) {   /* v0.3.62 (R12B · #347) */
       r.onchange = function () { (S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {})).scope = r.value; render(); };
     });
+    /* v0.3.67 (R12Y5 · #356 穴 3): (a)/(b) · 行 · 移す枠 */
+    var qv = function () { return S.qvals[q.queue_id] || (S.qvals[q.queue_id] = {}); };
+    document.querySelectorAll('input[name="link-ab"]').forEach(function (r) { r.onchange = function () { var x = qv(); x.ab = r.value; x.move = null; render(); }; });
+    document.querySelectorAll('input[name="link-row"]').forEach(function (r) { r.onchange = function () { qv().row = r.value; render(); }; });
+    document.querySelectorAll('input[name="link-move"]').forEach(function (r) { r.onchange = function () { qv().move = r.value; render(); }; });
   }
   /* ── v0.3.46 (R9X Part 00-2 · #295 · 형님 「IV 連結 をすると 同じ画面で値まで」): FAX で読んだ値 ↔ 選んだ IV の同じ CT の行の値 ──
      同じ = ✓ (確認する) · 違う = FAX / 行 / 直接入力 を選ぶ · 「連結して確認（OK）」 = link_iv + 確認した値 (confirm_value · 同じ queue_id) · 元に戻す = 両方。
@@ -4033,21 +4116,33 @@ window.C01 = window.C01 || {};
     acts.miss = miss;
     return acts;
   }
+  var LINK_NEED = { ab: 'この書類は どれ？ — (a) か (b) を選んでください', row: '追加書類を付ける行を選んでください', move: '今の行を移す空き枠を選んでください' };
+  function linkReady(q) {
+    var v = S.qvals[q.queue_id] || {}, iv = linkIvOf(q);
+    if (!iv || !(q.files || []).some(function (f) { return f.sha16; })) return false;
+    if (!linkAbOn()) return !!v.slot;
+    var p = linkPlanOf(q, iv);
+    return !p.block && !p.need && !!p.slot_guid;
+  }
   function linkIvAction(q, withConfirm) {
     var v = S.qvals[q.queue_id] || {};
     var iv = linkIvOf(q);
     if (!iv) { S.qmsg[q.queue_id] = 'この BKG / IV は進行中のブッキングにありません'; render(); return; }
-    var sl = (iv.slots || []).filter(function (s) { return s.slot_guid === v.slot; })[0];
+    var ab = linkAbOn(), p = ab ? linkPlanOf(q, iv) : null;          /* v0.3.67 (R12Y5 · #356 穴 3) */
+    if (p && (p.block || p.need === 'ab' || p.need === 'row' || p.need === 'move')) {
+      S.qmsg[q.queue_id] = p.block || LINK_NEED[p.need]; render(); return;
+    }
+    var sl = (iv.slots || []).filter(function (s) { return s.slot_guid === (p && p.slot_guid ? p.slot_guid : v.slot); })[0];
     if (!sl) { S.qmsg[q.queue_id] = '枠を選んでください'; render(); return; }
     var warn = [];
     if (q.packer_guess && sl.packer && q.packer_guess.split('・').indexOf(sl.packer) < 0) {
       if (!window.confirm('書類の業者（' + q.packer_guess + '）と枠の業者（' + sl.packer + '）が違います。この枠に連結しますか？')) return;
       warn.push('packer');
     }
-    var all = linkScopeOn() && v.scope === 'packer_all';             /* v0.3.62 (R12B · #347): 業者の空き枠すべて */
+    var all = linkScopeOn() && v.scope === 'packer_all' && !(p && p.mode === 'attach');   /* v0.3.62 (R12B · #347): 業者の空き枠すべて */
     if (all && !linkFreeSlots(iv.slots || [], slotRows(iv), sl.packer).length) { S.qmsg[q.queue_id] = sl.packer + ' の空き枠がありません'; render(); return; }
     var used = slotRows(iv)[sl.slot_guid];
-    if (used && !all) {
+    if (used && !all && !ab) {
       if (!window.confirm('この枠にはもう行があります（' + (used.ct || 'CT 不明') + '）。この枠に連結しますか？')) return;
       warn.push('slot_used');
     }
@@ -4055,6 +4150,7 @@ window.C01 = window.C01 || {};
     var a = mkAction('link_iv', { iv: iv.iv_no, ct: null, field: null, source: null, queue_id: q.queue_id,
       value: { sha16: hs, slot_guid: sl.slot_guid, bkg: iv.bkg_no || null, names: (q.files || []).map(function (f) { return f.name; }).filter(Boolean),
         packer_guess: q.packer_guess || null, warn: warn, scope: all ? 'packer_all' : undefined,
+        mode: p ? p.mode : undefined, container_id: p && p.container_id ? p.container_id : undefined, move_to_slot: p && p.move_to_slot ? p.move_to_slot : undefined,
         fax: q.kind === '未分類FAX' ? { issuer: q.issuer || null, ct: (q.fax_read && q.fax_read.ct) || [], engine_cand: (q.candidates || []).indexOf(iv.iv_no) >= 0, past: !!iv.fromTarget } : null } });
     var cacts = [];
     if (withConfirm) {
@@ -4065,7 +4161,9 @@ window.C01 = window.C01 || {};
     var chain = writeAction(a);
     cacts.forEach(function (x) { chain = chain.then(function () { return writeAction(x); }); });
     chain.then(function () {
-      toast(cacts.length ? 'IV に連結して 値を ' + cacts.length + ' つ確認しました（元に戻す = 両方）' : all ? 'IV に連結しました（業者の空き枠すべて · 次の判定で反映）' : 'IV に連結しました（次の判定で反映）', 'success');
+      toast(cacts.length ? 'IV に連結して 値を ' + cacts.length + ' つ確認しました（元に戻す = 両方）' : all ? 'IV に連結しました（業者の空き枠すべて · 次の判定で反映）' :
+        p && p.mode === 'attach' ? 'IV に連結しました（追加書類 · 次の判定で反映）' : p && p.move_to_slot ? 'IV に連結しました（' + (p.move_ct || '今の行') + ' を移す · 次の判定で反映 · 元に戻す = 両方）' :
+        'IV に連結しました（次の判定で反映）', 'success');
       S.qsel = nextQueueId(q); render();
     });
   }
