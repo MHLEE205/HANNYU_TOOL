@@ -386,16 +386,25 @@ C01.sources = (function () {
       }).sort(function (x, y) { return String(y.sentDateTime || '').localeCompare(String(x.sentDateTime || '')); });
       if (!xs.length) return null;
       var s1 = xs[0];
-      return self._mailGet('me/messages?$filter=' + encodeURIComponent("conversationId eq '" + s1.conversationId.replace(/'/g, "''") + "'") + '&$top=100&' + MSG_SEL).then(function (c) {
+      return self._mailGet('me/messages?$filter=' + encodeURIComponent("conversationId eq '" + s1.conversationId.replace(/'/g, "''") + "'") + '&$top=100&' + MSG_SEL + ',bodyPreview').then(function (c) {
         var L = (c.value || []).filter(function (m) { return !m.isDraft; }).sort(function (x, y) {
           return String(x.sentDateTime || x.receivedDateTime || '').localeCompare(String(y.sentDateTime || y.receivedDateTime || ''));
         });
         var last = L.length ? L[L.length - 1] : s1;
         var pack = function (m) { return { id: m.id, subject: m.subject || '', at: m.sentDateTime || m.receivedDateTime || '', from: addrOf(m.from), from_name: nameOf(m.from),
-          to: (m.toRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }), cc: (m.ccRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }) }; };
-        return { s1: pack(s1), last: pack(last), n_conv: L.length, s1_count: xs.length };
+          to: (m.toRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }), cc: (m.ccRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }),
+          preview: String(m.bodyPreview || '') }; };
+        /* v0.3.66 (R12Y3 · #366 ②): conv = 会話の全メール (古い順 · 本文の先頭 bodyPreview 付き) — 宛名 (会社名 · 担当者) を ① の会話から探す */
+        return { s1: pack(s1), last: pack(last), n_conv: L.length, s1_count: xs.length, conv: L.map(pack) };
       });
     });
+  };
+  /* v0.3.66 (R12Y3 · #366 ②): 通関業者のメール 1 通の本文 (返信の引用を除いた部分 · 文字) — 署名の会社名を探す (GET だけ) */
+  Graph.prototype.customsMailText = function (id) {
+    return this._fetch(GRAPH + 'me/messages/' + encodeURIComponent(id) + '?$select=uniqueBody', { headers: { Prefer: 'outlook.body-content-type="text"' } }).then(function (r) {
+      if (!r.ok) throw new Error('メールを読めません (' + r.status + ')');
+      return r.json();
+    }).then(function (j) { return String(((j || {}).uniqueBody || {}).content || ''); });
   };
   /* 送付済みの確認: 件名に 「通関書類送付_{IV}」 がある自社のメール (自分のメールボックスに見える分 · [test] は別に数える) */
   Graph.prototype.customsFindSent = function (iv) {
@@ -458,7 +467,7 @@ C01.sources = (function () {
       });
     }).then(function () {
       return Promise.all([J('GET', 'me/messages/' + encodeURIComponent(draft.id) + '?$select=subject,toRecipients,ccRecipients,bccRecipients,internetMessageId,conversationId'),
-        J('GET', 'me/messages/' + encodeURIComponent(draft.id) + '/attachments?$select=name,size')]);
+        J('GET', 'me/messages/' + encodeURIComponent(draft.id) + '/attachments?$select=name,size,isInline,contentType')]);
     }).then(function (r) {
       var d = r[0], at = r[1].value || [];
       var got = function (xs) { return (xs || []).map(addrOf).sort().join(','); };
@@ -466,7 +475,14 @@ C01.sources = (function () {
       if (got(d.toRecipients) !== to.slice().sort().join(',') || got(d.ccRecipients) !== cc.slice().sort().join(',') || (d.bccRecipients || []).length) {
         throw new Error('下書きの宛先が確認窓と違います — 送信しません（下書きは 下書き フォルダに残っています）');
       }
-      if (at.length !== 1 || at[0].name !== m.file) throw new Error('添付が ' + m.file + ' 1 つではありません — 送信しません（下書きは 下書き フォルダに残っています）');
+      /* v0.3.66 (R12Y3 · #366 ③): 全員に返信 の下書きには 元のメール本文の画像 (署名ロゴ · 貼り付け画像) が isInline=true の添付で付く (Graph の通常の動き) →
+         本文の表示用なのでそのまま残す (消すと引用本文の画像が壊れる)。確かめるのは 「isInline=false の添付 = ちょうど 1 つ · 名前 = 送る PDF」 */
+      var files = at.filter(function (x) { return x.isInline !== true; });
+      if (files.length !== 1 || files[0].name !== m.file) {
+        var other = files.filter(function (x) { return x.name !== m.file; }).map(function (x) { return x.name; });
+        throw new Error('添付ファイルが ' + m.file + ' 1 つではありません（' + (files.some(function (x) { return x.name === m.file; }) ? '' : m.file + ' がありません' + (other.length ? ' · ' : '')) +
+          (other.length ? 'ほかの添付: ' + other.join(' / ') : '') + '）— 送信しません（下書きは 下書き フォルダに残っています）');
+      }
       if (m.conv && d.conversationId && d.conversationId !== m.conv) throw new Error('① の会話ではありません — 送信しません');
       return J('POST', 'me/messages/' + encodeURIComponent(draft.id) + '/send', null).then(function () {
         return { ok: true, test: test, internet_message_id: d.internetMessageId || '', to: to, cc: cc };

@@ -10,6 +10,9 @@
  8 실전 모드 (sendTest false) = PATCH 받는 사람 = 창에 보인 To · CC 그대로 · 送付済 → 「もう一度送る」 체크 전 막힘
  9 下書き 받는 사람이 다르면 send 안 함 (下書き 남김)
 10 머리줄 표시: 시험 뒤 「試験済」 · 실전 뒤 「✓ 通関書類 送付済 m/d · 이름」
+12 (v0.3.66 · #366 ②) 받는 이름: ① 대화 우리 직원 메일 인사 줄 → TOOL 송부 기록 (시험 제외) → customs_broker.json (지금 받는 사람 우선) → 통관업자 서명 · 표시 이름 · 출처 한 줄
+13 (v0.3.66 · #366 ③) 下書き 첨부: 인라인 그림 (isInline) 2 = 통과 · 일반 첨부가 끼어듦 = 송부 중지 + 파일 이름 · 빨간 글자 + 닫을 때까지 남는 알림
+14 (v0.3.66 · #366 ①) POD = 고른 S/I (IV·PL) 의 COMPASS 값 · 값 없는 번호 흐리게 · B/L · Port of Discharge · 못 읽으면 노란 글자 (막지 않음)
 사용: python tests/test_customs.py [--shots 폴더]"""
 import argparse
 import base64
@@ -35,6 +38,18 @@ OURS = "example.invalid"            # 시험 = 우리 회사 도메인 대신 (C
 ME = "staff.a@example.invalid"
 IV = "TST2611-04"
 BKG = "BKG-TEST-0004"
+# v0.3.66 (R12Y3): 인사 줄 예 = 엔진 tests/test_v0157_r12y3.py GREET_CASES 와 똑같이 (JS greeting() = Python greeting())
+GREET_CASES = [
+    ("テスト海運株式会社\r\n山田 様\r\n\r\nいつもお世話になっております。", "テスト海運株式会社", "山田"),
+    ("\u200b\r\nテスト通関\r\n佐藤様\r\nいつもお世話になっております。", "テスト通関", "佐藤"),
+    ("株式会社テスト\r\n通関部\r\n鈴木 様\r\nいつも", "株式会社テスト\n通関部", "鈴木"),
+    ("※至急\r\n株式会社テスト\r\n田中様\r\nいつも", "株式会社テスト", "田中"),
+    ("TEST Co., Ltd. 高橋様\r\nいつも", "TEST Co., Ltd.", "高橋"),
+    ("伊藤様\r\nいつもお世話になっております。", "", "伊藤"),
+    ("いつもお世話になっております。\r\n株式会社テスト\r\n渡辺様", "", ""),
+    ("お疲れ様です。\r\n書類を送ります。", "", ""),
+    ("", "", ""),
+]
 
 
 def ok(name, cond, detail=""):
@@ -47,7 +62,11 @@ class Mail:
     def __init__(self):
         self.reset()
 
-    def reset(self, s1=True, sent=None, draft_override=None):
+    def reset(self, s1=True, sent=None, draft_override=None, greet=None, sig=None, extra_atts=None):
+        self.greet = greet            # v0.3.66: ① (우리 메일) 본문 앞부분 = 인사 줄 (None = 인사 줄 없음)
+        self.sig = sig                # v0.3.66: 통관업자 메일 본문 (uniqueBody · 서명)
+        self.extra_atts = extra_atts or []   # v0.3.66: 全員に返信 下書き 에 따라온 첨부 (인라인 그림 등)
+        self.urls = []
         self.calls = []
         self.patch = None
         self.atts = []
@@ -60,7 +79,8 @@ class Mail:
         def m(i, subj, frm, to, cc, at):
             r = lambda a: {"emailAddress": {"address": a, "name": a.split("@")[0].upper()}}
             return {"id": i, "subject": subj, "conversationId": "CONV1", "sentDateTime": at, "receivedDateTime": at, "isDraft": False,
-                    "from": r(frm), "toRecipients": [r(x) for x in to], "ccRecipients": [r(x) for x in cc], "internetMessageId": "<" + i + ">"}
+                    "from": r(frm), "toRecipients": [r(x) for x in to], "ccRecipients": [r(x) for x in cc], "internetMessageId": "<" + i + ">",
+                    "bodyPreview": (self.greet or "お疲れ様です。\r\n通関の依頼です。") if frm == ME else "いつもお世話になっております。"}
         s1 = m("M1", f"新規通関依頼:BKG#{BKG}, CUT11/10 (TOKYO TO TEST)", ME, ["broker.a@broker.invalid"], ["staff.b@" + OURS], "2026-11-05T01:00:00Z")
         r1 = m("M2", f"RE: 新規通関依頼:BKG#{BKG}, CUT11/10 (TOKYO TO TEST)", "broker.a@broker.invalid", [ME], ["broker.b@broker.invalid", "staff.b@" + OURS], "2026-11-05T03:00:00Z")
         return [s1, r1]
@@ -70,6 +90,7 @@ class Mail:
         path = unquote(u.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         self.calls.append(request.method + " " + path.replace("/v1.0/", ""))
+        self.urls.append(request.method + " " + unquote(request.url))
         J = lambda st, b: route.fulfill(status=st, body=json.dumps(b), headers={"Content-Type": "application/json"})
         if request.method == "GET" and path == "/v1.0/me/messages":
             if "$search" in q and "通関書類送付_" in q["$search"]:
@@ -78,6 +99,8 @@ class Mail:
                 return J(200, {"value": self.msgs()[:1] if self.has_s1 else []})
             if "$filter" in q:
                 return J(200, {"value": self.msgs()})
+        if request.method == "GET" and path == "/v1.0/me/messages/M2" and "uniqueBody" in q.get("$select", ""):
+            return J(200, {"uniqueBody": {"contentType": "text", "content": self.sig or ""}})
         if request.method == "POST" and path.endswith("/createReplyAll"):
             self.reply_to = path.split("/")[-2]
             return J(201, {"id": "D1", "subject": "RE: x", "body": {"contentType": "html", "content": "<html><head></head><body><p>QUOTED</p></body></html>"},
@@ -96,7 +119,7 @@ class Mail:
             return J(200, {"subject": p.get("subject"), "toRecipients": p.get("toRecipients", []), "ccRecipients": p.get("ccRecipients", []),
                            "bccRecipients": [], "internetMessageId": "<D1@test>", "conversationId": "CONV1"})
         if request.method == "GET" and path == "/v1.0/me/messages/D1/attachments":
-            return J(200, {"value": [{"name": a["name"], "size": 10} for a in self.atts]})
+            return J(200, {"value": [{"name": a["name"], "size": 10, "isInline": False, "contentType": "application/pdf"} for a in self.atts] + self.extra_atts})
         if request.method == "POST" and path == "/v1.0/me/messages/D1/send":
             self.sends += 1
             return route.fulfill(status=202, body="")
@@ -112,7 +135,7 @@ window.D03AUTO={version:'4.13',ready:Promise.resolve(true),run:function(o){windo
  var W=[{red:true,item:'D-03 未決項目',text:'タイ SHIPPING MARK'},{red:false,item:'D-03 未決項目',text:'INSURANCE 最低フロア (CIF)'}];
  if(!bl) W.unshift({red:true,item:'B/L',text:'B/L 形態を選んでください'});
  return Promise.resolve({ok:true,version:'4.13',iv:o.iv,file:o.iv+'_IV_PL_SI.pdf',pages:2,pdf_b64:'%s',bytes:900,sha256:'ab'.repeat(32),
-  picks:{ivSino:{v:2,why:'最終番号 (S/I②)'},siSino:{v:1,why:'S/I①'},pod:{v:[1],why:'候補 1 つ'},freight:{v:true,why:'CIF = 運賃あり'},bl:{v:bl,why:o.blWhy||''}},
+  picks:{ivSino:{v:o.ivSino||2,why:'最終番号 (S/I②)'},siSino:{v:1,why:'S/I①'},pod:{v:[1],why:'候補 1 つ'},freight:{v:true,why:'CIF = 運賃あり'},bl:{v:bl,why:o.blWhy||''}},
   warnings:W,si_avail:[1,2],info:{buyer_id:'BUYER-T',consignee:'TESTCONS',terms:'CIF',containers:window.__ct||%s}});}};
 </script>""" % (pdf_b64, json.dumps(containers))
 
@@ -177,7 +200,8 @@ def main():
             page.on("dialog", lambda d: (dlg.append(d.message), d.accept()))
             page.route("https://graph.microsoft.com/**", graph)
             page.route(f"http://127.0.0.1:{port}/__d03fake.html*", lambda r: r.fulfill(status=200, body=fake_d03(pdf_b64, containers), headers={"Content-Type": "text/html; charset=utf-8"}))
-            ft = {"mode": "ok"}          # v0.3.65 (R12Y · #361): 形態 · タイプ (가명 칸) — ok = 모두 있음 · blank = 1 칸 빈칸 · fail = GET 500
+            ft = {"mode": "ok"}
+            SIQ = []          # v0.3.65 (R12Y · #361): 形態 · タイプ (가명 칸) — ok = 모두 있음 · blank = 1 칸 빈칸 · fail = GET 500
 
             def dvx(r):
                 if "crcf9_container_informations" in r.request.url:
@@ -189,12 +213,21 @@ def main():
                         cs[2]["crcf9_type"] = None
                     cs.append({"crcf9_container_no": None, "crcf9_type": None, "_crcf9_form_value": None})     # CT 없는 칸 = 안 셈
                     return r.fulfill(status=200, body=json.dumps({"value": cs}), headers={"Content-Type": "application/json"})
+                if "cr49f_s_is" in r.request.url:        # v0.3.66 (R12Y3 · #366 ①): S/I 의 POD (가명)
+                    if ft.get("si") == "fail":
+                        return r.fulfill(status=500, body="{}")
+                    si = [{"crcf9_sino": 1, "crcf9_place_of_delivery_1": "TESTPORT ONE", "crcf9_place_of_delivery_2": None, "crcf9_place_of_delivery_3": None,
+                           "crcf9_pod_bl1": "TESTPORT ONE BL", "crcf9_pod_bl2": None, "crcf9_pod_bl3": None, "crcf9_port_of_discharge": "TESTPORT ONE"},
+                          {"crcf9_sino": 2, "crcf9_place_of_delivery_1": "TESTPORT A", "crcf9_place_of_delivery_2": "TESTPORT B", "crcf9_place_of_delivery_3": None,
+                           "crcf9_pod_bl1": "TESTPORT A BL", "crcf9_pod_bl2": None, "crcf9_pod_bl3": None, "crcf9_port_of_discharge": "TESTPORT DIS"}]
+                    SIQ.append(unquote(r.request.url))
+                    return r.fulfill(status=200, body=json.dumps({"value": si}), headers={"Content-Type": "application/json"})
                 return r.fulfill(status=200, body=json.dumps({"value": [{"_cr49f_sale_contract_id_value": "SC1"}], "_cr49f_buyer_id_value": "BUYER-T"}),
                                  headers={"Content-Type": "application/json"})
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.65", page.title() == "LEENAI C-01 搬入票 v0.3.65", page.title())
+            ok("탭 제목 v0.3.66", page.title() == "LEENAI C-01 搬入票 v0.3.66", page.title())
             ok("설정: 통관서류 송부 켜짐 · 시험 모드 (sendTest true) · D-03 주소 = 같은 출처 github.io",
                page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === true && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
             ok("본문 · 서명 · ✦ 설정 (본문 = #352 문구)", page.evaluate("C01.CUSTOMS.body.indexOf('通関用の書類を送付いたしますので、ご確認の程お願い致します。') > 0 && C01.CUSTOMS.footer === '✦ Powered by LEENAI Automation System'"))
@@ -225,7 +258,15 @@ def main():
             ok("2 제목 = [test] 【通関書類送付_IV】Re: {① 제목}", subj == f"[test] 【通関書類送付_{IV}】Re: 新規通関依頼:BKG#{BKG}, CUT11/10 (TOKYO TO TEST)", subj)
             bt = page.locator("[data-cbody]").input_value()
             ok("2 본문 = 様 · 通関用の書類 · 서명 (이름 · 메일) · ✦", "様" in bt and "通関用の書類を送付いたしますので" in bt and ME in bt and bt.rstrip().endswith("✦ Powered by LEENAI Automation System"), bt[-120:])
-            ok("2 본문 첫 줄 = 회사명 자리표시 (지난 기록 없음)", bt.splitlines()[0] == "（通関業者の会社名）", bt.splitlines()[0])
+            ok("2 본문 첫 줄 = 회사명 자리표시 (지난 기록 없음 · ① 인사 줄 없음 · 서명 없음)", bt.splitlines()[0] == "（通関業者の会社名）", bt.splitlines()[0])
+            src_l = page.locator("[data-cnamesrc]").inner_text() if page.locator("[data-cnamesrc]").count() else ""
+            ok("12 宛名の出どころ 한 줄 (회사명 = 見つかりません · 담당자 = 표시 이름)", "会社名 = 見つかりません" in src_l and "送信者名" in src_l, src_l)
+            ok("12 서명 찾기 = 통관업자 메일 1통 GET (uniqueBody · 글자) · 쓰기 0", any("me/messages/M2" in u and "uniqueBody" in u for u in mail.urls), mail.urls[-6:])
+            pod = page.locator("tr:has(th:text('POD'))").inner_text()
+            ok("14 POD = 고른 S/I② 의 값 (1st POD TESTPORT A · 2nd POD TESTPORT B · 3rd = 값 없음)", "1st POD" in pod and "TESTPORT A" in pod and "2nd POD" in pod and "TESTPORT B" in pod and "TESTPORT ONE" not in pod, pod)
+            ok("14 값 없는 3rd = 흐리게 · 못 누름", page.locator("[data-cpod='3']").is_disabled() and page.locator("[data-cpod='1']").is_enabled())
+            ok("14 B/L · Port of Discharge 작게", "B/L: TESTPORT A BL" in pod and "Port of Discharge: TESTPORT DIS" in pod, pod)
+            ok("14 S/I 읽기 = 販売契約 1번 (sino · POD 1/2/3 · pod_bl · port_of_discharge)", len(SIQ) == 1 and "_cr49f_sale_contract_id_value eq SC1" in SIQ[0] and "crcf9_place_of_delivery_3" in SIQ[0] and "crcf9_port_of_discharge" in SIQ[0], SIQ)
             ok("2 PDF 미리보기 · 첨부 이름 {IV}_IV_PL_SI.pdf", page.locator(".c01-cpdf").count() == 1 and f"{IV}_IV_PL_SI.pdf" in body)
             ok("2 고른 값과 이유 (S/I② 最終番号 · S/I① · 候補 1 つ · 운임)", "最終番号 (S/I②)" in body and "S/I①" in body and "候補 1 つ" in body and "CIF = 運賃あり" in body)
             ok("2 시험 모드 표시", page.locator("[data-ctrial]").count() == 1)
@@ -328,7 +369,8 @@ def main():
             page.wait_for_function("() => !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
             page.check("[data-cack]")
             bt8 = page.locator("[data-cbody]").input_value()
-            ok("4 지난 송부 기록의 회사명 (같은 통관업자 도메인) 을 미리 채움", bt8.splitlines()[0] == "TEST BROKER CORPORATION", bt8.splitlines()[0])
+            ok("12 시험 송부 기록은 회사명 출처가 아님 (시험 제외 · v0.3.66) → 자리표시", bt8.splitlines()[0] == "（通関業者の会社名）", bt8.splitlines()[0])
+            fill_body(page)
             subj = page.locator(".c01-csubj").inner_text()
             ok("8 실전 제목 = [test] 없음", subj.startswith("【通関書類送付_" + IV + "】Re: "), subj)
             n_d = len(dlg)
@@ -351,6 +393,8 @@ def main():
             fill_body(page)
             why = page.locator("[data-cwhy]").inner_text()
             ok("8 送付済 IV = 「もう一度送る」 체크 전 막힘", page.locator("[data-csendgo]").is_disabled() and "送付済み" in why, why)
+            ok("12 실전 송부 기록 (같은 도메인) = 회사명 미리 채움 · 출처 「TOOL の送付記録」", page.locator("[data-cbody]").input_value().splitlines()[0] == "TEST BROKER CORPORATION"
+               and "TOOL の送付記録" in page.locator("[data-cnamesrc]").inner_text(), page.locator("[data-cnamesrc]").inner_text())
             page.check("[data-cagain]")
             n_d = len(dlg)
             # 9 下書き 받는 사람 다름 → send 안 함
@@ -370,7 +414,7 @@ def main():
                 return route.fulfill(status=200 if len(puts) < 2 else 201, body="{}", headers={"Content-Type": "application/json"})
             page.route("https://upload.example.invalid/**", up)
             big = base64.b64encode(pdfp.read_bytes() + b"%" + b"0" * (3_400_000)).decode()
-            page.evaluate("(b) => { const w = document.getElementById('c01-d03auto').contentWindow; const r0 = w.D03AUTO.run; w.D03AUTO.run = (o) => r0(o).then(r => Object.assign(r, {pdf_b64: b, bytes: Math.floor(b.length * 3 / 4)})); }", big)
+            page.evaluate("(b) => { const w = document.getElementById('c01-d03auto').contentWindow; const r0 = w.D03AUTO.run; w.__r0 = r0; w.D03AUTO.run = (o) => r0(o).then(r => Object.assign(r, {pdf_b64: b, bytes: Math.floor(b.length * 3 / 4)})); }", big)
             page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
             page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
             page.select_option("[data-cbl]", "original")
@@ -385,6 +429,82 @@ def main():
             ok("11 3MB 넘는 PDF = createUploadSession → PUT 조각 (4MB 이하 · 인증 머리 없음) → send 1",
                getattr(mail, "upload", {}).get("AttachmentItem", {}).get("name") == f"{IV}_IV_PL_SI.pdf" and len(puts) == 1 and puts[0]["auth"] is None
                and puts[0]["n"] <= 4 * 1024 * 1024 and puts[0]["range"].startswith("bytes 0-") and mail.sends == 1, [puts, getattr(mail, "upload", None), mail.sends])
+            page.evaluate("() => { const w = document.getElementById('c01-d03auto').contentWindow; w.D03AUTO.run = w.__r0; }")   # 11 의 큰 PDF 흉내 끝
+            # 12 (v0.3.66 · #366 ②) 받는 이름 — 인사 줄 규칙 = 엔진과 같음
+            got = page.evaluate("(cs) => cs.map(c => C01.customs._greeting(c[0]))", [list(c) for c in GREET_CASES])
+            ok("12 인사 줄 읽기 = 엔진 greeting() 과 같은 결과 (" + str(len(GREET_CASES)) + " 예)", [(g["company"], g["person"]) for g in got] == [(c[1], c[2]) for c in GREET_CASES], got)
+
+            def open_iv(**kw):
+                mail.reset(**kw)
+                page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
+                page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
+                return page.locator("[data-cbody]").input_value(), (page.locator("[data-cnamesrc]").inner_text() if page.locator("[data-cnamesrc]").count() else "")
+            page.evaluate("() => { const A = C01.app._api(); A.S.mine = (A.S.mine || []).filter(m => !(m.action && m.action.action === 'customs_sent')); A.S.actions = (A.S.actions || []).filter(m => !((m.action || m).action === 'customs_sent')); A.render(); }")
+            bt, sl = open_iv(greet="※ご確認ください\r\nテスト海運株式会社\r\nBROKERA 様\r\n\r\nいつもお世話になっております。")
+            ok("12 ① 대화 우리 직원 메일 인사 줄 → 회사명 · 담당자 · 출처 「① の会話（あなたのメール m/d）」", bt.splitlines()[:2] == ["テスト海運株式会社", "BROKERA 様"] and "① の会話（あなたのメール 11/05）" in sl, [bt.splitlines()[:2], sl])
+            ok("12 ① 에서 둘 다 찾음 = 서명 GET 0", not any("uniqueBody" in u for u in mail.urls), mail.urls[-4:])
+            page.click(".c01-customs [data-close]")
+            page.evaluate("""() => { C01.app._api().S.customsBroker = { domains: { 'broker.invalid': { company: 'テスト通関株式会社', company_n: 5, n: 7,
+                persons: [{ name: '新人', n: 1, last_at: '2026-11-07T10:00:00' }, { name: 'BROKER.B', n: 6, last_at: '2026-10-01T10:00:00' }] },
+                'other.invalid': { company: 'ちがう会社', company_n: 9, n: 9, persons: [{ name: 'X', n: 9, last_at: '2026-11-08T10:00:00' }] } } }; }""")
+            bt, sl = open_iv()
+            ok("12 customs_broker.json (같은 도메인) → 회사명 · 담당자 = 지금 받는 사람 (CC 의 BROKER.B) 우선 · 출처 「過去の 通関書類送付（7 通）」",
+               bt.splitlines()[:2] == ["テスト通関株式会社", "BROKER.B 様"] and "過去の 通関書類送付（7 通）" in sl, [bt.splitlines()[:2], sl])
+            page.click(".c01-customs [data-close]")
+            page.evaluate("() => { C01.app._api().S.customsBroker = null; }")
+            bt, sl = open_iv(sig="お世話になります。\r\n承知しました。\r\n\r\n--------\r\nテストシッピング株式会社\r\n通関課 BROKERA\r\nTEL 00-0000-0000")
+            ok("12 서명의 회사명 줄 + 표시 이름 → 채움 · 출처 「通関業者のメールの署名」", bt.splitlines()[:2] == ["テストシッピング株式会社", "BROKER.A 様"] and "通関業者のメールの署名" in sl, [bt.splitlines()[:2], sl])
+            page.click(".c01-customs [data-close]")
+            ok("12 서명 줄 고르기 (회사명 낱말 · 60자 이하 · 맨 아래)", page.evaluate("C01.customs._sigCompany('本文 株式会社の件で\\nーー\\n■ テスト株式会社 ■\\nTEL')") == "テスト株式会社",
+               page.evaluate("C01.customs._sigCompany('本文 株式会社の件で\\nーー\\n■ テスト株式会社 ■\\nTEL')"))
+            # 13 (v0.3.66 · #366 ③) 下書き 첨부 = 인라인 그림 + 우리 PDF → 보냄 · 일반 첨부가 끼어듦 → 중지
+            def send_once(**kw):
+                open_iv(greet="テスト海運株式会社\r\nBROKERA 様\r\nいつも", **kw)
+                page.select_option("[data-cbl]", "original")
+                page.wait_for_function("() => !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+                if page.locator("[data-cack]").count():
+                    page.check("[data-cack]")
+                if page.locator("[data-cagain]").count():
+                    page.check("[data-cagain]")
+                why = page.locator("[data-cwhy]").inner_text()
+                page.click("[data-csendgo]")
+                return why
+            inl = [{"name": "image001.png", "size": 5000, "isInline": True, "contentType": "image/png"}, {"name": "image002.jpg", "size": 8000, "isInline": True, "contentType": "image/jpeg"}]
+            w13 = send_once(extra_atts=inl)
+            try:
+                page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=15000)
+            except Exception:
+                print("13 why:", w13, mail.calls[-6:], page.locator("[data-csenderr]").all_inner_texts())
+            ok("13 인라인 그림 2 + PDF 1 → 송부 1번 (인라인 그림은 지우지 않음 · DELETE 0)", mail.sends == 1 and not any(c.startswith("DELETE") for c in mail.calls), mail.calls[-5:])
+            ok("13 첨부 다시 읽기 = isInline · contentType 같이", any("/attachments?" in u and "isInline" in u and u.startswith("GET") for u in mail.urls), [u for u in mail.urls if "attachments" in u])
+            send_once(extra_atts=inl[:1] + [{"name": "original_invoice.xlsx", "size": 9000, "isInline": False, "contentType": "application/vnd.ms-excel"}])
+            page.wait_for_selector("#c01-cerr", timeout=15000)
+            page.wait_for_timeout(300)
+            er = page.locator("[data-csenderr]").inner_text() if page.locator("[data-csenderr]").count() else ""
+            ok("13 일반 첨부가 끼어듦 → send 0 · 창 그대로 · 빨간 글자에 그 파일 이름", mail.sends == 0 and page.locator(".c01-customs").count() == 1 and "original_invoice.xlsx" in er and "image001.png" not in er, er)
+            page.wait_for_timeout(6500)
+            ok("13 실패 알림 = 6초 뒤에도 남음 (닫기 전까지) · 닫기 → 사라짐", page.locator("#c01-cerr").count() == 1 and "original_invoice.xlsx" in page.locator("#c01-cerr").inner_text())
+            page.click("#c01-cerr [data-cerr-close]")
+            ok("13 닫기 → 사라짐", page.locator("#c01-cerr").count() == 0)
+            page.click(".c01-customs [data-close]")
+            # 14 S/I 바꾸면 POD 표시도 그 S/I · 못 읽으면 노란 글자 (막지 않음)
+            open_iv(greet="テスト海運株式会社\r\nBROKERA 様\r\nいつも")
+            page.select_option("[data-cpick='ivSino']", "1")
+            page.wait_for_function("() => !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+            pod1 = page.locator("tr:has(th:text('POD'))").inner_text()
+            ok("14 S/I① 으로 바꿈 → POD 표시 = S/I① 값 (TESTPORT ONE · 2nd 흐리게)", "TESTPORT ONE" in pod1 and "TESTPORT A" not in pod1 and page.locator("[data-cpod='2']").is_disabled(), pod1)
+            page.click(".c01-customs [data-close]")
+            ft["si"] = "fail"
+            open_iv(greet="テスト海運株式会社\r\nBROKERA 様\r\nいつも")
+            page.select_option("[data-cbl]", "original")
+            page.wait_for_function("() => !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+            page.check("[data-cack]")
+            if page.locator("[data-cagain]").count():
+                page.check("[data-cagain]")
+            ok("14 S/I 못 읽음 → 번호만 + 노란 「COMPASS の POD を読めませんでした」 · 送信 은 막지 않음", page.locator("[data-cpodng]").count() == 1 and page.locator("[data-csendgo]").is_enabled(),
+               page.locator("[data-cwhy]").inner_text())
+            page.click(".c01-customs [data-close]")
+            ft["si"] = None
             # 콘솔 오류
             errs = [e for e in RES["console_errors"] if "favicon" not in e and "404" not in e and not ("500" in e and "Failed to load resource" in e)]   # 500 = 7b 形態・タイプ GET 실패 흉내 (R12Y)
             ok("콘솔 오류 0", not errs, errs[:3])

@@ -1,4 +1,4 @@
-/* ✦ Powered by LEENAI Automation System — 通関書類送付 (v0.3.63 · 決定 #359 · #302 · #303 · #306 · #338 · #343 · #352)
+/* ✦ Powered by LEENAI Automation System — 通関書類送付 (v0.3.63 · 決定 #359 · #302 · #303 · #306 · #338 · #343 · #352 · v0.3.66 #366)
    - 実況表 IV 見出しの 「通関書類送付」 (Compass入力 の横) → 確認窓 → 担当者が 「送信」 を押した時だけ 1 通
    - PDF = D-03 自動モード (同じ出所 · ?auto=1 · 押した担当者のログイン · COMPASS は読むだけ)
    - メール = ① 通関依頼 の会話の一番新しいメールに 全員に返信 (押した担当者のメール · js/source.js customsSend)
@@ -70,12 +70,17 @@ C01.customs = (function () {
       return fetch(base + '/api/data/v9.2/' + path, { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' } });
     }).then(function (r) { if (!r.ok) throw new Error('COMPASS ' + r.status); return r.json(); });
   }
-  function buyerOf(ivNo) {
+  /* v0.3.66 (R12Y3 · #366 ①): 販売契約 (SC) を 1 回だけ読み、バイヤーと S/I (POD 1/2/3 · B/L 用 POD · Port of Discharge) を一緒に読む。
+     S/I が読めない = si null (確認窓は番号だけ + 黄色 · 送信は止めない — D-03 が PDF に入れた値が正本) */
+  var SI_SEL = 'crcf9_sino,crcf9_place_of_delivery_1,crcf9_place_of_delivery_2,crcf9_place_of_delivery_3,crcf9_pod_bl1,crcf9_pod_bl2,crcf9_pod_bl3,crcf9_port_of_discharge';
+  function contractOf(ivNo) {
     return dvGet("cr49f_bookings?$filter=cr49f_invoice_no eq '" + String(ivNo).replace(/'/g, "''") + "'&$select=_cr49f_sale_contract_id_value").then(function (j) {
-      var b = (j.value || [])[0];
-      if (!b || !b._cr49f_sale_contract_id_value) return '';
-      return dvGet('cr49f_sale_contracts(' + b._cr49f_sale_contract_id_value + ')?$select=_cr49f_buyer_id_value').then(function (s) { return s._cr49f_buyer_id_value || ''; });
-    }).catch(function () { return ''; });
+      var b = (j.value || [])[0], sc = b && b._cr49f_sale_contract_id_value;
+      if (!sc) return { buyer: '', si: null };
+      var pB = dvGet('cr49f_sale_contracts(' + sc + ')?$select=_cr49f_buyer_id_value').then(function (s) { return s._cr49f_buyer_id_value || ''; }, function () { return ''; });
+      var pS = dvGet('cr49f_s_is?$filter=_cr49f_sale_contract_id_value eq ' + sc + '&$select=' + SI_SEL).then(function (r) { return r.value || []; }, function () { return null; });
+      return Promise.all([pB, pS]).then(function (r) { return { buyer: r[0], si: r[1] }; });
+    }).catch(function () { return { buyer: '', si: null }; });
   }
   /* #338: バイヤーの 6 か月の B/L 実績 = エンジン customs_bl.json (あれば) + 送付記録 (customs_sent · 試験は除く) */
   function blHistory(buyer, ivNo) {
@@ -146,24 +151,101 @@ C01.customs = (function () {
 
   /* ── 本文 ── */
   function fill(t, m) { return String(t || '').replace(/\{(\w+)\}/g, function (x, k) { return m[k] != null ? m[k] : x; }); }
-  var BROKER_PH = '（通関業者の会社名）';
+  var BROKER_PH = '（通関業者の会社名）', PERSON_PH = '（担当者名）';
+  /* v0.3.66 (R12Y3 · #366 ②): 本文の先頭の あいさつ (会社名 / 〇〇 様) を読む — エンジン engine/output/customs_broker.py greeting() と同じ決まり
+     (先頭 6 行 · 「いつも」 などの前まで · 「様」 で終わる最初の行 = 担当者 · その上の行 (2 行まで · ※ などの注意書きは除く) = 会社名) */
+  var CO_RE = /(株式会社|㈱|有限会社|合同会社|\(株\)|（株）|Co\.,?\s*Ltd|CO\.,?\s*LTD|Corporation|Corp\.|Inc\.|LIMITED|Ltd\.)/i;
+  var STOP_RE = /^(いつも|お世話|お疲れ|平素|大変お世話)/, SKIP_RE = /^[※*＊■□●◆【\[〔>＞-]/, SAMA_RE = /\s*(様|さま)\s*$/;
+  function glines(t) {
+    return String(t || '').replace(/[\u200b\ufeff]/g, '').replace(/[\u3000\u00a0]/g, ' ').split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+  function greeting(text) {
+    var ls = [], all = glines(text).slice(0, 6);
+    for (var k = 0; k < all.length; k++) { if (STOP_RE.test(all[k])) break; ls.push(all[k]); }
+    var i = -1;
+    for (k = 0; k < ls.length; k++) { if (SAMA_RE.test(ls[k])) { i = k; break; } }
+    if (i < 0) return { company: '', person: '' };
+    var person = ls[i].replace(SAMA_RE, '').trim();
+    var above = ls.slice(0, i).filter(function (x) { return !SKIP_RE.test(x) && x.indexOf('様') < 0; }).slice(-2);
+    var company = above.join('\n');
+    if (!above.length && CO_RE.test(person) && /\s/.test(person)) {
+      var m = /^(.*\S)\s+(\S+)$/.exec(person);
+      if (m) { company = m[1]; person = m[2]; }
+    }
+    if (person.length > 40 || company.length > 80) return { company: '', person: '' };
+    return { company: company.trim(), person: person.trim() };
+  }
+  function domOf(a) { return String(a || '').toLowerCase().split('@')[1] || ''; }
+  function normName(s) { return String(s || '').replace(/[\s\u3000]/g, '').toLowerCase(); }
+  /* 宛名を探す順 (先に見つかったもの · 会社名と担当者はそれぞれ):
+     ① ① の会話で 自社の職員が書いた一番新しいメールの あいさつ (宛先に 同じ通関業者のドメインがある時だけ)
+     ② TOOL の送付記録 (customs_sent · 試験を除く · 同じドメイン) の 1 行目 · 2 行目
+     ③ 職員が手で送った 「通関書類送付」 (エンジン customs_broker.json · 同じドメイン · 担当者が複数 = 今の宛先にいる人 → 一番新しい人)
+     ④ 通関業者のメールの署名の会社名の行 (確認窓を開いた後に 1 通だけ読む) + 送信者の表示名
+     ⑤ 見つからない = 書き換え用の印 (残っていたら送れない) */
   function brokerGuess(mail) {
-    var last = mail && mail.last, s1 = mail && mail.s1;
-    var our = String(C01.CUSTOMS.ourDomain || 'leenearcorp.com');
-    var ext = [].concat(last ? [{ a: last.from, n: last.from_name }] : [], (last && last.to) || [], (s1 && s1.to) || []).filter(function (x) { return x.a && x.a.split('@')[1] !== our; });
+    var a = api(), S = a.S, last = mail && mail.last, s1 = mail && mail.s1;
+    var our = String(C01.CUSTOMS.ourDomain || 'leenearcorp.com').toLowerCase();
+    var me = String((S.me || {}).email || '').toLowerCase();
+    var ext = [].concat(last ? [{ a: last.from, n: last.from_name }] : [], (last && last.to) || [], (s1 && s1.to) || []).filter(function (x) { return x.a && domOf(x.a) !== our; });
     var p = ext[0] || { n: '', a: '' };
-    var dom = String(p.a || '').split('@')[1] || '';
-    /* 会社名 = 同じ通関業者 (メールのドメイン) へ前に送った時の 1 行目 (送付記録) · 無ければ 書き換え用の印 (残っていたら送れない) */
-    var line = '';
-    ((api().S.jik && api().S.jik.ivs) || []).forEach(function (iv) {
-      records(iv).forEach(function (r) { if (!line && r.value.broker_dom === dom && r.value.broker_line) line = r.value.broker_line; });
-    });
-    return { broker: line || BROKER_PH, person: String(p.n || '').replace(/\s*[<(（].*$/, '').trim() || '（担当者名）', dom: dom };
+    var dom = domOf(p.a);
+    var out = { broker: '', person: '', dom: dom, src: { broker: '', person: '' } };
+    var put = function (co, ps, src) {
+      if (co && !out.broker) { out.broker = co; out.src.broker = src; }
+      if (ps && !out.person) { out.person = ps; out.src.person = src; }
+    };
+    if (dom) {
+      // ①
+      var conv = ((mail && mail.conv) || []).slice().reverse();
+      for (var i = 0; i < conv.length && !(out.broker && out.person); i++) {
+        var m = conv[i];
+        if (domOf(m.from) !== our) continue;
+        if (![].concat(m.to || [], m.cc || []).some(function (x) { return domOf(x.a) === dom; })) continue;
+        var g = greeting(m.preview);
+        if (!g.company && !g.person) continue;
+        put(g.company, g.person, '① の会話（' + (m.from === me ? 'あなた' : (a.staffName(m.from) || m.from_name || m.from)) + 'のメール ' + a.md(String(m.at).slice(0, 10)) + '）');
+      }
+      // ②
+      var rec = null;
+      ((S.jik && S.jik.ivs) || []).forEach(function (iv) {
+        records(iv).forEach(function (r) { if (!r.value.test && r.value.broker_dom === dom && r.value.broker_line && (!rec || String(r.at) > String(rec.at))) rec = r; });
+      });
+      if (rec) put(rec.value.broker_line, rec.value.broker_person || '', 'TOOL の送付記録（' + a.md(String(rec.at).slice(0, 10)) + '）');
+      // ③
+      var cb = S.customsBroker && S.customsBroker.domains && S.customsBroker.domains[dom];
+      if (cb) {
+        var names = [].concat((last && last.to) || [], (last && last.cc) || [], last ? [{ a: last.from, n: last.from_name }] : []).filter(function (x) { return domOf(x.a) === dom; }).map(function (x) { return normName(x.n); });
+        var ps = (cb.persons || []).filter(function (x) { var k = normName(x.name); return k && names.some(function (n) { return n && n.indexOf(k) >= 0; }); })[0] || (cb.persons || [])[0];
+        put(cb.company || '', ps ? ps.name : '', '過去の 通関書類送付（' + cb.n + ' 通）');
+      }
+    }
+    return out;
+  }
+  /* ④ 通関業者のメールの署名 (本文の会社名の行 · 一番下のもの) + 送信者の表示名 — ①〜③ で足りない時だけ (GET 1 回) */
+  function sigCompany(text) {
+    var ls = glines(text).filter(function (x) { return x.length <= 60 && CO_RE.test(x) && !/様/.test(x); });
+    return ls.length ? ls[ls.length - 1].replace(/^[\s\-_=*■□●◆|]+|[\s\-_=*■□●◆|]+$/g, '') : '';
+  }
+  function cleanName(n) { return String(n || '').replace(/\s*[<(（\[].*$/, '').replace(/[\s\u3000]*(様|さま)$/, '').trim(); }
+  function brokerSig(mail, gs) {
+    var a = api(), src = a.S.src;
+    if ((gs.broker && gs.person) || !gs.dom || !mail || typeof src.customsMailText !== 'function') return Promise.resolve(gs);
+    var bm = ((mail.conv || []).slice().reverse().filter(function (m) { return domOf(m.from) === gs.dom; }))[0];
+    if (!bm) return Promise.resolve(gs);
+    var nm = cleanName(bm.from_name);
+    if (!gs.person && nm && nm.indexOf('@') < 0) { gs.person = nm; gs.src.person = '通関業者のメールの送信者名（' + a.md(String(bm.at).slice(0, 10)) + '）'; }
+    if (gs.broker) return Promise.resolve(gs);
+    return src.customsMailText(bm.id).then(function (t) {
+      var co = sigCompany(t);
+      if (co) { gs.broker = co; gs.src.broker = '通関業者のメールの署名（' + a.md(String(bm.at).slice(0, 10)) + '）'; }
+      return gs;
+    }, function () { return gs; });
   }
   function bodyText(st) {
     var me = api().S.me || {};
     var C = C01.CUSTOMS;
-    return fill(C.body, { broker: st.broker, person: st.person }) + '\n\n' + fill(C.signature, { name: me.name || '', email: me.email || '' }) + '\n\n' + C.footer;
+    return fill(C.body, { broker: st.broker || BROKER_PH, person: st.person || PERSON_PH }) + '\n\n' + fill(C.signature, { name: me.name || '', email: me.email || '' }) + '\n\n' + C.footer;
   }
   function bodyHtml(txt) {
     return '<div style="font-family:\'Meiryo\',\'Yu Gothic\',sans-serif;font-size:10.5pt">' + api().esc(txt).replace(/\n/g, '<br>') + '</div>';
@@ -176,7 +258,8 @@ C01.customs = (function () {
     var iv = a.ivById(ivNo), g = (a.S.customsG || {})[ivNo];
     if (!on() || !iv || !g) return;
     if (off) { a.toast('まだ送れません: ' + lacks(g).join(' · '), 'error'); return; }
-    st = { iv: ivNo, g: g, step: '準備中', mail: null, sent: [], d03: null, err: [], bl: '', blWhy: '', over: {}, ack: false, again: false, busy: false, body: null, broker: '', person: '' };
+    st = { iv: ivNo, g: g, step: '準備中', mail: null, sent: [], d03: null, err: [], bl: '', blWhy: '', over: {}, ack: false, again: false, busy: false, body: null, broker: '', person: '',
+      si: undefined, nameSrc: null, sendErr: '' };
     a.S.modal = { kind: 'customs', iv: ivNo };
     draw();
     var src = a.S.src;
@@ -185,23 +268,28 @@ C01.customs = (function () {
     var pSent = graphOk ? src.customsFindSent(ivNo).catch(function () { return []; }) : Promise.resolve([]);
     /* customs_bl.json = エンジンの meta.customs_bl がある時だけ読む (無いエンジンに 404 を出さない) */
     var pBl = (a.S.customsBl === undefined && a.S.meta && a.S.meta.customs_bl ? src.getJson(String(a.S.meta.customs_bl)).then(function (x) { a.S.customsBl = x; }, function () { a.S.customsBl = null; }) : Promise.resolve())
-      .then(function () { return graphOk ? buyerOf(ivNo) : ''; });
+      .then(function () { return graphOk ? contractOf(ivNo) : { buyer: '', si: null }; });
+    /* v0.3.66 (R12Y3 · #366 ②): customs_broker.json = エンジンの meta.customs_broker がある時だけ読む */
+    var pCb = a.S.customsBroker === undefined && a.S.meta && a.S.meta.customs_broker ? src.getJson(String(a.S.meta.customs_broker)).then(function (x) { a.S.customsBroker = x; }, function () { a.S.customsBroker = null; }) : Promise.resolve();
     /* v0.3.65 (R12Y · #361): 形態 · タイプ 空欄の枠 (CT が入った枠だけ · COMPASS GET だけ) — 読めない = null (送信を止める) */
     var pFt = C01.COMPASS && C01.COMPASS.form_bales ? (graphOk && iv.booking_guid ? dvGet('crcf9_container_informations?$select=crcf9_container_no,crcf9_type,_crcf9_form_value&$filter=' +
       encodeURIComponent('_crcf9_booking_id_value eq ' + iv.booking_guid)).then(function (j) {
       var cells = {}; (j.value || []).forEach(function (c, i) { cells[i] = c; }); return C01.compass.formTypeBlank(cells);
     }).catch(function () { return null; }) : Promise.resolve(null)) : Promise.resolve(0);
-    Promise.all([pMail, pSent, pBl, pFt]).then(function (r) {
+    Promise.all([pMail, pSent, pBl, pFt, pCb]).then(function (r) {
       if (!st || st.iv !== ivNo) return;
-      st.mail = r[0]; st.sent = r[1] || []; st.buyer = r[2] || ''; st.ftBlank = r[3];
+      st.mail = r[0]; st.sent = r[1] || []; st.buyer = (r[2] || {}).buyer || ''; st.si = (r[2] || {}).si; st.ftBlank = r[3];
       var h = st.buyer ? blHistory(st.buyer, ivNo) : [];
       var pb = pickBl(h);
       st.bl = pb.v; st.blWhy = pb.why;
       st.prevCons = h.length ? (h[h.length - 1].cons || '') : null;
-      var gs = brokerGuess(st.mail); st.broker = gs.broker; st.person = gs.person; st.brokerDom = gs.dom;
-      st.step = 'D-03';
-      draw();
-      return makePdf();
+      return brokerSig(st.mail, brokerGuess(st.mail)).then(function (gs) {
+        if (!st || st.iv !== ivNo) return;
+        st.broker = gs.broker; st.person = gs.person; st.brokerDom = gs.dom; st.nameSrc = gs.src;
+        st.step = 'D-03';
+        draw();
+        return makePdf();
+      });
     }).catch(function (e) { if (st && st.iv === ivNo) { st.err.push(e.message); st.step = '完了'; draw(); } });
   }
   function makePdf() {
@@ -300,7 +388,7 @@ C01.customs = (function () {
     // 件名 · 本文
     if (st.body == null && st.mail) st.body = bodyText(st);
     h += '<section class="c01-csec"><h4>件名</h4><div class="mono c01-csubj">' + esc(st.mail ? subject() : '—') + '</div>' +
-      '<h4>本文（直せます · 下に 返信の元のメールが付きます）</h4><textarea class="c01-cbodytxt" data-cbody rows="12">' + esc(st.body || '') + '</textarea></section>';
+      '<h4>本文（直せます · 下に 返信の元のメールが付きます）</h4>' + nameSrcLine() + '<textarea class="c01-cbodytxt" data-cbody rows="12">' + esc(st.body || '') + '</textarea></section>';
     // 選んだ値
     h += '<section class="c01-csec"><h4>D-03 の選択（既定と理由 · 変えると PDF を作り直します）</h4>';
     if (r && r.ok) {
@@ -309,7 +397,7 @@ C01.customs = (function () {
       h += '<table class="c01-ctab">' +
         '<tr><th>S/I (IV·PL)</th><td>' + sel('ivSino', P.ivSino.v) + '</td><td class="t2' + (P.ivSino.red ? ' c01-cr' : '') + '">' + esc(P.ivSino.why) + '</td></tr>' +
         '<tr><th>S/I (SI)</th><td>' + sel('siSino', P.siSino.v) + '</td><td class="t2' + (P.siSino.red ? ' c01-cr' : '') + '">' + esc(P.siSino.why) + '</td></tr>' +
-        '<tr><th>POD</th><td>' + [1, 2, 3].map(function (n) { return '<label><input type="checkbox" data-cpod="' + n + '"' + (P.pod.v.indexOf(n) >= 0 ? ' checked' : '') + '> ' + n + '</label>'; }).join(' ') + '</td><td class="t2' + (P.pod.red ? ' c01-cr' : '') + '">' + esc(P.pod.why) + '</td></tr>' +
+        '<tr><th>POD</th><td>' + podCell(P) + '</td><td class="t2' + (P.pod.red ? ' c01-cr' : '') + '">' + esc(P.pod.why) + '</td></tr>' +
         '<tr><th>FOB 運賃</th><td><label><input type="checkbox" data-cfreight' + (P.freight.v ? ' checked' : '') + '> 表示</label></td><td class="t2' + (P.freight.red ? ' c01-cr' : '') + '">' + esc(P.freight.why) + '</td></tr>' +
         '<tr><th>B/L 形態</th><td><select data-cbl><option value=""' + (!P.bl.v ? ' selected' : '') + '>（選んでください）</option>' +
         ['original', 'waybill', 'surrender'].map(function (k) { return '<option value="' + k + '"' + (P.bl.v === k ? ' selected' : '') + '>' + BL_LABEL[k] + '</option>'; }).join('') + '</select></td><td class="t2' + (!P.bl.v ? ' c01-cr' : '') + '">' + esc(st.blWhy) + '</td></tr></table>';
@@ -329,6 +417,7 @@ C01.customs = (function () {
     h += '<section class="c01-csec"><h4>添付 ' + (r && r.ok ? '<span class="mono">' + esc(r.file) + '</span> · ' + r.pages + ' ページ · ' + Math.round(r.bytes / 1024) + ' KB' : '') + '</h4>' +
       (st.pdfUrl ? '<iframe class="c01-cpdf" title="PDF" src="' + st.pdfUrl + '"></iframe>' : '<p class="t2">—</p>') + '</section>';
     h += '</div>';
+    if (st.sendErr) h = h.replace(/<\/div>$/, '') + '<p class="c01-warn2 c01-csenderr" data-csenderr>送信できませんでした: ' + esc(st.sendErr) + '</p></div>';
     var bl = ready ? blockers() : ['準備中'];
     h += '<div class="c01-mf"><span class="t2 c01-cwhy" data-cwhy>' + esc(bl.length ? '送れません: ' + bl[0] + (bl.length > 1 ? '（ほか ' + (bl.length - 1) + '）' : '') : '送信できます') + '</span><span class="c01-flex"></span>' +
       '<button class="c01-btn-pri" data-csendgo' + (bl.length ? ' disabled' : '') + '>' + (testMode() ? '送信（試験 · 自分あて）' : '送信') + '</button></div>';
@@ -384,7 +473,7 @@ C01.customs = (function () {
       '\n件名: ' + subj + '\n添付: ' + r.file + '（' + r.pages + ' ページ）\nよろしいですか？';
     if (!window.confirm(msg)) return;
     if (again && !window.confirm('この IV はすでに送付済みです。本当にもう一度送りますか？')) return;
-    st.busy = true; draw();
+    st.busy = true; st.sendErr = ''; draw();
     var ivNo = st.iv;
     a.S.src.customsSend({ replyToId: st.mail.last.id, conv: null, subject: subj, html: bodyHtml(st.body || ''), pdf_b64: r.pdf_b64, file: r.file,
       to: rc.to.map(function (x) { return x.a; }), cc: rc.cc.map(function (x) { return x.a; }) }).then(function (res) {
@@ -394,14 +483,57 @@ C01.customs = (function () {
           picks: { ivSino: r.picks.ivSino.v, siSino: r.picks.siSino.v, pod: r.picks.pod.v, freight: r.picks.freight.v },
           bl: r.picks.bl.v, buyer_id: (r.info || {}).buyer_id || st.buyer || '', consignee: (r.info || {}).consignee || '',
           red: (r.warnings || []).filter(function (w) { return w.red; }).map(function (w) { return w.item; }),
-          real_to_n: rc.to.length, real_cc_n: rc.cc.length, broker_dom: st.brokerDom || '', broker_line: String(st.body || '').split(/\r?\n/)[0].trim() } }));
+          real_to_n: rc.to.length, real_cc_n: rc.cc.length, broker_dom: st.brokerDom || '', broker_line: String(st.body || '').split(/\r?\n/)[0].trim(),
+          broker_person: personLine(st.body), name_src: st.nameSrc || null } }));
     }).then(function () {
       a.toast((test ? '試験送信しました（あなた宛て）' : '送信しました') + ' — ' + ivNo, 'ok');
       st = null; a.closeModal(); a.render();
     }).catch(function (e) {
-      if (st) { st.busy = false; draw(); }
-      a.toast('送信できませんでした: ' + e.message, 'error');
+      if (st) { st.busy = false; st.sendErr = e.message; draw(); }
+      stickyErr('送信できませんでした: ' + e.message);
     });
   }
-  return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; } };
+  /* v0.3.66 (R12Y3 · #366 ③): 失敗の知らせは 「閉じる」 を押すまで消えない (すぐ消える toast では読めなかった) */
+  function stickyErr(msg) {
+    var old = document.getElementById('c01-cerr');
+    if (old) old.remove();
+    var d = document.createElement('div');
+    d.id = 'c01-cerr';
+    d.className = 'c01-cerr';
+    d.setAttribute('role', 'alert');
+    d.innerHTML = '<span></span><button type="button" class="c01-btn-ghost2" data-cerr-close>閉じる</button>';
+    d.firstChild.textContent = msg;
+    d.querySelector('[data-cerr-close]').onclick = function () { d.remove(); };
+    document.body.appendChild(d);
+  }
+  function personLine(body) {
+    var l = String(body || '').split(/\r?\n/).map(function (x) { return x.trim(); }).filter(function (x) { return SAMA_RE.test(x); })[0] || '';
+    return l.replace(SAMA_RE, '').trim();
+  }
+  function nameSrcLine() {
+    var s = st.nameSrc;
+    if (!s) return '';
+    var esc = api().esc;
+    var b = s.broker || '見つかりません', p = s.person || '見つかりません';
+    return '<p class="t2 c01-cnamesrc" data-cnamesrc>宛名の出どころ: ' + (b === p ? esc(b) : '会社名 = ' + esc(b) + ' · 担当者 = ' + esc(p)) + '</p>';
+  }
+  /* v0.3.66 (R12Y3 · #366 ①): POD = 今の S/I (IV·PL) の COMPASS の値 (D-03 の手動画面と同じ形 · 値の無い番号は薄く · 押せない) */
+  function podCell(P) {
+    var esc = api().esc, si = null;
+    if (Array.isArray(st.si)) si = st.si.filter(function (x) { return Number(x.crcf9_sino) === Number(P.ivSino.v); })[0] || null;
+    var h = [1, 2, 3].map(function (n) {
+      var on = P.pod.v.indexOf(n) >= 0, ord = ['1st', '2nd', '3rd'][n - 1];
+      if (!si) return '<label><input type="checkbox" data-cpod="' + n + '"' + (on ? ' checked' : '') + '> ' + n + '</label>';
+      var val = si['crcf9_place_of_delivery_' + n] || '';
+      var dis = !val && !on;
+      return '<label class="c01-cpodl' + (dis ? ' c01-cpod-off' : '') + '"><input type="checkbox" data-cpod="' + n + '"' + (on ? ' checked' : '') + (dis ? ' disabled' : '') + '> ' + ord + ' POD' +
+        (val ? ' <span class="c01-cpodv" data-cpodv="' + n + '">' + esc(val) + '</span>' : '') + '</label>';
+    }).join('');
+    if (!si) return h + '<div class="c01-cy" data-cpodng>COMPASS の POD を読めませんでした</div>';
+    var bl = [1, 2, 3].map(function (n) { return si['crcf9_pod_bl' + n] || ''; }).filter(Boolean);
+    var sub = (bl.length ? 'B/L: ' + bl.join(' / ') : '') + (si.crcf9_port_of_discharge ? (bl.length ? ' · ' : '') + 'Port of Discharge: ' + si.crcf9_port_of_discharge : '');
+    return '<div class="c01-cpods">' + h + '</div>' + (sub ? '<div class="t2 c01-cpodsub" data-cpodsub>' + esc(sub) + '</div>' : '');
+  }
+  return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
+    _greeting: greeting, _sigCompany: sigCompany };
 })();
