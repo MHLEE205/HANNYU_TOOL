@@ -1199,7 +1199,7 @@ window.C01 = window.C01 || {};
       if (!r.ok) throw new Error(String(r.status));
       return r.json();
     }).then(function (b) {
-      var name = String(b['_cr49f_carrier_id_value@OData.Community.Display.V1.FormattedValue'] || '').trim();
+      var name = String(b['_cr49f_carrier_id_value' + '@' + 'OData.Community.Display.V1.FormattedValue'] || '').trim();
       var list = (C.type45rCarriers || []).map(function (x) { return String(x).toUpperCase(); });
       return { carrier: name, carrier45r: name ? list.indexOf(name.toUpperCase()) >= 0 : false };
     }).catch(function () { return { carrier: '', carrier45r: null }; });

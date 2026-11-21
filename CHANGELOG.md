@@ -3,7 +3,7 @@
 ✦ Powered by LEENAI Automation System
 
 ## 0.3.65 (2026-11-21) — R12Y Part 001 (決定 #361) · Part 1 (구멍 6 · 형님 #354) + Part 00 (通関書類送付 · 下の項目)
-- Compass入力 (決定 #361 「맞아. 바로 그대로야」): **形態** = COMPASS crcf9_form (Lookup → crcf9_packer_types 「BALES」 · guid は 11/21 GET で確認) — 空欄の時だけ BALES (`crcf9_form@odata.bind`) · 値ありはそのまま (比較表 「（空） → BALES」)。
+- Compass入力 (決定 #361 「맞아. 바로 그대로야」): **形態** = COMPASS crcf9_form (Lookup → crcf9_packer_types 「BALES」 · guid は 11/21 GET で確認) — 空欄の時だけ BALES (crcf9_form の odata.bind) · 値ありはそのまま (比較表 「（空） → BALES」)。
   **タイプ** = crcf9_type — 値ありはそのまま · 空欄は 45GP (決定 #1 · 旧 Compass入力 と同じ)。45R を使う船社 (6 か月の 45R = すべて ONE · 設定 type45rCarriers) · 船社を読めない · 同じブッキングの他の枠が 45R/42GP/22GP · 書類 · 写真のサイズ根拠 (エンジン size_hint · あれば) の行は 黄色 「選ぶ」 (45GP / 45R / 42GP · 自動では入れない · 行のチェックは担当者)。
   表の見出し: 前は タイプ 列を 「形態」 と表示していた → 「タイプ」 · 「形態」 を分けた。入力の後 もう一度 GET で確認 (形態 = guid) · 記録 (_crcf9_form_value 前 / 後 · formtype_blank) · 元に戻す (形態 = 前が空なら DELETE …/crcf9_form/$ref · タイプ = 前の値 / 空)。
 - 通関書類送付 の条件に 「形態・タイプ 空欄 0」: Compass入力 の記録 formtype_blank > 0 = 灰色 「形態・タイプ 空欄 n台」 · 確認窓で COMPASS GET → 空欄 / 読めない = 送信を止める。

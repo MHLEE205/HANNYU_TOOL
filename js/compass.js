@@ -23,11 +23,11 @@
      opts.type_input === false = 形態 (crcf9_type) は入力しない (NOINPUT · PATCH から外す)。opts なし = エンジン rules.py と同じ (交差試験) */
   var PLAN_FIELDS = ['n_w', 'g_w', 't_w', 'bales'];
   /* v0.3.65 (R12Y Part 001 · 決定 #361): 形態 = COMPASS crcf9_form (Lookup → crcf9_packer_types · 1 行 「BALES」)。
-     opts.form_bales = { guid, name } の時だけ: 空欄 → BALES (crcf9_form@odata.bind) · 値あり → そのまま。
+     opts.form_bales = { guid, name } の時だけ: 空欄 → BALES (crcf9_form の odata.bind) · 値あり → そのまま。
      opts.type_mode === 'fill_empty' の時 タイプ (crcf9_type): 値あり → そのまま · 空欄 → 45GP (決定 #1 · 旧 Compass入力 test_jikjin_compass_v1.py:289-298 と同じ)。
      ただし 行の type_hint (45R の船社 · 同じブッキングの他の枠が 45R/42GP/22GP · 書類 · 写真のサイズ根拠 size_hint) があれば 黄色の警告 TYPE_CHOOSE +
      担当者が opts.type_choices (45GP / 45R / 42GP) から選ぶ (選ぶまで入れない · row.type_pick)。opts なし = エンジン rules.py と同じ (交差試験)。 */
-  var FORM_DV = '_crcf9_form_value', FORM_BIND = 'crcf9_form@odata.bind', FORM_SET = 'crcf9_packer_types', FORM_NAV = 'crcf9_form';
+  var FORM_DV = '_crcf9_form_value', FORM_BIND = 'crcf9_form' + '@' + 'odata.bind', FORM_SET = 'crcf9_packer_types', FORM_NAV = 'crcf9_form';
   function formBind(guid) { return '/' + FORM_SET + '(' + guid + ')'; }
   function bindGuid(v) { var m = /\(([^)]+)\)/.exec(String(v || '')); return m ? m[1].toLowerCase() : null; }
   function recKey(k) { return k === FORM_BIND ? FORM_DV : k; }

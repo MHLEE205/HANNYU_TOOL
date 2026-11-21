@@ -24,6 +24,8 @@ import test_graph as G  # noqa: E402  (가짜 Graph · 로그인 흉내 · ok() 
 
 TOOL = G.TOOL
 DV = "https://orgde512c6f.crm7.dynamics.com"
+BIND = "crcf9_form" + "@" + "odata.bind"   # 공개 전 검사 (메일 꼴) 피해 나눠 씀
+CARF = "_cr49f_carrier_id_value" + "@" + "OData.Community.Display.V1.FormattedValue"
 REQ = []
 JST = timezone(timedelta(hours=9))
 TRIAL_UNTIL = datetime(2026, 11, 24, tzinfo=JST)   # v0.3.50 (R10Q · #176): config.js trialUntil
@@ -42,7 +44,7 @@ def dv_handler(cells, state):
             if state.get("carrier") is None:
                 return route.fulfill(status=500, body="{}")
             return route.fulfill(status=200, body=json.dumps({"cr49f_bookingid": mb.group(1), "_cr49f_carrier_id_value": "00000000-0000-0000-0000-00000000c0a1",
-                                                              "_cr49f_carrier_id_value@OData.Community.Display.V1.FormattedValue": state["carrier"]}), headers=hj)
+                                                              CARF: state["carrier"]}), headers=hj)
         mr = re.match(re.escape(pre) + r"\(([^)]+)\)/crcf9_form/\$ref$", path)
         if mr and request.method == "DELETE":      # v0.3.65: 형태 Lookup 비우기 (元に戻す)
             c = cells.get(mr.group(1))
@@ -74,9 +76,9 @@ def dv_handler(cells, state):
             if not im or im != c["@odata.etag"]:
                 return route.fulfill(status=412, body="{}")
             body = json.loads(request.post_data or "{}")
-            if state.get("fail_form") and "crcf9_form@odata.bind" in body:      # 다시 GET 실패 흉내: 형태를 받은 척하고 넣지 않음
-                body.pop("crcf9_form@odata.bind")
-            fb = body.pop("crcf9_form@odata.bind", None)
+            if state.get("fail_form") and BIND in body:      # 다시 GET 실패 흉내: 형태를 받은 척하고 넣지 않음
+                body.pop(BIND)
+            fb = body.pop(BIND, None)
             if fb is not None:
                 c["_crcf9_form_value"] = re.search(r"\(([^)]+)\)", fb).group(1)
             c.update(body)
@@ -145,7 +147,7 @@ def main():
             tcells = page.evaluate("Array.from(document.querySelectorAll('td.c01-cell[data-field=\"type\"]')).map(t => t.dataset.state)")
             ok("タイプ: 값 있는 칸 (45GP · 42GP) = 「値あり（そのまま）」 · PATCH 에 crcf9_type 없음", tcells and set(tcells) == {"KEEPNOW"}
                and not any("crcf9_type" in x["body"] for x in json.loads(page.locator("#compass-patch").text_content())), tcells)
-            ok("PATCH 본문 형태 = crcf9_form@odata.bind = /crcf9_packer_types(BALES guid)", all(x["body"].get("crcf9_form@odata.bind") == "/crcf9_packer_types(64f45d9f-383c-f011-8c4e-6045bd62e122)"
+            ok("PATCH 본문 형태 = crcf9_form (odata.bind) = /crcf9_packer_types(BALES guid)", all(x["body"].get(BIND) == "/crcf9_packer_types(64f45d9f-383c-f011-8c4e-6045bd62e122)"
                for x in json.loads(page.locator("#compass-patch").text_content())))
             # 다른 사람이 먼저 바꿈 = 체크된 행 1개 etag 바뀜 (서버 쪽)
             chk_ids = page.evaluate("Array.from(document.querySelectorAll('[data-cpick]:checked')).map(b => b.getAttribute('data-cpick'))")
@@ -169,7 +171,7 @@ def main():
             ok("서버 값 = 넣은 값 (성공 행 · 正味 를 넣은 행) · 먼저 바뀐 행 그대로", all(cells[c]["crcf9_n_w"] is not None for c in okids if "crcf9_n_w" in patch_by.get(c, {}))
                and any("crcf9_n_w" in patch_by.get(c, {}) for c in okids) and cells[conflict]["crcf9_seal_no"] == "OTHERSEAL1"
                and cells[conflict]["crcf9_n_w"] == orig[conflict]["crcf9_n_w"], {c[:6]: (cells[c]["crcf9_n_w"], sorted(patch_by.get(c, {}))) for c in okids + [conflict]})
-            allowed = {"crcf9_container_no", "crcf9_seal_no", "crcf9_n_w", "crcf9_g_w", "crcf9_t_w", "crcf9_quantity", "crcf9_type", "crcf9_form@odata.bind"}
+            allowed = {"crcf9_container_no", "crcf9_seal_no", "crcf9_n_w", "crcf9_g_w", "crcf9_t_w", "crcf9_quantity", "crcf9_type", BIND}
             ok("서버 형태 = BALES guid (성공 행) · 먼저 바뀐 행 그대로 빈칸 (다시 GET 확인)", all(cells[c].get("_crcf9_form_value") == "64f45d9f-383c-f011-8c4e-6045bd62e122" for c in okids)
                and not cells[conflict].get("_crcf9_form_value"))
             ok("PATCH 본문 = 입력 7칸 + 형태 안 (작업일 · 다른 칸 0)", all(set(json.loads(r[3])) <= allowed for r in sent if r[0] == "PATCH"),

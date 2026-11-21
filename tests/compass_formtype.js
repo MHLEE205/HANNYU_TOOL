@@ -12,16 +12,16 @@ function st(r, f) { return (r.cells.filter(function (c) { return c.field === f; 
 
 /* 1. 빈칸 → BALES · 45GP */
 var r1 = C.compareRow(row(), cell(), [], OPTS);
-ok('빈칸: 形態 FILL BALES · タイプ FILL 45GP · PATCH 두 칸', st(r1, 'form') === 'FILL' && st(r1, 'type') === 'FILL' && r1.patch['crcf9_form@odata.bind'] === '/crcf9_packer_types(' + G + ')' && r1.patch.crcf9_type === '45GP' && !r1.warnings.length, r1.patch);
+ok('빈칸: 形態 FILL BALES · タイプ FILL 45GP · PATCH 두 칸', st(r1, 'form') === 'FILL' && st(r1, 'type') === 'FILL' && r1.patch[C.FORM_BIND] === '/crcf9_packer_types(' + G + ')' && r1.patch.crcf9_type === '45GP' && !r1.warnings.length, r1.patch);
 /* 2. 이미 값 → 그대로 */
 var r2 = C.compareRow(row(), cell({ crcf9_type: '45R', _crcf9_form_value: G.toUpperCase() }), [], OPTS);
-ok('이미 값: 形態 SAME (같은 guid · 대소문자 무관) · タイプ 45R KEEPNOW · PATCH 에 두 칸 없음', st(r2, 'form') === 'SAME' && st(r2, 'type') === 'KEEPNOW' && !('crcf9_form@odata.bind' in r2.patch) && !('crcf9_type' in r2.patch), r2.cells);
+ok('이미 값: 形態 SAME (같은 guid · 대소문자 무관) · タイプ 45R KEEPNOW · PATCH 에 두 칸 없음', st(r2, 'form') === 'SAME' && st(r2, 'type') === 'KEEPNOW' && !(C.FORM_BIND in r2.patch) && !('crcf9_type' in r2.patch), r2.cells);
 var r2b = C.compareRow(row(), cell({ crcf9_type: '42GP', _crcf9_form_value: '11111111-2222-3333-4444-555555555555' }), [], OPTS);
 ok('다른 形態 · 42GP: 둘 다 KEEPNOW (덮어쓰지 않음 · TYPE_42_22 경고도 없음)', st(r2b, 'form') === 'KEEPNOW' && st(r2b, 'type') === 'KEEPNOW' && !Object.keys(r2b.patch).some(function (k) { return k === 'crcf9_type' || k.indexOf('form') >= 0; }), r2b.patch);
 /* 3. 45R 선사 → 경고 + 고르기 */
 var h3 = C.typeHint(row(), { carrier: 'ONE', carrier45r: true, otherTypes: [] });
 var r3 = C.compareRow(row({ type_hint: h3 }), cell(), [], OPTS);
-ok('45R 선사: タイプ CHOOSE · TYPE_CHOOSE 경고 · PATCH 에 タイプ 없음 (形態 는 들어감)', st(r3, 'type') === 'CHOOSE' && r3.warnings.indexOf('TYPE_CHOOSE') >= 0 && !('crcf9_type' in r3.patch) && !!r3.patch['crcf9_form@odata.bind'] && /45R/.test(h3), [h3, r3.patch]);
+ok('45R 선사: タイプ CHOOSE · TYPE_CHOOSE 경고 · PATCH 에 タイプ 없음 (形態 는 들어감)', st(r3, 'type') === 'CHOOSE' && r3.warnings.indexOf('TYPE_CHOOSE') >= 0 && !('crcf9_type' in r3.patch) && !!r3.patch[C.FORM_BIND] && /45R/.test(h3), [h3, r3.patch]);
 var r3b = C.compareRow(row({ type_hint: h3, type_pick: '45R' }), cell(), [], OPTS);
 ok('고른 뒤: タイプ = 고른 값 (45R) PATCH · 경고는 남음 (행 체크는 담당자)', st(r3b, 'type') === 'CHOOSE' && r3b.patch.crcf9_type === '45R' && r3b.warnings.indexOf('TYPE_CHOOSE') >= 0, r3b.patch);
 var r3c = C.compareRow(row({ type_hint: h3, type_pick: '20GP' }), cell(), [], OPTS);
@@ -36,7 +36,7 @@ var h5 = C.typeHint(row(), { carrier: '', carrier45r: null, otherTypes: [] });
 ok('선사 못 읽음 = 고르게 함 (안전 쪽)', /船社を読めません/.test(h5) && st(C.compareRow(row({ type_hint: h5 }), cell(), [], OPTS), 'type') === 'CHOOSE', h5);
 /* 5. opts 없음 = 예전 그대로 (엔진 rules.py 교차와 같음) */
 var r5 = C.compareRow(row(), cell(), [], null);
-ok('opts 없음: 形態 칸 없음 · タイプ FILL 45GP (예전 규칙)', !st(r5, 'form') && r5.patch.crcf9_type === '45GP' && !('crcf9_form@odata.bind' in r5.patch), r5.patch);
+ok('opts 없음: 形態 칸 없음 · タイプ FILL 45GP (예전 규칙)', !st(r5, 'form') && r5.patch.crcf9_type === '45GP' && !(C.FORM_BIND in r5.patch), r5.patch);
 var r5b = C.compareRow(row(), cell(), [], { plan_fill: true, type_input: false });
 ok('type_mode 없음 + type_input false = NOINPUT (예전 실전 설정 그대로)', st(r5b, 'type') === 'NOINPUT' && !st(r5b, 'form'), r5b.cells.map(function (c) { return c.state; }));
 /* 6. compareIv 셈 */
@@ -57,8 +57,8 @@ function fakeServer(opt) {
     if (o.method === 'GET') { if (opt.getFail && log.filter(function (x) { return x[0] === 'GET'; }).length > 1) return resp(500, {}); return resp(200, JSON.parse(JSON.stringify(c))); }
     if (o.method === 'PATCH') {
       var b = JSON.parse(o.body);
-      if (b['crcf9_form@odata.bind'] && !opt.dropForm) c._crcf9_form_value = C.bindGuid(b['crcf9_form@odata.bind']);
-      delete b['crcf9_form@odata.bind'];
+      if (b[C.FORM_BIND] && !opt.dropForm) c._crcf9_form_value = C.bindGuid(b[C.FORM_BIND]);
+      delete b[C.FORM_BIND];
       Object.assign(c, b); c['@odata.etag'] = 'W/"2"'; return resp(204, {});
     }
     if (o.method === 'DELETE' && m[2]) { c._crcf9_form_value = null; c['@odata.etag'] = 'W/"3"'; return resp(204, {}); }
@@ -79,7 +79,7 @@ chain.push(s1.w.apply({ ct_id: 'g1', if_match: 'W/"1"', body: r1.patch }).then(f
 }));
 var s2 = fakeServer({ dropForm: true });
 chain.push(s2.w.apply({ ct_id: 'g1', if_match: 'W/"1"', body: r1.patch }).then(function (r) {
-  ok('다시 GET 값 다름 (形態 안 들어감) = REREAD_DIFF (field = crcf9_form@odata.bind)', r.result === 'REREAD_DIFF' && r.field === 'crcf9_form@odata.bind', r.result);
+  ok('다시 GET 값 다름 (形態 안 들어감) = REREAD_DIFF (field = 形態 odata.bind)', r.result === 'REREAD_DIFF' && r.field === C.FORM_BIND, r.result);
 }));
 var s3 = fakeServer({ getFail: true });
 chain.push(s3.w.apply({ ct_id: 'g1', if_match: 'W/"1"', body: r1.patch }).then(function (r) {

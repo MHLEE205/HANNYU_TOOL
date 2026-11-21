@@ -109,7 +109,7 @@ def fake_d03(pdf_b64, containers):
 window.__runs=[];
 window.D03AUTO={version:'4.13',ready:Promise.resolve(true),run:function(o){window.__runs.push(o);
  var bl=o.bl||'';
- var W=[{red:true,item:'D-03 未確定項目',text:'タイ SHIPPING MARK'},{red:false,item:'D-03 未確定項目',text:'INSURANCE 最低フロア (CIF)'}];
+ var W=[{red:true,item:'D-03 未決項目',text:'タイ SHIPPING MARK'},{red:false,item:'D-03 未決項目',text:'INSURANCE 最低フロア (CIF)'}];
  if(!bl) W.unshift({red:true,item:'B/L',text:'B/L 形態を選んでください'});
  return Promise.resolve({ok:true,version:'4.13',iv:o.iv,file:o.iv+'_IV_PL_SI.pdf',pages:2,pdf_b64:'%s',bytes:900,sha256:'ab'.repeat(32),
   picks:{ivSino:{v:2,why:'最終番号 (S/I②)'},siSino:{v:1,why:'S/I①'},pod:{v:[1],why:'候補 1 つ'},freight:{v:true,why:'CIF = 運賃あり'},bl:{v:bl,why:o.blWhy||''}},
