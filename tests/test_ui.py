@@ -4030,6 +4030,31 @@ def r12y11_checks(page, root, shots, engine_new):
     ok("R12Y11 엔진 목록이 좁으면 (가상 · 搬入票 · 手入力) TOOL 도 그 목록을 따름 (한 곳)", got["narrow"] == want_narrow, got["narrow"])
 
 
+def r12y12_checks(page, root, shots):
+    """v0.3.72 (R12Y12 0-A): 「このまま確認」 출처 (keepSrc) — meta.sources.action 있음: 값이 목록 안 출처에 있으면 그 출처 · 목록 밖 출처에만 = 手入力 ·
+    출처 모름 = 搬入票 (0.3.71 그대로) · meta.sources 없음 = 0.3.71 그대로."""
+    cases = [
+        ("목록 안 (写真)", {"values": {"写真": ["A1"]}}, "A1"),
+        ("목록 밖에만 (業者フォルダ名)", {"values": {"業者フォルダ名": ["A1"]}}, "A1"),
+        ("목록 밖 + 목록 안 (밖이 먼저)", {"values": {"業者フォルダ名": ["A1"], "写真": ["A1"]}}, "A1"),
+        ("출처 모름 (값 없음)", {"values": {"写真": ["B2"]}}, "A1"),
+        ("field_sources agree 목록 밖", {"values": {}, "field_sources": {"seal": [{"src": "業者フォルダ名", "agree": True}]}}, "A1"),
+        ("field_sources agree 목록 안", {"values": {}, "field_sources": {"seal": [{"src": "搬入票", "agree": True}]}}, "A1"),
+        ("手入力 에만", {"values": {"手入力": ["A1"]}}, "A1"),
+    ]
+    got = page.evaluate("""a => { var keep = C01.state.meta; var out = {on: [], off: []};
+        C01.state.meta = Object.assign({}, keep || {}, {sources: {action: ['搬入票', '写真', 'Excel', '手入力'], values: []}});
+        a.forEach(function (c) { out.on.push(C01.keepSrc(c[1], 'seal', c[2])); });
+        var m2 = Object.assign({}, keep || {}); delete m2.sources; C01.state.meta = m2;
+        a.forEach(function (c) { out.off.push(C01.keepSrc(c[1], 'seal', c[2])); });
+        C01.state.meta = keep; return out; }""", cases)
+    want_on = ["写真", "手入力", "写真", "搬入票", "手入力", "搬入票", "搬入票"]
+    want_off = ["写真", "搬入票", "搬入票", "搬入票", "搬入票", "搬入票", "搬入票"]   # 0.3.71 그대로 (첫 출처 · 목록 밖 = 搬入票)
+    ok("R12Y12 keepSrc 목록 있음: 목록 안 = 그 출처 · 목록 밖 출처에만 = 手入力 · 모름 = 搬入票", got["on"] == want_on, (got["on"], want_on))
+    ok("R12Y12 keepSrc 목록 없음 (옛 엔진) = 0.3.71 그대로", got["off"] == want_off, (got["off"], want_off))
+    ok("R12Y12 keepSrc 목록 안 출처 값은 목록 있음 · 없음 같음", got["on"][0] == got["off"][0] and got["on"][5] == got["off"][5])
+
+
 def r10x_checks(page, root, shots, engine_frz):
     """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
     「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
@@ -4645,11 +4670,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.71", page.title() == "LEENAI C-01 搬入票 v0.3.71", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.72", page.title() == "LEENAI C-01 搬入票 v0.3.72", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.71" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.72" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -5187,6 +5212,7 @@ def main():
             r12x_checks(page, root, shots, a.engine_r12x)
             r12y9_checks(page, root, shots, a.engine_r12x)
             r12y11_checks(page, root, shots, a.engine_r12x)
+            r12y12_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

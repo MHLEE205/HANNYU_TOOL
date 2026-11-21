@@ -1605,12 +1605,23 @@ window.C01 = window.C01 || {};
     return Array.isArray(a) && a.length ? a.indexOf(s) >= 0 : !!KEEP_SRC[s];
   }
   C01.actSrc = function (s) { return actSrcOk(s) ? s : '手入力'; };
+  /* v0.3.72 (R12Y12 0-A): エンジン meta.sources.action がある時 — 値のある出所のうち 一覧にあるもの (先頭) · 一覧に無い出所 (業者フォルダ名 など) にしか
+     値が無い = 手入力 (人の値 · 「搬入票」 と書かない) · 値の出所が分からない = 搬入票 (0.3.71 のまま)。一覧が無い (古いエンジン) = 0.3.71 のまま */
   function keepSrc(q, fd, val) {
-    var s0 = null;
-    Object.keys((q && q.values) || {}).forEach(function (k) { if (!s0 && (q.values[k] || []).some(function (v) { return String(v) === String(val); })) s0 = k; });
-    if (!s0) (((q && q.field_sources) || {})[fd] || []).forEach(function (x) { if (!s0 && x.agree) s0 = x.src; });
-    return (s0 && s0 !== '手入力' && actSrcOk(s0)) ? s0 : '搬入票';
+    var a = S.meta && S.meta.sources && S.meta.sources.action;
+    var hasList = Array.isArray(a) && a.length > 0;
+    var hit = [];
+    Object.keys((q && q.values) || {}).forEach(function (k) { if ((q.values[k] || []).some(function (v) { return String(v) === String(val); })) hit.push(k); });
+    if (!hit.length) (((q && q.field_sources) || {})[fd] || []).forEach(function (x) { if (x.agree && (hasList || !hit.length)) hit.push(x.src); });
+    if (!hasList) {
+      var s0 = hit[0] || null;
+      return (s0 && s0 !== '手入力' && actSrcOk(s0)) ? s0 : '搬入票';
+    }
+    var ok = hit.filter(function (s) { return s && s !== '手入力' && actSrcOk(s); });
+    if (ok.length) return ok[0];
+    return hit.some(function (s) { return s && s !== '手入力'; }) ? '手入力' : '搬入票';
   }
+  C01.keepSrc = keepSrc;
   function keepPlan(iv, r, ov) {
     var x = statusOf(r, iv, ov), acts = [], block = [];
     var cur = function (fd) { return x.human[fd] ? x.human[fd].value : r[fd]; };
