@@ -4055,6 +4055,18 @@ def r12y12_checks(page, root, shots):
     ok("R12Y12 keepSrc 목록 안 출처 값은 목록 있음 · 없음 같음", got["on"][0] == got["off"][0] and got["on"][5] == got["off"][5])
 
 
+def r12y14_checks(page, root, shots):
+    """v0.3.73 (R12Y14 Part 0): info 「検査書類=参考(…)」 → 회색 배지 「検査書類は参考」 (title = 뺀 칸만) · 없음 = 배지 없음 · 모르는 info = 그대로 안 보임."""
+    cases = [["検査書類=参考(N/W)"], [], ["検査書類=参考(N/W,G/W)"], ["検査書類=補助(作業日)", "UNKNOWN_INFO_X"], ["検査書類=参考(G/W)", "AI_GROUP_DIFF"]]
+    got = page.evaluate("a => a.map(function (i) { var d = document.createElement('div'); d.innerHTML = C01.inspRefBadge({info: i});"
+                        " var b = d.querySelector('.c01-inspref'); return b ? [b.textContent, b.getAttribute('title')] : null; })", cases)
+    ok("R12Y14 배지 있음 (N/W) = 「検査書類は参考」 · title N/W", got[0] == ["検査書類は参考", "検査書類の N/W は値の出どころに数えません"], got[0])
+    ok("R12Y14 배지 없음 (info 없음 · 補助 · 모르는 info)", got[1] is None and got[3] is None, (got[1], got[3]))
+    ok("R12Y14 N/W・G/W 둘 다 = title 「N/W・G/W」 · G/W 만 = G/W", got[2] == ["検査書類は参考", "検査書類の N/W・G/W は値の出どころに数えません"]
+       and got[4] == ["検査書類は参考", "検査書類の G/W は値の出どころに数えません"], (got[2], got[4]))
+    page.screenshot(path=str(shots / "r12y14_inspref.png"))
+
+
 def r10x_checks(page, root, shots, engine_frz):
     """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
     「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
@@ -4670,11 +4682,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.72", page.title() == "LEENAI C-01 搬入票 v0.3.72", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.73", page.title() == "LEENAI C-01 搬入票 v0.3.73", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.72" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.73" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -5213,6 +5225,7 @@ def main():
             r12y9_checks(page, root, shots, a.engine_r12x)
             r12y11_checks(page, root, shots, a.engine_r12x)
             r12y12_checks(page, root, shots)
+            r12y14_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")

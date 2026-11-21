@@ -231,6 +231,7 @@ button.c01-blocked { background: transparent; cursor: pointer; font-family: inhe
 .c01-mh .c01-btn-ghost2, .c01-mf .c01-btn-pri { width: auto; flex: 0 0 auto; min-height: 32px; padding: 4px 14px; }
 /* v0.2.2 (#109): 行の情報表示 · スロット変更 */
 .c01-ibadge { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--line, #8884); color: var(--text2); font-size: 11px; cursor: help; white-space: nowrap; }
+.c01-inspref { color: var(--text3, #999); border-style: dashed; }   /* v0.3.73 (R12Y14): 検査書類は参考 = 灰色 · 小さい */
 .c01-slotbtn { margin-left: 4px; min-width: 24px; min-height: 22px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--line, #8884); background: transparent; color: var(--text2); font-size: 12px; cursor: pointer; font-family: inherit; }
 .c01-slotbtn:hover { color: var(--c-diff); }
 .c01-slotlist { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }

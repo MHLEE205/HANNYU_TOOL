@@ -1845,8 +1845,22 @@ window.C01 = window.C01 || {};
       ' を写真から読めず、ほかの出処もありません — 読める写真の再送をお願いするか、担当者が判断してください（自動では送りません）') + '">再送依頼候補</span>';
     var mg = mergeBadge(r);
     if (mg) out += mg;
+    var ib = inspRefBadge(r);
+    if (ib) out += ib;
     return out;
   }
+  /* v0.3.73 (R12Y14 Part 0 · エンジン v0.5.165 s3_inspection_weight_ref): info 「検査書類=参考(N/W,G/W…)」 = 検査書類 (COTECNA など) の重量は
+     値の出どころに数えていない行 — 灰色の小さい 「検査書類は参考」 (表示だけ · 判定 · 確認・入力 は変わりません) */
+  function inspRefBadge(r) {
+    var hit = ((r && r.info) || []).filter(function (s) { return /^検査書類=参考\(/.test(String(s)); });
+    if (!hit.length) return '';
+    var fs = [];
+    hit.forEach(function (s) { String(s).replace(/^検査書類=参考\(/, '').replace(/\)$/, '').split(',').forEach(function (f) { f = f.trim(); if (f && fs.indexOf(f) < 0) fs.push(f); }); });
+    var order = ['N/W', 'T/W', 'G/W'];
+    fs.sort(function (a, b) { var i = order.indexOf(a), j = order.indexOf(b); return (i < 0 ? 9 : i) - (j < 0 ? 9 : j); });
+    return ' <span class="c01-ibadge c01-inspref" data-info="insp_ref" title="' + esc('検査書類の ' + (fs.length ? fs.join('・') : 'N/W・G/W') + ' は値の出どころに数えません') + '">検査書類は参考</span>';
+  }
+  C01.inspRefBadge = inspRefBadge;
   /* v0.3.49 (R10H Part 1 · #305 ③): エンジンが 2 行を 1 行にまとめた行 (同一seal統合 · 同一搬入票(再送) · 行まとめ(人)) = 「2行→1行」 (表示だけ) */
   var MERGE_TEXT = { '同一seal統合': '同じシールの 書類の行 と 写真の行 を 1 行にまとめました（写真の CT · 書類の CT は参考）',
     '同一搬入票(再送)': '同じ搬入票の再送（同じ絵 · 同じ重量）— 新しい行を作らず この行に参考としてまとめました（値は変わりません）',
