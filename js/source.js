@@ -344,6 +344,135 @@ C01.sources = (function () {
       return { ok: true };
     });
   };
+  /* ── v0.3.63 (決定 #359 · #302 · #352): 通関書類送付 — 押した職員のメールボックスだけ (/me) · 読むのは GET · 送るのは 「送信」 を押した時の 1 通だけ ── */
+  function oursDom() { return String((C01.CUSTOMS && C01.CUSTOMS.ourDomain) || 'leenearcorp.com').toLowerCase(); }
+  function addrOf(r) { return String(((r || {}).emailAddress || {}).address || '').trim().toLowerCase(); }
+  function nameOf(r) { return String(((r || {}).emailAddress || {}).name || '').trim(); }
+  var MSG_SEL = '$select=id,subject,conversationId,sentDateTime,receivedDateTime,from,toRecipients,ccRecipients,isDraft,internetMessageId';
+  function stripRe(s) { return String(s || '').replace(/^\s*((re|fw|fwd|返信|転送)\s*[:：]\s*)+/i, '').trim(); }
+  /* ① 通関依頼 の件名 = 원조토르 6 か月調査 mail_lib.kind と同じ: 件名 (RE: を除く) で一番前に出た語の種類が ① の時だけ
+     (本船変更 · 本数追加 · 通関書類 · 許可書 などが先にあれば ① ではない = 別の会話に返信しない) */
+  var KW_ORDER = [['④', /本登録/], ['ACL訂正', /ACL\s*訂正|ACL\s*確認/], ['DR訂正', /DR\s*訂正|D\/R\s*訂正/],
+    ['変更', /本船変更|CUT\s*変更|OPEN-CUT|本数(変更|追加)|VOYA/], ['②', /通関書類/], ['③', /許可書|仮\s*ACL|E\/D\s*添付|D\/R\s*添付|D\/R,\s*E\/D/],
+    ['①', /通関\s*[＆&、・]?\s*(ドレージ)?(の)?(ご)?依頼|ドレージ\s*[、・＆&]?\s*通関|新規ドレージ(の)?(ご)?依頼/],
+    ['業者', /ブッキング情報のご案内/]];   /* ブッキング情報のご案内 = 圧縮業者あて (① ではない · 実メール 2 週 21 件で確認) */
+  function isS1Subject(s) {
+    var h = stripRe(s), best = null;
+    KW_ORDER.forEach(function (k) { var m = k[1].exec(h); if (m && (best === null || m.index < best[0])) best = [m.index, k[0]]; });
+    return !!best && best[1] === '①';
+  }
+  Graph.prototype._mailGet = function (path) {
+    return this._fetch(GRAPH + path).then(function (r) {
+      if (r.status === 403) throw new Error('メールを読む権限がありません (403)');
+      if (!r.ok) throw new Error('メールの検索に失敗 (' + r.status + ')');
+      return r.json();
+    });
+  };
+  /* ① = 件名に BKG があり ① の件名の、自社から送ったメール (一番新しいもの) → その会話の一番新しいメール (下書き除く) */
+  Graph.prototype.customsFindS1 = function (bkg) {
+    var self = this;
+    var raw = String(bkg || '').trim().toUpperCase();
+    var b = raw.replace(/[^A-Z0-9]/g, '');
+    if (b.length < 6) return Promise.resolve(null);
+    /* 件名の英数字だけをつないだ文字列に BKG があり、すぐ後ろが数字でない (長い番号の一部ではない) */
+    var hasBkg = function (s) {
+      var ns = String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), i = ns.indexOf(b);
+      while (i >= 0) { if (!/[0-9]/.test(ns.charAt(i + b.length))) return true; i = ns.indexOf(b, i + 1); }
+      return false;
+    };
+    return self._mailGet('me/messages?$search=' + encodeURIComponent('"' + raw.replace(/"/g, '') + '"') + '&$top=50&' + MSG_SEL).then(function (j) {
+      var xs = (j.value || []).filter(function (m) {
+        return !m.isDraft && addrOf(m.from).split('@')[1] === oursDom() && isS1Subject(m.subject) && hasBkg(m.subject);
+      }).sort(function (x, y) { return String(y.sentDateTime || '').localeCompare(String(x.sentDateTime || '')); });
+      if (!xs.length) return null;
+      var s1 = xs[0];
+      return self._mailGet('me/messages?$filter=' + encodeURIComponent("conversationId eq '" + s1.conversationId.replace(/'/g, "''") + "'") + '&$top=100&' + MSG_SEL).then(function (c) {
+        var L = (c.value || []).filter(function (m) { return !m.isDraft; }).sort(function (x, y) {
+          return String(x.sentDateTime || x.receivedDateTime || '').localeCompare(String(y.sentDateTime || y.receivedDateTime || ''));
+        });
+        var last = L.length ? L[L.length - 1] : s1;
+        var pack = function (m) { return { id: m.id, subject: m.subject || '', at: m.sentDateTime || m.receivedDateTime || '', from: addrOf(m.from), from_name: nameOf(m.from),
+          to: (m.toRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }), cc: (m.ccRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }) }; };
+        return { s1: pack(s1), last: pack(last), n_conv: L.length, s1_count: xs.length };
+      });
+    });
+  };
+  /* 送付済みの確認: 件名に 「通関書類送付_{IV}」 がある自社のメール (自分のメールボックスに見える分 · [test] は別に数える) */
+  Graph.prototype.customsFindSent = function (iv) {
+    var v = String(iv || '').trim();
+    if (!v) return Promise.resolve([]);
+    return this._mailGet('me/messages?$search=' + encodeURIComponent('"通関書類送付_' + v + '"') + '&$top=25&' + MSG_SEL).then(function (j) {
+      return (j.value || []).filter(function (m) {
+        return !m.isDraft && addrOf(m.from).split('@')[1] === oursDom() && String(m.subject || '').indexOf('通関書類送付_' + v) >= 0 && !/^\s*(re|fw|fwd)\s*[:：]/i.test(m.subject || '');
+      }).map(function (m) { return { at: m.sentDateTime || m.receivedDateTime || '', from: addrOf(m.from), from_name: nameOf(m.from), test: /^\s*\[test\]/i.test(m.subject || '') }; });
+    });
+  };
+  /* 送信 (担当者が確認窓で 「送信」 を押した時だけ): ① 会話の一番新しいメールに createReplyAll → 宛先を確認窓の通りに · 件名 · 本文 · PDF → send。
+     鍵: ① C01.CUSTOMS.enabled ② 試験モード (C01.CUSTOMS.sendTest !== false) = 宛先は押した本人 1 人だけ · 件名は [test] で始まる
+         ③ 送る直前に下書きをもう一度読んで 宛先 · 件名 · 添付 1 つ を確かめる (違えば送らない · 下書きは 下書き フォルダに残る) */
+  Graph.prototype.customsSend = function (m) {
+    var self = this;
+    var C = C01.CUSTOMS || {};
+    var test = C.sendTest !== false;
+    var low = function (a) { return String(a || '').trim().toLowerCase(); };
+    if (!C.enabled || !m || !m.replyToId || !m.pdf_b64 || !m.file) return Promise.reject(new Error('送信の条件がそろっていません — 送信しません'));
+    var me = low((LEENAI.user || {}).email);
+    var to = (m.to || []).map(low).filter(Boolean), cc = (m.cc || []).map(low).filter(Boolean);
+    if (test) { to = [me]; cc = []; if (!/^\[test\] /.test(m.subject || '')) return Promise.reject(new Error('試験モードの件名ではありません — 送信しません')); }
+    if (!me || !to.length) return Promise.reject(new Error('宛先がありません — 送信しません'));
+    if (!/^[A-Z]{1,4}\d{4}-\d{1,3}_IV_PL_SI\.pdf$/.test(m.file) || m.subject.indexOf('通関書類送付_' + m.file.split('_')[0] + '】') < 0) return Promise.reject(new Error('件名の IV と添付の IV が違います — 送信しません'));
+    var rcp = function (xs) { return xs.map(function (a) { return { emailAddress: { address: a } }; }); };
+    var J = function (method, path, body) {
+      return self._fetch(GRAPH + path, { method: method, headers: { 'Content-Type': 'application/json' }, body: body == null ? undefined : JSON.stringify(body) }).then(function (r) {
+        if (r.status === 403) throw new Error('メールの権限がありません (403 · Mail.ReadWrite / Mail.Send)');
+        if (!r.ok && r.status !== 202) throw new Error(method + ' ' + path.split('/').slice(0, 4).join('/') + ' 失敗 (' + r.status + ')');
+        return r.status === 202 || r.status === 204 ? {} : r.json();
+      });
+    };
+    var draft = null;
+    var bytes = Math.floor(m.pdf_b64.length * 3 / 4);
+    return J('POST', 'me/messages/' + encodeURIComponent(m.replyToId) + '/createReplyAll', {}).then(function (d) {
+      draft = d;
+      var html = String((d.body || {}).content || '');
+      var mine = '<div>' + m.html + '</div>';
+      html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, function (x) { return x + mine; }) : mine + html;
+      return J('PATCH', 'me/messages/' + encodeURIComponent(d.id), { subject: m.subject, body: { contentType: 'HTML', content: html }, toRecipients: rcp(to), ccRecipients: rcp(cc), bccRecipients: [] });
+    }).then(function () {
+      if (bytes <= 2900000) {
+        return J('POST', 'me/messages/' + encodeURIComponent(draft.id) + '/attachments', { '@odata.type': '#microsoft.graph.fileAttachment', name: m.file, contentType: 'application/pdf', contentBytes: m.pdf_b64 });
+      }
+      /* 3MB 超 = アップロード セッション (4MB ごと · アップロード先 URL には認証ヘッダーを付けない) */
+      return J('POST', 'me/messages/' + encodeURIComponent(draft.id) + '/attachments/createUploadSession', { AttachmentItem: { attachmentType: 'file', name: m.file, size: bytes, contentType: 'application/pdf' } }).then(function (us) {
+        var bin = atob(m.pdf_b64), u8 = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        var CH = 4 * 1024 * 1024 - 320 * 1024, pos = 0;
+        var next = function () {
+          if (pos >= u8.length) return Promise.resolve();
+          var end = Math.min(pos + CH, u8.length);
+          return fetch(us.uploadUrl, { method: 'PUT', headers: { 'Content-Range': 'bytes ' + pos + '-' + (end - 1) + '/' + u8.length, 'Content-Type': 'application/octet-stream' }, body: u8.slice(pos, end) }).then(function (r) {
+            if (!r.ok) throw new Error('添付のアップロード失敗 (' + r.status + ')');
+            pos = end; return next();
+          });
+        };
+        return next();
+      });
+    }).then(function () {
+      return Promise.all([J('GET', 'me/messages/' + encodeURIComponent(draft.id) + '?$select=subject,toRecipients,ccRecipients,bccRecipients,internetMessageId,conversationId'),
+        J('GET', 'me/messages/' + encodeURIComponent(draft.id) + '/attachments?$select=name,size')]);
+    }).then(function (r) {
+      var d = r[0], at = r[1].value || [];
+      var got = function (xs) { return (xs || []).map(addrOf).sort().join(','); };
+      if (d.subject !== m.subject) throw new Error('下書きの件名が違います — 送信しません（下書きは 下書き フォルダに残っています）');
+      if (got(d.toRecipients) !== to.slice().sort().join(',') || got(d.ccRecipients) !== cc.slice().sort().join(',') || (d.bccRecipients || []).length) {
+        throw new Error('下書きの宛先が確認窓と違います — 送信しません（下書きは 下書き フォルダに残っています）');
+      }
+      if (at.length !== 1 || at[0].name !== m.file) throw new Error('添付が ' + m.file + ' 1 つではありません — 送信しません（下書きは 下書き フォルダに残っています）');
+      if (m.conv && d.conversationId && d.conversationId !== m.conv) throw new Error('① の会話ではありません — 送信しません');
+      return J('POST', 'me/messages/' + encodeURIComponent(draft.id) + '/send', null).then(function () {
+        return { ok: true, test: test, internet_message_id: d.internetMessageId || '', to: to, cc: cc };
+      });
+    });
+  };
   Graph.prototype.getStaff = function () {
     /* 担当港 = 共通マスター pol_staff (SharePoint · 列 staff = 担当 · assist = 補助 · 値 = 職員コード)
        職員 = 共通マスター staff (code · email · name_ja) — v0.3.16 (R7O Part D): LEENAI.STAFF (共通ファイルに書かれた一覧) ではなくマスター。

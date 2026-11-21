@@ -7,9 +7,9 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.64',
-  date: '2026-11-18',
-  desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
+  version: '0.3.65',
+  date: '2026-11-21',
+  desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
 /* D-6 → 決定 #109 (R6.8) で決まった規則。ここだけ変える (エンジン engine/actions/apply.py ACTION_RULES と同じ規則) */
@@ -73,6 +73,22 @@ C01.SEND = {
   remindLive: true
 };
 
+/* v0.3.63 (決定 #359 · #302 · #303 · #306 · #338 · #343 · #352): 通関書類送付 — 実況表 IV 見出しの 「通関書類送付」 (Compass入力 の横)。
+   PDF = D-03 自動モード (同じ出所の画面の中 · ?auto=1 · 押した担当者のログイン · COMPASS は読むだけ) · メール = ① 通関依頼 の会話の一番新しいメールに 全員に返信
+   (押した担当者のメール) · 送るのは確認窓で 「送信」 を押した時だけ · 送ったら _actions customs_sent。
+   sendTest: true = 試験モード (宛先 = 押した本人 1 人だけ · 件名の前に [test]) — 実際の宛先へ送る時はこの 1 行を false (管理者の確認の後) */
+C01.CUSTOMS = {
+  enabled: true,
+  sendTest: true,
+  d03Url: 'https://mhlee205.github.io/Shipping_Document/index.html',   /* 同じ出所 (mhlee205.github.io) の時だけ自動モードが動く */
+  ourDomain: 'leenearcorp.com',      /* 自社のメール (① = 自社から送った 通関依頼) */
+  /* 本文 (#352 · 원조토르 6 か月調査 3 節の型) — {broker} = 通関業者の会社名 · {person} = 担当者名 (確認窓で直せる) */
+  body: '{broker}\n{person} 様\n\nいつもお世話になっております。\n通関用の書類を送付いたしますので、ご確認の程お願い致します。\n\n宜しくお願い致します。',
+  /* 署名 = 押した職員 (職員マスターの名前 · メール) + 会社 */
+  signature: '----------------------------------------\n{name}\n株式会社リニア (LEENEAR CORPORATION)\nTEL : +81-3-3528-9850 / FAX : +81-3-3528-9851\n{email}',
+  footer: '✦ Powered by LEENAI Automation System'
+};
+
 /* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 催促 送信直前の確認 — エンジン notify/remind.guard と同じ決まり (エンジンが下書きに付けた allow を使う)。
    ① 宛先 (To) 1 件以上 ② To · CC (固定 CC を除く) · 確認した未受信 = すべて allow.domains (元請の会社ドメイン) か allow.addrs (元請の無料メール)
    ③ 固定 CC (cc_fixed) が CC に全部ある · To に無い ④ allow が無い下書き = 送らない。戻り = 送れない理由の配列 (空 = 送れる) */
@@ -106,7 +122,14 @@ C01.COMPASS = {
   follow_same_cond_slot: false,      /* v0.3.24 (R7X Part D-4): 켜지 않음 (v2 単独なら行き違いなし) */
   /* v0.3.24 (R7X Part D · #214): CT が空の枠の 数値 = ブッキング予定値 → 「予定値 → 入力」 (緑 · 警告なし) / 形態は入力しない (保留) */
   plan_fill: true,
-  type_input: false,
+  type_input: false,      /* type_mode があれば そちらが先 (v0.3.65) */
+  /* v0.3.65 (R12Y Part 001 · 決定 #361 「맞아. 바로 그대로야」): 形態 = COMPASS crcf9_form (Lookup → crcf9_packer_types の 1 行 「BALES」 · guid は 11/21 GET で確認) —
+     空欄の時だけ BALES を入れる (値ありはそのまま)。タイプ = crcf9_type — 値ありはそのまま · 空欄は 45GP。ただし 45R を使う船社 (6 か月の 45R 110 行 = すべて ONE · 11/21 GET) ·
+     同じブッキングの他の枠が 45R/42GP/22GP · 書類・写真のサイズ根拠 があれば 黄色の警告で 担当者が type_choices から選ぶ (自動では入れない)。 */
+  form_bales: { guid: '64f45d9f-383c-f011-8c4e-6045bd62e122', name: 'BALES' },
+  type_mode: 'fill_empty',
+  type45rCarriers: ['ONE'],
+  type_choices: ['45GP', '45R', '42GP'],
   /* v0.3.19 (R7T 決定 #190): COMPASS (Dataverse) の場所 — LEENAI_COMMON と同じ環境 · 読み書きは職員トークン (LEENAI.auth.token('dataverse')) */
   dvUrl: 'https://orgde512c6f.crm7.dynamics.com',
   /* 並行期間 (#176): compass_done 記録の trial (記録だけ · 入力の動きは同じ) */

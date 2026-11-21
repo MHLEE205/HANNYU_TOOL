@@ -2241,7 +2241,11 @@ def r9l_gask_checks(page, root, shots, engine):
     page.fill("#gask-in", "沖縄テスト紙業 から TSTBK0000001 のメール来てるのに写真がない")
     page.press("#gask-in", "Enter")
     page.wait_for_timeout(500)
-    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    for _ in range(40):                      # v0.3.65 (R12Y): 질문 파일이 써질 때까지 (최대 10초) — 고정 500ms 는 늦을 때 ask_id 를 못 찾음
+        new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before] if (root / "_actions" / "ask").exists() else []
+        if new:
+            break
+        page.wait_for_timeout(250)
     g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
     me = page.evaluate("() => (C01.state.me || {}).email")
     gc = g.get("card") or {}
@@ -3100,7 +3104,11 @@ def r9x_checks(page, root, shots, engine):
     page.fill("#gask-in", "TST2611-01 の " + r0["ct"] + " は他社の案件。削除したい")
     page.press("#gask-in", "Enter")
     page.wait_for_timeout(500)
-    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    for _ in range(40):                      # v0.3.65 (R12Y): 질문 파일이 써질 때까지 (최대 10초) — 고정 500ms 는 늦을 때 ask_id 를 못 찾음
+        new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before] if (root / "_actions" / "ask").exists() else []
+        if new:
+            break
+        page.wait_for_timeout(250)
     g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
     key = "a1b2c3d4e5f6"
     rep = {"ask_id": g.get("ask_id"), "scope": "global", "status": "ok", "kind": "guide", "suggestions": [], "approval_request": "", "improve": None,
@@ -4340,7 +4348,7 @@ def r11g_checks(page, root, shots, engine):
     man = {"schema_version": 1, "kind": "manual", **MAN.output()}
     ok("R11G manual.json = 엔진 스키마", SC.errors(man, SC.load("manual")) == [])
     # ① 매뉴얼 버튼 이름 = TOOL 화면 글자 (공개 전 자동 대조 · #305)
-    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "photo.html"))
+    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "js/customs.js", "photo.html"))   # customs.js = v0.3.65 (通関書類送付 버튼)
     miss = [b for b in man["buttons"] if b not in src]
     ok("R11G 매뉴얼 버튼 이름 = TOOL 화면 글자 (" + str(len(man["buttons"])) + "개 · 없음 0)", not miss and len(man["buttons"]) >= 20, miss)
     imiss = [x for x in man["images"] if not (TOOL / "docs" / x).is_file()]
@@ -4408,7 +4416,11 @@ def r11g_checks(page, root, shots, engine):
     page.fill("#gask-in", "行をまとめたい")
     page.press("#gask-in", "Enter")
     page.wait_for_timeout(500)
-    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    for _ in range(40):                      # v0.3.65 (R12Y): 질문 파일이 써질 때까지 (최대 10초) — 고정 500ms 는 늦을 때 ask_id 를 못 찾음
+        new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before] if (root / "_actions" / "ask").exists() else []
+        if new:
+            break
+        page.wait_for_timeout(250)
     g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
     rep = {"ask_id": g.get("ask_id"), "scope": "global", "status": "ok", "kind": "guide", "suggestions": [], "approval_request": "", "improve": None,
            "answer": "書類だけの行で 「✎ 修正」 から CT番号 を入れると 「n番の行にまとめる」 が出ます。\n参考: 使い方 3-4 まとめる\n調べた内容: なし",
@@ -4418,9 +4430,16 @@ def r11g_checks(page, root, shots, engine):
     page.evaluate("() => C01.app.tick()")
     page.wait_for_timeout(800)
     page.evaluate("() => C01.app.render()")
+    try:                                     # v0.3.65 (R12Y): 답이 화면에 뜰 때까지 (최대 8초) — 고정 800ms 는 통관 · 枠 출력이 늘어 tick 이 늦을 때 모자람
+        page.wait_for_function("() => document.querySelector('#gask-box .c01-ask-ref [data-man]')", timeout=8000)
+    except Exception:  # noqa: BLE001 — 안 뜨면 아래 ok 가 NG
+        page.evaluate("() => C01.app.tick()")
+        page.wait_for_timeout(1500)
+        page.evaluate("() => C01.app.render()")
     page.wait_for_timeout(300)
     ref = page.locator("#gask-box .c01-ask-ref [data-man]")
-    txt = page.locator("#gask-box .c01-ask-txt").last.inner_text() if page.locator("#gask-box .c01-ask-txt").count() else ""
+    _tl = page.locator("#gask-box .c01-ask-txt", has_text="書類だけの行で")     # v0.3.65 (R12Y): 같은 초에 생긴 다른 질문과 순서가 바뀌어도 이 질문의 답 글
+    txt = _tl.last.inner_text() if _tl.count() else ""
     ok("R11G 답의 参考 = 링크 1 (잘못된 id 버림) · 답 글에 같은 줄 겹침 0 · 調べた内容 그대로",
        ref.count() == 1 and ref.inner_text() == "参考: 使い方 3-4 まとめる" and "参考: 使い方" not in txt and "調べた内容" in txt, (ref.count(), txt[-80:]))
     page.screenshot(path=str(shots / "r11g_ask_ref.png"))
@@ -4524,11 +4543,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.64", page.title() == "LEENAI C-01 搬入票 v0.3.64", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.65", page.title() == "LEENAI C-01 搬入票 v0.3.65", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.64" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.65" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -4626,7 +4645,7 @@ def main():
             ok("비교표 칸 색 (SAME · FILL · DIFF)", {"SAME", "FILL", "DIFF"} <= states, sorted(states))
             # v0.3.24 (R7X Part D · #214): 形態 = 入力しない (NOINPUT · TYPE_42_22 경고 없음) · CT 빈 칸 예정값 = PLAN
             ok("경고 표시 (EXISTING_DIFF · CT_DUP) · 形態 경고 없음", {"EXISTING_DIFF", "CT_DUP"} <= warns and "TYPE_42_22" not in warns, sorted(warns))
-            ok("v0.3.24 形態 = 入力しない (NOINPUT · PATCH 에 crcf9_type 없음)", "NOINPUT" in states and
+            ok("v0.3.65 (#361) タイプ 값 있는 칸 = そのまま (KEEPNOW · PATCH 에 crcf9_type 없음 · 예전 v0.3.24 NOINPUT 대신)", "KEEPNOW" in states and "NOINPUT" not in states and
                "crcf9_type" not in page.evaluate("JSON.stringify(C01.state.modal.res.patches)"), sorted(states))
             sb = page.locator("#compass-send")
             ok("送信 비활성 「DRY — 送信しません」", sb.is_disabled() and "DRY" in sb.inner_text(), sb.inner_text())

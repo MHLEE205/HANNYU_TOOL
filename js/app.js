@@ -876,6 +876,11 @@ window.C01 = window.C01 || {};
       var freeCnt = free.filter(function (x) { return !x.wakuSkip; });
       var over = nSlots ? freeCnt.length : 0;
       if (over) freeCnt.forEach(function (x) { x.over = true; });
+      /* v0.3.65 (R12Y Part 1 · 구멍 6 · 형님 #354): エンジン rows[].waku_ab (out_waku_ab) — A = 本当の枠外 (業者の空き枠なし · 合う枠なし) /
+         B = 枠未定 (空き枠はある · 枠がまだ決まらない)。エンジンに無い = 前のまま (全部 COMPASS 枠外) */
+      var overB = over ? freeCnt.filter(function (x) { return x.r.waku_ab === 'B'; }) : [];
+      overB.forEach(function (x) { x.wakuB = true; });
+      var overA = over - overB.length;
       var freeIn = free.filter(function (x) { return !x.over; }), freeOver = free.filter(function (x) { return x.over; });
       /* v0.3.11 (R7J Part C-2): 同じブッキングに枠の決まっていない行があれば、空き枠は「未着」ではなく「割当待ち」 (行の数まで · 枠外の行は数えない) */
       unarr.slice(0, freeIn.length).forEach(function (x) { x.st = '割当待ち'; x.wait = '割当待ち'; x.waitTitle = 'このブッキングに枠の決まっていない行（未割当）があります — メールは届いている可能性'; });
@@ -888,7 +893,7 @@ window.C01 = window.C01 || {};
       list.forEach(function (x) { ivNo += 1; x.no = ivNo; no += 1; });
       var okN = rows.filter(function (x) { return isOk(x) && !x.over; }).length;
       var total = nSlots || rows.length + unarr.length;
-      out.push({ iv: iv, rows: list, okN: okN, total: total, over: over, nFree: free.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
+      out.push({ iv: iv, rows: list, okN: okN, total: total, over: over, overA: overA, overB: overB.length, nFree: free.length, allOk: allOk, onlyUn: onlyUn, remind: remind, compassDone: compassDone });
     });
     return { groups: out, cnt: cnt, ov: ov };
   }
@@ -1021,7 +1026,8 @@ window.C01 = window.C01 || {};
         '<span class="mono">' + esc(iv.iv_no) + '</span>' +
         '<span class="t2">BKG ' + esc(iv.bkg_no || '') + '</span>' +
         '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
-        (g.over ? '<span class="c01-overhead" title="' + esc('行が COMPASS の枠 ' + g.total + ' を超える — 枠のない行 ' + g.over + ' 行 = 間違って作られた行 · 割り当ての間違い · COMPASS の入力漏れの可能性（赤の行）' + wakuWhy(g.iv)) + '">枠外 ' + g.over + '</span>' : '') +
+        (g.overA ? '<span class="c01-overhead" title="' + esc('行が COMPASS の枠 ' + g.total + ' を超える — 枠のない行 ' + g.overA + ' 行 = 間違って作られた行 · 割り当ての間違い · COMPASS の入力漏れの可能性（赤の行）' + wakuWhy(g.iv)) + '">枠外 ' + g.overA + '</span>' : '') +
+        (g.overB ? '<span class="c01-wakumi-head" title="' + esc('空き枠はありますが、まだ枠が決まっていない行 ' + g.overB + ' 行（品目 · 営業所などで枠を選べない — 写真 · 書類が届くと決まることがあります。急ぐ時は 「枠変更」 で枠を選んでください）') + '">枠未定 ' + g.overB + '</span>' : '') +
         '<span class="c01-flex"></span>' +
         (holdOpenN(iv.iv_no, ov) ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + holdOpenN(iv.iv_no, ov) + ')</button>' : '') +
         (otherList(iv, ov).length ? '<button class="c01-btn-sub c01-otherct" data-otherct="' + esc(iv.iv_no) + '" title="「他社のコンテナ」にした行（写真・書類をこの IV から外しています · 元に戻せます）">他社のコンテナ ' + otherList(iv, ov).length + '</button>' : '') +
@@ -1032,6 +1038,7 @@ window.C01 = window.C01 || {};
         (g.compassDone ? '<button class="c01-done" data-compass="' + esc(iv.iv_no) + '" title="Compass入力の記録 · 元に戻す">✓ 入力済</button>' :
           g.allOk ? '<button class="c01-btn-pri" data-compass="' + esc(iv.iv_no) + '">⬇ Compass入力</button>' :
             (!g.onlyUn ? '<button class="c01-blocked" data-compass="' + esc(iv.iv_no) + '" title="全台が 自動OK / 確認済 になると入力できます（比較表だけ見られます）">Compass入力（未完了あり）</button>' : '')) +
+        (C01.customs && !g.onlyUn ? C01.customs.headerBtn(g) : '') +            /* v0.3.63 (決定 #359): 通関書類送付 (Compass入力 の横) */
         '</div></td></tr>';
       g.rows.forEach(function (x) {
         var cls = x.dk === 'human' ? 'ok hum' : x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';   /* v0.3.60 (R11R): 人の確認 = 青 (hum) */
@@ -1059,7 +1066,8 @@ window.C01 = window.C01 || {};
             '<span class="st-wait' + (x.candTitle ? ' c01-cand' : '') + '"' + (x.candTitle ? ' title="' + esc(x.candTitle) + '"' : '') + '>' + esc(x.wait) + '</span>');
         if (x.dup_seal) stCell = '<span class="c01-over" title="' + esc('同じシール番号の行があります（' + x.dup_seal.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 入力の間違い · 読み違いの可能性') + '">シール重複</span> ' + stCell;
         if (x.dup_ct) stCell = '<span class="c01-over" title="' + esc('同じ CT 番号の行があります（' + x.dup_ct.map(function (y) { return y.no + '行目'; }).join(' · ') + '）— 同じコンテナの再送 · 読み違いの可能性') + '">CT重複</span> ' + stCell;
-        if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
+        if (x.over && x.wakuB) stCell = '<span class="c01-wakumi" title="空き枠はありますが、この行の枠がまだ決まっていません（品目 · 営業所などで選べない）— 写真 · 書類が届くと決まることがあります · 急ぐ時は 「枠変更」（台数には数えません）">枠未定</span> ' + stCell;   /* v0.3.65 (R12Y Part 1) */
+        else if (x.over) stCell = '<span class="c01-over" title="行が COMPASS の枠の数より多く、この行には枠がありません — 間違って作られた行・割り当ての間違いの可能性があります（台数には数えません）">COMPASS 枠外</span> ' + stCell;
         else if (x.wakuSkip) stCell = '<span class="c01-unassigned c01-wakuskip" title="CT が読めない写真の束です（行ではなく候補 · 枠外には数えません）— 確認・入力 の 「写真の CT」 でどのコンテナか選んでください">CTが読めない写真 · 候補あり</span> ' + stCell;   /* v0.3.45 (R9W 0-4b) */
         else if (x.unassigned) stCell = '<span class="c01-unassigned" title="COMPASS の枠がまだ決まっていない行（台数は枠の数で数えます）">未割当</span> ' + stCell;
         if (r.confirmed_suspect && x.st === '確認済') stCell += ' ' + suspectBadge(r);      /* v0.3.47 (R9Y Part 0-1): 確認済 でも 他社の疑い (値 · 状態は そのまま) */
@@ -1067,7 +1075,7 @@ window.C01 = window.C01 || {};
           esc(r.same_cand.role === 'fax' ? '写真の行と同じコンテナかもしれません（FAX の CT・シールの読み違い）— クリックで確認' : 'FAX の行と同じコンテナかもしれません — クリックで確認') + '">同一候補</button>';
         stCell += rowInfo(iv, r, x, b.ov) + (canSlotChange() && r.ct ? ' <button class="c01-slotbtn" data-slot="' + esc(x.key) + '" title="スロット変更">⇄</button>' : '') +
           (otherCtOn() && r.container_id ? ' <button class="c01-slotbtn c01-rowmenu" data-rowmenu="' + esc(x.key) + '" title="この行の操作（他社のコンテナ など）" aria-label="この行の操作">⋯</button>' : '');   /* v0.3.45 (R9W 0-3 · #290): 全ての行 (自動OK · 確認済 · 再確認 · 受信中) */
-        html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over ? ' over' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"' + (x.frozen ? ' data-frozen="1"' : '') + '><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
+        html += '<tr class="c01-row ' + cls + (x.unassigned ? ' unassigned' : '') + (x.over && !x.wakuB ? ' over' : '') + (x.wakuB ? ' wakumi' : '') + '" data-key="' + esc(x.key) + '" data-status="' + esc(x.st) + '"' + (x.frozen ? ' data-frozen="1"' : '') + '><td class="c-no">' + x.no + '</td><td>' + esc(iv.cy_cut || '') +
           '</td>' + c1(iv.iv_no, 'mono') + cv(rowVal(iv, r, 'item')) + '<td class="c-cut">' + ctCell + '</td><td class="mono c-cut" title="' + esc(v.seal || '') + '">' + esc(v.seal || '') + hmark('seal') +
           '</td><td class="r num">' + num(v.n_w) + hmark('n_w') + '</td><td class="r num">' + num(v.t_w) + hmark('t_w') + '</td><td class="r num">' + num(v.bales) + hmark('bales') +
           '</td>' + wdCell(v.work_date, x.st === '受信中' && r.has_docs === false ? slotPlan(iv, slotOf(iv, r, b.ov) || r.slot_guid) : null, x.human.work_date ? '' : wdDoubt(r), wdSrc(r, x.human.work_date), x.st === '受信中' && r.has_docs === false) +
@@ -1082,7 +1090,8 @@ window.C01 = window.C01 || {};
     if (!b.groups.length) html += '<tbody><tr><td colspan="15" class="c01-empty">表示する IV がありません（担当港・絞り込みを確認してください）</td></tr></tbody>';
     html += '</table></div>';
     html += '<div class="c01-legend"><span><i class="lg ok"></i>自動OK（エンジン）</span><span><i class="lg hum"></i>確認済（人が確認）</span><span><small class="c01-inmark">✓入力済</small> = Compass入力 済み</span><span><i class="lg check"></i>要確認</span><span><i class="lg wait"></i>受信待ち · メール未着</span>' +
-      (b.groups.some(function (g) { return g.over; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠のない行 · 行が枠の数を超える）</span>' : '') +
+      (b.groups.some(function (g) { return g.overA; }) ? '<span><i class="lg over"></i>COMPASS 枠外（枠のない行 · 業者の空き枠なし）</span>' : '') +
+      (b.groups.some(function (g) { return g.overB; }) ? '<span><i class="lg wakumi"></i>枠未定（空き枠あり · 枠がまだ決まらない）</span>' : '') +
       '<span class="c01-flex"></span><span>✦ Powered by LEENAI Automation System</span></div>';
     setHtml($('c01-main'), html, 5);                               /* v0.3.15 (R7N F): 変わった行だけ差し替え (スクロール位置そのまま) */
     var root = $('c01-main');
@@ -1093,6 +1102,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-docs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openDocs(el.getAttribute('data-docs')); }; });
     root.querySelectorAll('[data-compass]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCompass(el.getAttribute('data-compass')); }; });
     root.querySelectorAll('[data-remind]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRemind(el.getAttribute('data-remind')); }; });
+    root.querySelectorAll('[data-csend]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); if (C01.customs) C01.customs.open(el.getAttribute('data-csend'), el.hasAttribute('data-csend-off')); }; });   /* v0.3.63 */
     root.querySelectorAll('[data-customs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCustoms(el.getAttribute('data-customs')); }; });
     root.querySelectorAll('[data-otherct]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openOtherCts(el.getAttribute('data-otherct')); }; });
     root.querySelectorAll('[data-same]').forEach(function (el) {
@@ -1129,16 +1139,20 @@ window.C01 = window.C01 || {};
   window.addEventListener('resize', function () { if (S.view === 'main') fitTable(); });
 
   /* ── v0.2.0 Compass入力 DRY 窓 (設計 §6 · 決定 #1~#3 · #91) — 比較表だけ。送信は無効「DRY — 送信しません」 ── */
-  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）', PLAN: '予定値 → 入力（CT が空の枠 · 前の値は記録）', NOINPUT: '入力しない（保留）' };
+  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）', PLAN: '予定値 → 入力（CT が空の枠 · 前の値は記録）', NOINPUT: '入力しない（保留）',
+    KEEPNOW: '値あり（そのまま）', CHOOSE: '選んでください（自動では入れません）' };   /* v0.3.65 (R12Y · #361) */
   var WARN_LABEL = { PACKER_DIFF: '業者が違う', ITEM_DIFF: '品目が違う', OFFICE_DIFF: '営業所が違う', EXISTING_DIFF: 'COMPASS に別の値', CT_DUP: 'CT が別の枠にもある',
-    TYPE_42_22: '形態 42GP/22GP — 担当者が判断', NUM_INVALID: '数字にできない — この行は入力しない',
+    TYPE_42_22: 'タイプ 42GP/22GP — 担当者が判断', NUM_INVALID: '数字にできない — この行は入力しない',
     /* v0.2.1 (D-11 (가) 準備 · C01.COMPASS.follow_same_cond_slot · 既定オフ) */
     SLOT_FOLLOWED: '同じ CT がある同一条件の枠で比較', CT_DUP_OTHER_COND: '同じ CT が条件の違う枠にある', CT_DUP_MULTI: '同じ CT が 2 つ以上の枠にある',
-    OTHER_CT_IN_SLOT: '枠に別の CT が入っている' };
+    OTHER_CT_IN_SLOT: '枠に別の CT が入っている',
+    TYPE_CHOOSE: 'タイプを選んでください（45GP / 45R / 42GP）' };   /* v0.3.65 (R12Y · #361) */
   var SKIP_LABEL = { NO_CT_ID: '枠 (ct_id) なし — 入力しない', NOT_FOUND: 'COMPASS の枠が見つからない', NOT_OK: '対象外（自動OK・確認済 以外）', NUM_INVALID: '数字にできない値がある',
     CT_DUP_OTHER_COND: '同じ CT が条件の違う枠にある — 入力しない', CT_DUP_MULTI: '同じ CT が 2 つ以上の枠にある — 入力しない',
     OTHER_CT_IN_SLOT: '枠に別の CT が入っている — 上書きしない' };
-  var CF_LABEL = { ct: 'CT', seal: 'シール', n_w: '正味', g_w: '総重量(=正味)', t_w: '風袋', bales: 'ベール', type: '形態' };
+  /* v0.3.65 (R12Y · #361): COMPASS の 「形態」 = crcf9_form (BALES) · 「タイプ」 = crcf9_type (45GP 等) — 前は タイプ を 「形態」 と表示していた */
+  var CF_LABEL = { ct: 'CT', seal: 'シール', n_w: '正味', g_w: '総重量(=正味)', t_w: '風袋', bales: 'ベール', type: 'タイプ', form: '形態' };
+  function compassCols() { return C01.compass.FIELDS.map(function (f) { return f[0]; }).concat((C01.COMPASS || {}).form_bales ? ['form'] : []); }
   function ivById(ivNo) { return ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === ivNo; })[0] || null; }
   function compassInput(iv) {
     var ov = overlay();
@@ -1176,8 +1190,22 @@ window.C01 = window.C01 || {};
     });
   }
   function dvBase() { return String((C01.COMPASS || {}).dvUrl || '').replace(/\/$/, ''); }
+  /* v0.3.65 (R12Y · #361): ブッキングの船社 (GET だけ · 表示名) — 45R を使う船社なら タイプ を選ばせる。読めない = null (選ばせる側) */
+  function compassCarrier(iv) {
+    var C = C01.COMPASS || {};
+    if (C.type_mode !== 'fill_empty') return Promise.resolve({});
+    return dvFetch(dvBase() + '/api/data/v9.2/cr49f_bookings(' + iv.booking_guid + ')?$select=_cr49f_carrier_id_value',
+      { method: 'GET', headers: { Accept: 'application/json', Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"' } }).then(function (r) {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }).then(function (b) {
+      var name = String(b['_cr49f_carrier_id_value' + '@' + 'OData.Community.Display.V1.FormattedValue'] || '').trim();
+      var list = (C.type45rCarriers || []).map(function (x) { return String(x).toUpperCase(); });
+      return { carrier: name, carrier45r: name ? list.indexOf(name.toUpperCase()) >= 0 : false };
+    }).catch(function () { return { carrier: '', carrier45r: null }; });
+  }
   function compassLive(iv) {
-    var sel = 'crcf9_container_informationid,' + C01.compass.FIELDS.map(function (f) { return f[1]; }).join(',');
+    var sel = 'crcf9_container_informationid,' + C01.compass.FIELDS.map(function (f) { return f[1]; }).join(',') + ',' + C01.compass.FORM_DV;
     var url = dvBase() + '/api/data/v9.2/crcf9_container_informations?$select=' + sel + '&$filter=' + encodeURIComponent('_crcf9_booking_id_value eq ' + iv.booking_guid);
     return dvFetch(url, { method: 'GET', headers: { Accept: 'application/json' } }).then(function (r) {
       if (!r.ok) throw new Error('COMPASS を読めません (' + r.status + ')');
@@ -1195,8 +1223,21 @@ window.C01 = window.C01 || {};
       Object.keys(cells).forEach(function (g) {
         dups[g] = Object.keys(cells).filter(function (h) { return h !== g; }).map(function (h) { return C01.compass.normText(cells[h].crcf9_container_no); }).filter(Boolean);
       });
-      return { cells: cells, dups: dups, live: true };
+      return compassCarrier(iv).then(function (car) { return { cells: cells, dups: dups, live: true, carrier: car }; });
     });
+  }
+  /* v0.3.65 (R12Y · #361): 行ごとの タイプ の選ばせる理由 · 担当者が選んだ値 (S.modal.typePick) */
+  function compassRows(iv, snap, picks) {
+    var rows = compassInput(iv), C = C01.COMPASS || {};
+    if (C.type_mode !== 'fill_empty') return rows;
+    var cells = (snap && snap.cells) || {};
+    rows.forEach(function (r) {
+      var ot = [];
+      Object.keys(cells).forEach(function (g) { var t = String((cells[g] || {}).crcf9_type || '').trim().toUpperCase(); if (g !== r.ct_id && t && ot.indexOf(t) < 0) ot.push(t); });
+      r.type_hint = C01.compass.typeHint(r, { carrier: ((snap || {}).carrier || {}).carrier, carrier45r: ((snap || {}).carrier || {}).carrier45r, otherTypes: ot.sort() });
+      if (picks && picks[r.container_id]) r.type_pick = picks[r.container_id];
+    });
+    return rows;
   }
   /* v0.3.50 (R10Q · #176): compass_done 記録の trial — C01.COMPASS.trialUntil (JST) まで true · その後 false */
   function compassTrial() { return C01.compass.trialAt(C01.COMPASS, Date.now()); }
@@ -1216,12 +1257,13 @@ window.C01 = window.C01 || {};
     var last = compassRecords(iv)[0];
     return !!last && !last.value.undo_of;
   }
-  function openCompass(ivNo) {
+  function openCompass(ivNo, reuse) {
     var iv = ivById(ivNo);
     if (!iv) return;
-    S.modal = { kind: 'compass', iv: ivNo };
-    var live = compassLiveOn();
-    var getSnap = live ? compassLive(iv).catch(function (e) { return { error: e.message }; })
+    var prev = reuse && S.modal && S.modal.kind === 'compass' && S.modal.iv === ivNo ? S.modal : null;   /* v0.3.65: タイプを選んだ時 = 読み直さず描き直す */
+    S.modal = { kind: 'compass', iv: ivNo, typePick: prev ? prev.typePick : {} };
+    var live = prev ? prev.live : compassLiveOn();
+    var getSnap = prev ? Promise.resolve(prev.snap) : live ? compassLive(iv).catch(function (e) { return { error: e.message }; })
       : S.src.getJson('compass_now/' + ivNo + '.json').then(function (snap) { return snap; }).catch(function () { return null; });
     getSnap.then(function (snap) {
       if (!S.modal || S.modal.iv !== ivNo) return;
@@ -1234,29 +1276,41 @@ window.C01 = window.C01 || {};
         showModal(html);
         return;
       }
-      var res = C01.compass.compareIv(ivNo, compassInput(iv), snap.cells || {}, snap.dups || {}, C01.COMPASS || null);
-      S.modal.res = res; S.modal.live = live; S.modal.cells = snap.cells || {};
+      var res = C01.compass.compareIv(ivNo, compassRows(iv, snap, S.modal.typePick), snap.cells || {}, snap.dups || {}, C01.COMPASS || null);
+      S.modal.res = res; S.modal.live = live; S.modal.cells = snap.cells || {}; S.modal.snap = snap;
       S.modal.pick = {};
-      res.rows.forEach(function (r) { if (!r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = r.warnings.length === 0; });
+      res.rows.forEach(function (r) {
+        if (!r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = prev && prev.pick && prev.pick[r.ct_id] !== undefined ? prev.pick[r.ct_id] : r.warnings.length === 0;
+      });
+      if (prev) res.rows.forEach(function (r) { if (r.container_id && S.modal.typePick[r.container_id] && !r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = true; });
       html += '<div class="c01-mb"><div class="c01-csum">' +
         '<span class="c01-cst SAME">同じ ' + res.count.cells.SAME + '</span><span class="c01-cst FILL">空欄→入力 ' + res.count.cells.FILL + '</span>' +
         (res.count.cells.PLAN !== undefined ? '<span class="c01-cst PLAN">予定値→入力 ' + res.count.cells.PLAN + '</span>' : '') +
         '<span class="c01-cst DIFF">違う値 ' + res.count.cells.DIFF + '</span><span class="c01-cst KEEP">値なし ' + res.count.cells.KEEP + '</span>' +
-        (res.count.cells.NOINPUT !== undefined ? '<span class="c01-cst NOINPUT">形態は入力しない</span>' : '') +
+        (res.count.cells.NOINPUT !== undefined ? '<span class="c01-cst NOINPUT">タイプは入力しない</span>' : '') +
+        (res.count.cells.KEEPNOW !== undefined ? '<span class="c01-cst KEEPNOW">値あり(そのまま) ' + res.count.cells.KEEPNOW + '</span>' : '') +
+        (res.count.cells.CHOOSE ? '<span class="c01-cst CHOOSE" id="cmp-choose">タイプを選ぶ ' + res.count.cells.CHOOSE + '</span>' : '') +
         '<span class="t2">PATCH 対象 ' + res.count.patch_rows + '行 · 作業日は入れません</span></div>' +
         (res.all_ok ? '' : '<p class="c01-warnline" id="cmp-reason">' + esc(res.button.reason || '') + (live ? ' — 自動OK・確認済 の行だけ入力できます' : ' — 比較表だけ表示します') + '</p>') +
         '<table class="c01-ctable" id="compass-table"><thead><tr>' + (live ? '<th title="入力する行"><label class="c01-call" title="警告のない行を全て選ぶ（警告のある行は 1 行ずつ確認して選ぶ）"><input type="checkbox" id="compass-all"> 全て選択</label></th>' : '') + '<th>CT</th>' +
-        C01.compass.FIELDS.map(function (f) { return '<th>' + CF_LABEL[f[0]] + '</th>'; }).join('') + '<th>警告・理由</th></tr></thead><tbody>';
+        compassCols().map(function (f) { return '<th>' + CF_LABEL[f] + '</th>'; }).join('') + '<th>警告・理由</th></tr></thead><tbody>';
       res.rows.forEach(function (r) {
         var can = !r.skip && Object.keys(r.patch).length > 0;
         html += '<tr data-crow="' + esc(r.container_id || '') + '"' + (r.ct_id ? ' data-ctid="' + esc(r.ct_id) + '"' : '') + '>' +
           (live ? '<td class="c01-cpick">' + (can ? '<input type="checkbox" data-cpick="' + esc(r.ct_id) + '"' + (S.modal.pick[r.ct_id] ? ' checked' : '') + ' title="' + (r.warnings.length ? '警告あり — 確認して入れる時だけチェック' : 'この行を入力') + '">' : '') + '</td>' : '') +
           '<td class="mono">' + esc(r.ct || '—') + '</td>';
         if (r.skip) {
-          html += '<td colspan="' + C01.compass.FIELDS.length + '" class="c01-skip">' + esc(SKIP_LABEL[r.skip] || r.skip) + '</td>';
+          html += '<td colspan="' + compassCols().length + '" class="c01-skip">' + esc(SKIP_LABEL[r.skip] || r.skip) + '</td>';
         } else {
           r.cells.forEach(function (c) {
-            html += '<td class="c01-cell ' + c.state + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL[c.state]) + '" data-state="' + c.state + '">' +
+            if (c.state === 'CHOOSE') {      /* v0.3.65 (#361): 黄色 · 45GP / 45R / 42GP から選ぶ (選ぶまで入れない) */
+              html += '<td class="c01-cell CHOOSE' + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL.CHOOSE + ' — ' + (c.hint || '')) + '" data-state="CHOOSE" data-field="' + c.field + '">' +
+                '<div class="now">（空）</div><select data-tpick="' + esc(r.container_id || '') + '"><option value="">選ぶ</option>' +
+                ((C01.COMPASS || {}).type_choices || ['45GP', '45R', '42GP']).map(function (t) { return '<option value="' + esc(t) + '"' + (c.put === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
+                '</select><div class="t2 c01-thint">' + esc(c.hint || '') + '</div></td>';
+              return;
+            }
+            html += '<td class="c01-cell ' + c.state + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL[c.state]) + '" data-state="' + c.state + '" data-field="' + c.field + '">' +
               (c.state === 'NOINPUT' ? '<div class="now">' + esc(c.now == null ? '（空）' : c.now) + '</div><div class="t2">入力しない</div>' :
               '<div class="now">' + (c.state === 'PLAN' ? '<span class="t2">予定 </span>' : '') + esc(c.now == null ? '（空）' : c.now) + '</div>' + (c.state === 'SAME' || c.state === 'KEEP' ? '' : '<div class="put">→ ' + esc(c.put == null ? '' : c.put) + '</div>')) + '</td>';
           });
@@ -1293,6 +1347,9 @@ window.C01 = window.C01 || {};
       };
       document.querySelectorAll('[data-cpick]').forEach(function (el) {
         el.onchange = function () { S.modal.pick[el.getAttribute('data-cpick')] = el.checked; upd(); };
+      });
+      document.querySelectorAll('[data-tpick]').forEach(function (el) {      /* v0.3.65: タイプを選ぶ → 比較を作り直す (COMPASS は読み直さない) */
+        el.onchange = function () { var k = el.getAttribute('data-tpick'); if (el.value) S.modal.typePick[k] = el.value; else delete S.modal.typePick[k]; openCompass(ivNo, true); };
       });
       /* v0.3.24 (R7X Part D-3): 全て選択 = 警告のない行だけ (CT が別の枠にもある · COMPASS に別の値 (予定値でない) 等の行は外す — 1 行ずつ確認) */
       var noWarn = {};
@@ -1340,7 +1397,10 @@ window.C01 = window.C01 || {};
       var a = C01.compass.compassDoneAction(actionId(), ivNo, S.me.email, jstNow(), ok.map(function (r) { return r.cell; }));
       a.value.failed = bad;
       a.value.trial = compassTrial();               /* v0.3.50 (R10Q · #176): trialUntil (JST) から false */
-      return (ok.length ? writeAction(a) : Promise.resolve()).then(function () {
+      var ivx = ivById(ivNo);
+      var ft = (C01.COMPASS || {}).form_bales && ivx && ok.length ? compassLive(ivx).then(function (sn) { a.value.formtype_blank = C01.compass.formTypeBlank(sn.cells); }, function () { a.value.formtype_blank = null; })
+        : Promise.resolve();                         /* v0.3.65 (#361): 入力の後 形態 · タイプ が空欄の枠 (通関書類送付 の条件) */
+      return ft.then(function () { return ok.length ? writeAction(a) : null; }).then(function () {
         m.busy = false;
         toast('COMPASS 入力: 成功 ' + ok.length + '行' + (bad.length ? ' · 失敗 ' + bad.length + '行（赤の行）' : ''), bad.length ? 'warn' : 'success');
         if (!bad.length) { closeModal(); render(); }
@@ -1360,14 +1420,27 @@ window.C01 = window.C01 || {};
       chain = chain.then(function () {
         return w.getCell(c.ct_id).then(function (now) {
           if (!now) { bad.push({ ct_id: c.ct_id, result: 'ERROR', error: 'GET 失敗' }); return; }
-          var body = {};
+          var body = {}, clearForm = false, FD = C01.compass.FORM_DV;
           Object.keys(c.after || {}).forEach(function (dv) {
+            if (dv === FD) {                         /* v0.3.65 (#361): 形態 (Lookup) — 今 = 入れた BALES の時だけ · 前が空 = 参照を外す (DELETE $ref) */
+              if (String(now[FD] || '').toLowerCase() === String(c.after[FD] || '').toLowerCase()) {
+                if (c.before && c.before[FD]) body[C01.compass.FORM_BIND] = C01.compass.formBind(c.before[FD]); else clearForm = true;
+              }
+              return;
+            }
             var f = names[dv];
             if (C01.compass.nowValue(f, now[dv]) === C01.compass.nowValue(f, c.after[dv])) body[dv] = c.before ? c.before[dv] : null;   /* 今 = 入れた値 の項目だけ戻す */
           });
-          if (!Object.keys(body).length) { bad.push({ ct_id: c.ct_id, result: 'CHANGED', error: '他の値に変わっています — 戻しません' }); return; }
-          return w.apply({ ct_id: c.ct_id, if_match: now['@odata.etag'] || null, body: body }).then(function (r) {
-            if (r.result === 'OK') done.push(r.cell); else bad.push({ ct_id: c.ct_id, result: r.result, error: r.error || null });
+          if (!Object.keys(body).length && !clearForm) { bad.push({ ct_id: c.ct_id, result: 'CHANGED', error: '他の値に変わっています — 戻しません' }); return; }
+          var cell = { ct_id: c.ct_id, fields: [], before: {}, after: {} };
+          var merge = function (r) { r.cell.fields.forEach(function (k) { if (cell.fields.indexOf(k) < 0) cell.fields.push(k); }); Object.assign(cell.before, r.cell.before); Object.assign(cell.after, r.cell.after); };
+          var p1 = Object.keys(body).length ? w.apply({ ct_id: c.ct_id, if_match: now['@odata.etag'] || null, body: body }) : Promise.resolve(null);
+          return p1.then(function (r) {
+            if (r && r.result !== 'OK') return r;
+            if (r) merge(r);
+            return clearForm ? w.clearForm(c.ct_id).then(function (r2) { if (r2.result === 'OK') merge(r2); return r2; }) : r;
+          }).then(function (r) {
+            if (r.result === 'OK') { cell.fields.sort(); done.push(cell); } else bad.push({ ct_id: c.ct_id, result: r.result, error: r.error || null });
           });
         }).catch(function (e) { bad.push({ ct_id: c.ct_id, result: 'ERROR', error: e.message }); });
       });
@@ -4938,5 +5011,10 @@ window.C01 = window.C01 || {};
       $('c01-main').innerHTML = '<div class="c01-fatal"><b>データを読めませんでした</b><p>' + esc(e.message) + '</p><p>_data フォルダ (jikkyou.json · queue.json) があるフォルダを選んでください。</p></div>';
     });
   }
-  C01.app = { start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn, _compassInput: function (ivNo) { var iv = ivById(ivNo); return iv ? compassInput(iv) : null; } };
+  /* v0.3.63 (決定 #359): 通関書類送付 (js/customs.js) が使う内部の関数 — 画面の部品 · 記録の書き方は 他のボタンと同じ */
+  function customsApi() {
+    return { S: S, esc: esc, md: md, toast: toast, showModal: showModal, closeModal: closeModal, writeAction: writeAction, mkAction: mkAction,
+      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords };   /* compassRecords = v0.3.65 (#361) */
+  }
+  C01.app = { _api: customsApi, start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn, _compassInput: function (ivNo) { var iv = ivById(ivNo); return iv ? compassInput(iv) : null; } };
 })();
