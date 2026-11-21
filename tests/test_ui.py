@@ -2241,7 +2241,11 @@ def r9l_gask_checks(page, root, shots, engine):
     page.fill("#gask-in", "沖縄テスト紙業 から TSTBK0000001 のメール来てるのに写真がない")
     page.press("#gask-in", "Enter")
     page.wait_for_timeout(500)
-    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    for _ in range(40):                      # v0.3.65 (R12Y): 질문 파일이 써질 때까지 (최대 10초) — 고정 500ms 는 늦을 때 ask_id 를 못 찾음
+        new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before] if (root / "_actions" / "ask").exists() else []
+        if new:
+            break
+        page.wait_for_timeout(250)
     g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
     me = page.evaluate("() => (C01.state.me || {}).email")
     gc = g.get("card") or {}
@@ -3100,7 +3104,11 @@ def r9x_checks(page, root, shots, engine):
     page.fill("#gask-in", "TST2611-01 の " + r0["ct"] + " は他社の案件。削除したい")
     page.press("#gask-in", "Enter")
     page.wait_for_timeout(500)
-    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    for _ in range(40):                      # v0.3.65 (R12Y): 질문 파일이 써질 때까지 (최대 10초) — 고정 500ms 는 늦을 때 ask_id 를 못 찾음
+        new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before] if (root / "_actions" / "ask").exists() else []
+        if new:
+            break
+        page.wait_for_timeout(250)
     g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
     key = "a1b2c3d4e5f6"
     rep = {"ask_id": g.get("ask_id"), "scope": "global", "status": "ok", "kind": "guide", "suggestions": [], "approval_request": "", "improve": None,
@@ -4408,7 +4416,11 @@ def r11g_checks(page, root, shots, engine):
     page.fill("#gask-in", "行をまとめたい")
     page.press("#gask-in", "Enter")
     page.wait_for_timeout(500)
-    new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before]
+    for _ in range(40):                      # v0.3.65 (R12Y): 질문 파일이 써질 때까지 (최대 10초) — 고정 500ms 는 늦을 때 ask_id 를 못 찾음
+        new = [p for p in (root / "_actions" / "ask").rglob("*.json") if p.name not in before] if (root / "_actions" / "ask").exists() else []
+        if new:
+            break
+        page.wait_for_timeout(250)
     g = json.loads(new[0].read_text(encoding="utf-8")) if len(new) == 1 else {}
     rep = {"ask_id": g.get("ask_id"), "scope": "global", "status": "ok", "kind": "guide", "suggestions": [], "approval_request": "", "improve": None,
            "answer": "書類だけの行で 「✎ 修正」 から CT番号 を入れると 「n番の行にまとめる」 が出ます。\n参考: 使い方 3-4 まとめる\n調べた内容: なし",
@@ -4426,7 +4438,8 @@ def r11g_checks(page, root, shots, engine):
         page.evaluate("() => C01.app.render()")
     page.wait_for_timeout(300)
     ref = page.locator("#gask-box .c01-ask-ref [data-man]")
-    txt = page.locator("#gask-box .c01-ask-txt").last.inner_text() if page.locator("#gask-box .c01-ask-txt").count() else ""
+    _tl = page.locator("#gask-box .c01-ask-txt", has_text="書類だけの行で")     # v0.3.65 (R12Y): 같은 초에 생긴 다른 질문과 순서가 바뀌어도 이 질문의 답 글
+    txt = _tl.last.inner_text() if _tl.count() else ""
     ok("R11G 답의 参考 = 링크 1 (잘못된 id 버림) · 답 글에 같은 줄 겹침 0 · 調べた内容 그대로",
        ref.count() == 1 and ref.inner_text() == "参考: 使い方 3-4 まとめる" and "参考: 使い方" not in txt and "調べた内容" in txt, (ref.count(), txt[-80:]))
     page.screenshot(path=str(shots / "r11g_ask_ref.png"))
