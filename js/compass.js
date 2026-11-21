@@ -16,12 +16,21 @@
     ['t_w', 'crcf9_t_w', true], ['bales', 'crcf9_quantity', true], ['type', 'crcf9_type', false]];
   var OK_STATUSES = ['自動OK', '確認済'];
   var WARN_CODES = ['PACKER_DIFF', 'ITEM_DIFF', 'OFFICE_DIFF', 'EXISTING_DIFF', 'CT_DUP', 'TYPE_42_22', 'NUM_INVALID',
-    'SLOT_FOLLOWED', 'CT_DUP_OTHER_COND', 'CT_DUP_MULTI', 'OTHER_CT_IN_SLOT'];   /* 後ろ 4 つ = v0.2.1 follow_same_cond_slot (オンの時だけ) */
+    'SLOT_FOLLOWED', 'CT_DUP_OTHER_COND', 'CT_DUP_MULTI', 'OTHER_CT_IN_SLOT', 'TYPE_CHOOSE'];   /* TYPE_CHOOSE = v0.3.65 type_mode (オンの時だけ) */   /* 後ろ 4 つ = v0.2.1 follow_same_cond_slot (オンの時だけ) */
   var FOLLOW_OPT = 'follow_same_cond_slot';
   var STATES = ['SAME', 'FILL', 'DIFF', 'KEEP'];
   /* v0.3.24 (R7X Part D · #214 · 형님 実入力試験 OK 後): opts.plan_fill = COMPASS の CT が空の枠の 数値 (ブッキング予定値 例 23,000) は 「予定値 → 入力」 (PLAN · 警告なし · before は記録) ·
      opts.type_input === false = 形態 (crcf9_type) は入力しない (NOINPUT · PATCH から外す)。opts なし = エンジン rules.py と同じ (交差試験) */
   var PLAN_FIELDS = ['n_w', 'g_w', 't_w', 'bales'];
+  /* v0.3.65 (R12Y Part 001 · 決定 #361): 形態 = COMPASS crcf9_form (Lookup → crcf9_packer_types · 1 行 「BALES」)。
+     opts.form_bales = { guid, name } の時だけ: 空欄 → BALES (crcf9_form@odata.bind) · 値あり → そのまま。
+     opts.type_mode === 'fill_empty' の時 タイプ (crcf9_type): 値あり → そのまま · 空欄 → 45GP (決定 #1 · 旧 Compass入力 test_jikjin_compass_v1.py:289-298 と同じ)。
+     ただし 行の type_hint (45R の船社 · 同じブッキングの他の枠が 45R/42GP/22GP · 書類 · 写真のサイズ根拠 size_hint) があれば 黄色の警告 TYPE_CHOOSE +
+     担当者が opts.type_choices (45GP / 45R / 42GP) から選ぶ (選ぶまで入れない · row.type_pick)。opts なし = エンジン rules.py と同じ (交差試験)。 */
+  var FORM_DV = '_crcf9_form_value', FORM_BIND = 'crcf9_form@odata.bind', FORM_SET = 'crcf9_packer_types', FORM_NAV = 'crcf9_form';
+  function formBind(guid) { return '/' + FORM_SET + '(' + guid + ')'; }
+  function bindGuid(v) { var m = /\(([^)]+)\)/.exec(String(v || '')); return m ? m[1].toLowerCase() : null; }
+  function recKey(k) { return k === FORM_BIND ? FORM_DV : k; }
 
   function NumInvalid(v) { this.value = v; }
 
@@ -105,6 +114,19 @@
       var pv = put[name] === undefined ? null : put[name];
       var pc = (name === 'ct' || name === 'seal') ? normText(pv) : pv;
       var cw = [], state, inp;
+      if (name === 'type' && opts && opts.type_mode === 'fill_empty') {
+        if (nv !== null) { state = 'KEEPNOW'; inp = false; pv = null; }
+        else if (row.type_hint) {
+          cw.push('TYPE_CHOOSE');
+          var tp = row.type_pick && (opts.type_choices || ['45GP', '45R', '42GP']).indexOf(row.type_pick) >= 0 ? row.type_pick : null;
+          state = 'CHOOSE'; inp = !!tp; pv = tp;
+        } else { state = 'FILL'; inp = true; pv = '45GP'; }
+        out.cells.push({ field: name, dv_field: dv, now: cell[dv] === undefined ? null : cell[dv], put: pv, state: state, in_patch: inp, warnings: cw,
+          hint: state === 'CHOOSE' ? row.type_hint : undefined });
+        if (inp) out.patch[dv] = pv;
+        warns = warns.concat(cw);
+        return;
+      }
       if (name === 'type' && opts && opts.type_input === false) { state = 'NOINPUT'; inp = false; }
       else if (pv === null) { state = 'KEEP'; inp = false; }
       else if (nv === null) { state = 'FILL'; inp = true; }
@@ -119,6 +141,14 @@
       if (inp) out.patch[dv] = pv;
       warns = warns.concat(cw);
     });
+    if (opts && opts.form_bales && opts.form_bales.guid) {
+      /* v0.3.65 (#361): 形態 — 空欄だけ BALES (値ありはそのまま · 比較表 「形態: (空) → BALES」) */
+      var fg = String(opts.form_bales.guid).toLowerCase(), fn = cell[FORM_DV] ? String(cell[FORM_DV]).toLowerCase() : null;
+      var fst = fn === null ? 'FILL' : (fn === fg ? 'SAME' : 'KEEPNOW');
+      out.cells.push({ field: 'form', dv_field: FORM_DV, now: fn === null ? null : (fn === fg ? (opts.form_bales.name || 'BALES') : (cell[FORM_DV + '@OData.Community.Display.V1.FormattedValue'] || fn)),
+        put: fst === 'FILL' ? (opts.form_bales.name || 'BALES') : null, state: fst, in_patch: fst === 'FILL', warnings: [] });
+      if (fst === 'FILL') out.patch[FORM_BIND] = formBind(opts.form_bales.guid);
+    }
     out.warnings = uniqSorted(warns, WARN_CODES);
     return out;
   }
@@ -179,7 +209,8 @@
     });
     var cnt = { SAME: 0, FILL: 0, DIFF: 0, KEEP: 0 }, warn = {}, skip = {};
     if (opts && opts.plan_fill) cnt.PLAN = 0;
-    if (opts && opts.type_input === false) cnt.NOINPUT = 0;
+    if (opts && opts.type_input === false && opts.type_mode !== 'fill_empty') cnt.NOINPUT = 0;
+    if (opts && (opts.type_mode === 'fill_empty' || opts.form_bales)) { cnt.KEEPNOW = 0; cnt.CHOOSE = 0; }
     outRows.forEach(function (r) {
       r.cells.forEach(function (c) { if (cnt[c.state] !== undefined) cnt[c.state] += 1; });
       r.warnings.forEach(function (w) { warn[w] = (warn[w] || 0) + 1; });
@@ -215,7 +246,7 @@
     var self = this;
     if (!this.fetch) return Promise.reject(new Error('DRY — 送信しません'));
     this.calls.push(['GET', id]);
-    var sel = 'crcf9_container_informationid,' + FIELDS.map(function (f) { return f[1]; }).join(',');
+    var sel = 'crcf9_container_informationid,' + FIELDS.map(function (f) { return f[1]; }).join(',') + ',' + FORM_DV;   /* v0.3.65: 形態 も読む */
     return this.fetch(this._url(id) + '?$select=' + sel, { method: 'GET', headers: this._hdr() }).then(function (r) {
       return r.status === 200 ? r.json() : null;
     }).catch(function () { return null; }).then(function (x) { self.last = x; return x; });
@@ -237,17 +268,57 @@
           var names = {};
           FIELDS.forEach(function (f) { names[f[1]] = f[0]; });
           var bad = Object.keys(body).filter(function (dv) {
+            if (dv === FORM_BIND) return (after[FORM_DV] ? String(after[FORM_DV]).toLowerCase() : null) !== bindGuid(body[dv]);   /* v0.3.65: 形態 = 読み直した guid */
+            if (body[dv] === null) return after[dv] !== null && after[dv] !== undefined && after[dv] !== '';                   /* 元に戻す (空へ) */
             var f = names[dv], a = nowValue(f, after[dv]);
             var want = (f === 'ct' || f === 'seal') ? normText(body[dv]) : (f === 'type' ? String(body[dv]).toUpperCase() : body[dv]);
             return a !== want;
           });
           if (bad.length) return { result: 'REREAD_DIFF', ct_id: p.ct_id, before: before, after: after, field: bad[0] };
-          var pick = function (o) { var x = {}; Object.keys(body).forEach(function (k) { x[k] = o[k] === undefined ? null : o[k]; }); return x; };
-          return { result: 'OK', ct_id: p.ct_id, cell: { ct_id: p.ct_id, fields: Object.keys(body).sort(), before: pick(before), after: pick(after) } };
+          var pick = function (o) { var x = {}; Object.keys(body).forEach(function (k) { var rk = recKey(k); x[rk] = o[rk] === undefined ? null : o[rk]; }); return x; };
+          return { result: 'OK', ct_id: p.ct_id, cell: { ct_id: p.ct_id, fields: Object.keys(body).map(recKey).sort(), before: pick(before), after: pick(after) } };
         });
       });
     });
   };
+  /* v0.3.65 (R12Y Part 001): 形態 (Lookup) を空に戻す = DELETE …/crcf9_form/$ref → もう一度 GET で空を確認 (元に戻す だけが使う) */
+  Writer.prototype.clearForm = function (id, ifMatch) {
+    var self = this;
+    if (!this.enabled) return Promise.reject(new Error('DRY — 送信しません'));
+    return this.getCell(id).then(function (before) {
+      if (!before) return { result: 'ERROR', ct_id: id, error: 'GET 失敗' };
+      if (ifMatch && before['@odata.etag'] !== ifMatch) return { result: 'PRECONDITION_FAILED', ct_id: id, before: before };
+      self.calls.push(['DELETE_REF', id]);
+      return self.fetch(self._url(id) + '/' + FORM_NAV + '/$ref', { method: 'DELETE', headers: self._hdr({ 'If-Match': before['@odata.etag'] || '*' }) }).then(function (r) {
+        if (r.status === 412) return { result: 'PRECONDITION_FAILED', ct_id: id, before: before };
+        if (r.status !== 200 && r.status !== 204) return { result: 'ERROR', ct_id: id, error: 'DELETE ' + r.status, before: before };
+        return self.getCell(id).then(function (after) {
+          if (!after || after[FORM_DV]) return { result: 'REREAD_DIFF', ct_id: id, before: before, after: after || null, field: FORM_DV };
+          return { result: 'OK', ct_id: id, cell: { ct_id: id, fields: [FORM_DV], before: { _crcf9_form_value: before[FORM_DV] || null }, after: { _crcf9_form_value: null } } };
+        });
+      });
+    });
+  };
+  /* v0.3.65: 形態 · タイプ が空欄の行の数 (CT が入った枠だけ · 通関書類送付 の条件 · 記録 formtype_blank) */
+  function formTypeBlank(cells) {
+    var n = 0;
+    Object.keys(cells || {}).forEach(function (g) {
+      var c = cells[g] || {};
+      if (normText(c.crcf9_container_no) && (!c[FORM_DV] || !String(c.crcf9_type || '').trim())) n += 1;
+    });
+    return n;
+  }
+  /* v0.3.65: タイプを選ばせる理由 (行ごと) — 45R の船社 · 同じブッキングの他の枠のタイプ · 書類 · 写真のサイズ根拠 (エンジン size_hint · あれば) */
+  function typeHint(row, ctx) {
+    ctx = ctx || {};
+    var why = [];
+    if (ctx.carrier45r === true) why.push('45R を使う船社 (' + (ctx.carrier || '') + ')');
+    if (ctx.carrier45r === null) why.push('船社を読めません');
+    var ot = (ctx.otherTypes || []).filter(function (t) { return t && t !== '45GP'; });
+    if (ot.length) why.push('同じブッキングの他の枠 ' + ot.join('・'));
+    if (row && row.size_hint) why.push('書類・写真のサイズ ' + row.size_hint);
+    return why.length ? why.join(' · ') : null;
+  }
   /* v0.3.50 (R10Q · #176): compass_done 記録の trial — cfg.trialUntil (JST の日時 · 例 '2026-11-24T00:00:00+09:00') から false。
      nowMs = Date.now() (端末の時間帯に関係なし)。trial が false · trialUntil が読めない時 = cfg.trial のまま (記録だけ · 入力の動きは同じ) */
   function trialAt(cfg, nowMs) {
@@ -264,7 +335,8 @@
 
   var api = { RULES_VERSION: RULES_VERSION, FIELDS: FIELDS, STATES: STATES, WARN_CODES: WARN_CODES, toInt: toInt, normText: normText,
     putText: putText, normCode: normCode, nowValue: nowValue, targetType: targetType, compareRow: compareRow, ivAllOk: ivAllOk,
-    compareIv: compareIv, followTarget: followTarget, sameCond: sameCond, FOLLOW_OPT: FOLLOW_OPT, Writer: Writer, compassDoneAction: compassDoneAction, trialAt: trialAt, NumInvalid: NumInvalid };
+    compareIv: compareIv, followTarget: followTarget, sameCond: sameCond, FOLLOW_OPT: FOLLOW_OPT, Writer: Writer, compassDoneAction: compassDoneAction, trialAt: trialAt, NumInvalid: NumInvalid,
+    FORM_DV: FORM_DV, FORM_BIND: FORM_BIND, formBind: formBind, bindGuid: bindGuid, formTypeBlank: formTypeBlank, typeHint: typeHint };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.C01 = root.C01 || {};
   root.C01.compass = api;

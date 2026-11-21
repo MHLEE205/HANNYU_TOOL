@@ -177,8 +177,21 @@ def main():
             page.on("dialog", lambda d: (dlg.append(d.message), d.accept()))
             page.route("https://graph.microsoft.com/**", graph)
             page.route(f"http://127.0.0.1:{port}/__d03fake.html*", lambda r: r.fulfill(status=200, body=fake_d03(pdf_b64, containers), headers={"Content-Type": "text/html; charset=utf-8"}))
-            page.route("https://orgde512c6f.crm7.dynamics.com/**", lambda r: r.fulfill(status=200, body=json.dumps(
-                {"value": [{"_cr49f_sale_contract_id_value": "SC1"}], "_cr49f_buyer_id_value": "BUYER-T"}), headers={"Content-Type": "application/json"}))
+            ft = {"mode": "ok"}          # v0.3.65 (R12Y · #361): 形態 · タイプ (가명 칸) — ok = 모두 있음 · blank = 1 칸 빈칸 · fail = GET 500
+
+            def dvx(r):
+                if "crcf9_container_informations" in r.request.url:
+                    if ft["mode"] == "fail":
+                        return r.fulfill(status=500, body="{}")
+                    cs = [{"crcf9_container_no": f"TSTU{i:07d}", "crcf9_type": "45GP", "_crcf9_form_value": "64f45d9f-383c-f011-8c4e-6045bd62e122"} for i in range(3)]
+                    if ft["mode"] == "blank":
+                        cs[1]["_crcf9_form_value"] = None
+                        cs[2]["crcf9_type"] = None
+                    cs.append({"crcf9_container_no": None, "crcf9_type": None, "_crcf9_form_value": None})     # CT 없는 칸 = 안 셈
+                    return r.fulfill(status=200, body=json.dumps({"value": cs}), headers={"Content-Type": "application/json"})
+                return r.fulfill(status=200, body=json.dumps({"value": [{"_cr49f_sale_contract_id_value": "SC1"}], "_cr49f_buyer_id_value": "BUYER-T"}),
+                                 headers={"Content-Type": "application/json"})
+            page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("탭 제목 v0.3.65", page.title() == "LEENAI C-01 搬入票 v0.3.65", page.title())
@@ -284,6 +297,28 @@ def main():
             ok("7 COMPASS 값 ≠ 実況表 → 막힘 (シール)", page.locator("[data-csendgo]").is_disabled() and "COMPASS ≠ 実況表" in why, why)
             page.click(".c01-customs [data-close]")
             page.evaluate("() => { document.getElementById('c01-d03auto').contentWindow.__ct = null; }")
+            # 7b v0.3.65 (R12Y · #361): 形態 · タイプ 空欄 0 = 켜짐 조건 (확인 창 COMPASS GET · Compass入力 기록)
+            for mode, word, name in (("blank", "形態・タイプ が空欄 2台", "7b 形態・タイプ 빈칸 2칸 (CT 있는 칸만 셈) → 送信 막힘 · 이유 한 줄"),
+                                     ("fail", "形態・タイプ を COMPASS で確認できません", "7b 形態・タイプ GET 실패 → 막힘 (못 읽음 = 안 보냄)")):
+                ft["mode"] = mode
+                mail.reset()
+                page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
+                page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
+                page.select_option("[data-cbl]", "original")
+                page.wait_for_function("() => !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+                page.check("[data-cack]")
+                fill_body(page)
+                why = page.locator("[data-cwhy]").inner_text()
+                ok(name, page.locator("[data-csendgo]").is_disabled() and word in why, why)
+                page.click(".c01-customs [data-close]")
+            ft["mode"] = "ok"
+            page.evaluate("""(iv) => { const A = C01.app._api(); A.S.mine = (A.S.mine || []).concat([{ action: { action_id: 'ft-test', action: 'compass_done', iv: iv, by: 'staff_a@fake',
+                at: '2099-01-01T00:00:00+09:00', value: { cells: [{ ct_id: 'g', fields: ['crcf9_type'], before: {}, after: {} }], formtype_blank: 2 } } }]); A.render(); }""", IV)
+            bft = page.locator(f'tbody[data-iv="{IV}"] [data-csend]')
+            tft = bft.get_attribute("title") or ""
+            ok("7b Compass入力 기록 formtype_blank 2 → 버튼 회색 + 「形態・タイプ 空欄 2台」", "c01-blocked" in (bft.get_attribute("class") or "") and "形態・タイプ 空欄 2台" in tft, tft)
+            page.evaluate("() => { const A = C01.app._api(); A.S.mine = (A.S.mine || []).filter(m => m.action.action_id !== 'ft-test'); A.render(); }")
+            ok("7b 기록 없앰 → 다시 파랑", "c01-btn-pri" in (page.locator(f'tbody[data-iv="{IV}"] [data-csend]').get_attribute("class") or ""))
             # 8 실전 모드
             mail.reset()
             page.evaluate("C01.CUSTOMS.sendTest = false")
@@ -351,7 +386,7 @@ def main():
                getattr(mail, "upload", {}).get("AttachmentItem", {}).get("name") == f"{IV}_IV_PL_SI.pdf" and len(puts) == 1 and puts[0]["auth"] is None
                and puts[0]["n"] <= 4 * 1024 * 1024 and puts[0]["range"].startswith("bytes 0-") and mail.sends == 1, [puts, getattr(mail, "upload", None), mail.sends])
             # 콘솔 오류
-            errs = [e for e in RES["console_errors"] if "favicon" not in e and "404" not in e]
+            errs = [e for e in RES["console_errors"] if "favicon" not in e and "404" not in e and not ("500" in e and "Failed to load resource" in e)]   # 500 = 7b 形態・タイプ GET 실패 흉내 (R12Y)
             ok("콘솔 오류 0", not errs, errs[:3])
             br.close()
     finally:

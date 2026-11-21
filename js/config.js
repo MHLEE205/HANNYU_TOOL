@@ -122,7 +122,14 @@ C01.COMPASS = {
   follow_same_cond_slot: false,      /* v0.3.24 (R7X Part D-4): 켜지 않음 (v2 単独なら行き違いなし) */
   /* v0.3.24 (R7X Part D · #214): CT が空の枠の 数値 = ブッキング予定値 → 「予定値 → 入力」 (緑 · 警告なし) / 形態は入力しない (保留) */
   plan_fill: true,
-  type_input: false,
+  type_input: false,      /* type_mode があれば そちらが先 (v0.3.65) */
+  /* v0.3.65 (R12Y Part 001 · 決定 #361 「맞아. 바로 그대로야」): 形態 = COMPASS crcf9_form (Lookup → crcf9_packer_types の 1 行 「BALES」 · guid は 11/21 GET で確認) —
+     空欄の時だけ BALES を入れる (値ありはそのまま)。タイプ = crcf9_type — 値ありはそのまま · 空欄は 45GP。ただし 45R を使う船社 (6 か月の 45R 110 行 = すべて ONE · 11/21 GET) ·
+     同じブッキングの他の枠が 45R/42GP/22GP · 書類・写真のサイズ根拠 があれば 黄色の警告で 担当者が type_choices から選ぶ (自動では入れない)。 */
+  form_bales: { guid: '64f45d9f-383c-f011-8c4e-6045bd62e122', name: 'BALES' },
+  type_mode: 'fill_empty',
+  type45rCarriers: ['ONE'],
+  type_choices: ['45GP', '45R', '42GP'],
   /* v0.3.19 (R7T 決定 #190): COMPASS (Dataverse) の場所 — LEENAI_COMMON と同じ環境 · 読み書きは職員トークン (LEENAI.auth.token('dataverse')) */
   dvUrl: 'https://orgde512c6f.crm7.dynamics.com',
   /* 並行期間 (#176): compass_done 記録の trial (記録だけ · 入力の動きは同じ) */

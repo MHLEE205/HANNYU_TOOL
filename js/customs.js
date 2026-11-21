@@ -41,6 +41,11 @@ C01.customs = (function () {
     if (rows.some(function (x) { return x.dup_ct; })) out.push('CT重複');
     if (rows.some(function (x) { return x.dup_seal; })) out.push('シール重複');
     if (!g.compassDone) out.push('Compass入力未完了 ' + rows.filter(function (x) { return !x.frozen; }).length + '台');
+    else if (C01.COMPASS && C01.COMPASS.form_bales && api().compassRecords) {          /* v0.3.65 (R12Y · #361): Compass入力 の記録 (入力の後に読んだ) 形態 · タイプ 空欄 */
+      var cr = api().compassRecords(iv)[0];
+      var fb = cr && cr.value ? cr.value.formtype_blank : undefined;
+      if (typeof fb === 'number' && fb > 0) out.push('形態・タイプ 空欄 ' + fb + '台');
+    }
     if (!iv.bkg_no) out.push('BKG なし');
     return out;
   }
@@ -180,9 +185,14 @@ C01.customs = (function () {
     /* customs_bl.json = エンジンの meta.customs_bl がある時だけ読む (無いエンジンに 404 を出さない) */
     var pBl = (a.S.customsBl === undefined && a.S.meta && a.S.meta.customs_bl ? src.getJson(String(a.S.meta.customs_bl)).then(function (x) { a.S.customsBl = x; }, function () { a.S.customsBl = null; }) : Promise.resolve())
       .then(function () { return graphOk ? buyerOf(ivNo) : ''; });
-    Promise.all([pMail, pSent, pBl]).then(function (r) {
+    /* v0.3.65 (R12Y · #361): 形態 · タイプ 空欄の枠 (CT が入った枠だけ · COMPASS GET だけ) — 読めない = null (送信を止める) */
+    var pFt = C01.COMPASS && C01.COMPASS.form_bales ? (graphOk && iv.booking_guid ? dvGet('crcf9_container_informations?$select=crcf9_container_no,crcf9_type,_crcf9_form_value&$filter=' +
+      encodeURIComponent('_crcf9_booking_id_value eq ' + iv.booking_guid)).then(function (j) {
+      var cells = {}; (j.value || []).forEach(function (c, i) { cells[i] = c; }); return C01.compass.formTypeBlank(cells);
+    }).catch(function () { return null; }) : Promise.resolve(null)) : Promise.resolve(0);
+    Promise.all([pMail, pSent, pBl, pFt]).then(function (r) {
       if (!st || st.iv !== ivNo) return;
-      st.mail = r[0]; st.sent = r[1] || []; st.buyer = r[2] || '';
+      st.mail = r[0]; st.sent = r[1] || []; st.buyer = r[2] || ''; st.ftBlank = r[3];
       var h = st.buyer ? blHistory(st.buyer, ivNo) : [];
       var pb = pickBl(h);
       st.bl = pb.v; st.blWhy = pb.why;
@@ -240,6 +250,10 @@ C01.customs = (function () {
       if (!(r.si_avail || []).length) out.push('S/I がありません');
       if (!r.picks.bl.v) out.push('B/L 形態を選んでください');
       cmpCompass(st.g, r.info).forEach(function (x) { out.push('COMPASS ≠ 実況表: ' + x); });
+    }
+    if (C01.COMPASS && C01.COMPASS.form_bales) {                     /* v0.3.65 (R12Y · #361): 形態 · タイプ 空欄 0 (確認窓で COMPASS を読む) */
+      if (st.ftBlank === null) out.push('形態・タイプ を COMPASS で確認できません');
+      else if (st.ftBlank > 0) out.push('形態・タイプ が空欄 ' + st.ftBlank + '台 — Compass入力 で入れてください');
     }
     var rc = recips();
     if (st.mail && !rc.to.length) out.push('宛先がありません');

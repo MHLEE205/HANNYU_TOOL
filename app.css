@@ -411,6 +411,11 @@ table.c01-same { display: table; }          /* 古い .c01-same (flex) が表に
 /* v0.3.24 (R7X Part D): 予定値 → 入力 (緑) · 形態 入力しない (灰) · 全て選択 */
 .c01-cst.PLAN, .c01-cell.PLAN { background: var(--row-ok); }
 .c01-cst.NOINPUT, .c01-cell.NOINPUT { background: transparent; color: var(--text3); }
+/* v0.3.65 (R12Y · #361): 形態 · タイプ — 値あり(そのまま) = 灰色 · 選ぶ = 黄色の警告 */
+.c01-cst.KEEPNOW, .c01-cell.KEEPNOW { background: transparent; color: var(--text3); }
+.c01-cst.CHOOSE, .c01-cell.CHOOSE { background: #fff4c2; color: #6b4e00; }
+.c01-cell.CHOOSE select { font-size: 12px; margin-top: 2px; }
+.c01-thint { font-size: 11px; max-width: 160px; white-space: normal; }
 .c01-call { display: inline-flex; align-items: center; gap: 3px; font-weight: 400; font-size: 11px; white-space: nowrap; }
 /* v0.3.25 (R7Z Part A): その他（AIに相談） — 普段は閉じている · 欄の幅 · 高さは変えない (#193) */
 .c01-ask { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 6px; font-size: 13px; }

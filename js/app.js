@@ -1131,16 +1131,20 @@ window.C01 = window.C01 || {};
   window.addEventListener('resize', function () { if (S.view === 'main') fitTable(); });
 
   /* ── v0.2.0 Compass入力 DRY 窓 (設計 §6 · 決定 #1~#3 · #91) — 比較表だけ。送信は無効「DRY — 送信しません」 ── */
-  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）', PLAN: '予定値 → 入力（CT が空の枠 · 前の値は記録）', NOINPUT: '入力しない（保留）' };
+  var STATE_LABEL = { SAME: '同じ', FILL: '空欄→入力', DIFF: '違う値', KEEP: '値なし（そのまま）', PLAN: '予定値 → 入力（CT が空の枠 · 前の値は記録）', NOINPUT: '入力しない（保留）',
+    KEEPNOW: '値あり（そのまま）', CHOOSE: '選んでください（自動では入れません）' };   /* v0.3.65 (R12Y · #361) */
   var WARN_LABEL = { PACKER_DIFF: '業者が違う', ITEM_DIFF: '品目が違う', OFFICE_DIFF: '営業所が違う', EXISTING_DIFF: 'COMPASS に別の値', CT_DUP: 'CT が別の枠にもある',
-    TYPE_42_22: '形態 42GP/22GP — 担当者が判断', NUM_INVALID: '数字にできない — この行は入力しない',
+    TYPE_42_22: 'タイプ 42GP/22GP — 担当者が判断', NUM_INVALID: '数字にできない — この行は入力しない',
     /* v0.2.1 (D-11 (가) 準備 · C01.COMPASS.follow_same_cond_slot · 既定オフ) */
     SLOT_FOLLOWED: '同じ CT がある同一条件の枠で比較', CT_DUP_OTHER_COND: '同じ CT が条件の違う枠にある', CT_DUP_MULTI: '同じ CT が 2 つ以上の枠にある',
-    OTHER_CT_IN_SLOT: '枠に別の CT が入っている' };
+    OTHER_CT_IN_SLOT: '枠に別の CT が入っている',
+    TYPE_CHOOSE: 'タイプを選んでください（45GP / 45R / 42GP）' };   /* v0.3.65 (R12Y · #361) */
   var SKIP_LABEL = { NO_CT_ID: '枠 (ct_id) なし — 入力しない', NOT_FOUND: 'COMPASS の枠が見つからない', NOT_OK: '対象外（自動OK・確認済 以外）', NUM_INVALID: '数字にできない値がある',
     CT_DUP_OTHER_COND: '同じ CT が条件の違う枠にある — 入力しない', CT_DUP_MULTI: '同じ CT が 2 つ以上の枠にある — 入力しない',
     OTHER_CT_IN_SLOT: '枠に別の CT が入っている — 上書きしない' };
-  var CF_LABEL = { ct: 'CT', seal: 'シール', n_w: '正味', g_w: '総重量(=正味)', t_w: '風袋', bales: 'ベール', type: '形態' };
+  /* v0.3.65 (R12Y · #361): COMPASS の 「形態」 = crcf9_form (BALES) · 「タイプ」 = crcf9_type (45GP 等) — 前は タイプ を 「形態」 と表示していた */
+  var CF_LABEL = { ct: 'CT', seal: 'シール', n_w: '正味', g_w: '総重量(=正味)', t_w: '風袋', bales: 'ベール', type: 'タイプ', form: '形態' };
+  function compassCols() { return C01.compass.FIELDS.map(function (f) { return f[0]; }).concat((C01.COMPASS || {}).form_bales ? ['form'] : []); }
   function ivById(ivNo) { return ((S.jik && S.jik.ivs) || []).filter(function (x) { return x.iv_no === ivNo; })[0] || null; }
   function compassInput(iv) {
     var ov = overlay();
@@ -1178,8 +1182,22 @@ window.C01 = window.C01 || {};
     });
   }
   function dvBase() { return String((C01.COMPASS || {}).dvUrl || '').replace(/\/$/, ''); }
+  /* v0.3.65 (R12Y · #361): ブッキングの船社 (GET だけ · 表示名) — 45R を使う船社なら タイプ を選ばせる。読めない = null (選ばせる側) */
+  function compassCarrier(iv) {
+    var C = C01.COMPASS || {};
+    if (C.type_mode !== 'fill_empty') return Promise.resolve({});
+    return dvFetch(dvBase() + '/api/data/v9.2/cr49f_bookings(' + iv.booking_guid + ')?$select=_cr49f_carrier_id_value',
+      { method: 'GET', headers: { Accept: 'application/json', Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"' } }).then(function (r) {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }).then(function (b) {
+      var name = String(b['_cr49f_carrier_id_value@OData.Community.Display.V1.FormattedValue'] || '').trim();
+      var list = (C.type45rCarriers || []).map(function (x) { return String(x).toUpperCase(); });
+      return { carrier: name, carrier45r: name ? list.indexOf(name.toUpperCase()) >= 0 : false };
+    }).catch(function () { return { carrier: '', carrier45r: null }; });
+  }
   function compassLive(iv) {
-    var sel = 'crcf9_container_informationid,' + C01.compass.FIELDS.map(function (f) { return f[1]; }).join(',');
+    var sel = 'crcf9_container_informationid,' + C01.compass.FIELDS.map(function (f) { return f[1]; }).join(',') + ',' + C01.compass.FORM_DV;
     var url = dvBase() + '/api/data/v9.2/crcf9_container_informations?$select=' + sel + '&$filter=' + encodeURIComponent('_crcf9_booking_id_value eq ' + iv.booking_guid);
     return dvFetch(url, { method: 'GET', headers: { Accept: 'application/json' } }).then(function (r) {
       if (!r.ok) throw new Error('COMPASS を読めません (' + r.status + ')');
@@ -1197,8 +1215,21 @@ window.C01 = window.C01 || {};
       Object.keys(cells).forEach(function (g) {
         dups[g] = Object.keys(cells).filter(function (h) { return h !== g; }).map(function (h) { return C01.compass.normText(cells[h].crcf9_container_no); }).filter(Boolean);
       });
-      return { cells: cells, dups: dups, live: true };
+      return compassCarrier(iv).then(function (car) { return { cells: cells, dups: dups, live: true, carrier: car }; });
     });
+  }
+  /* v0.3.65 (R12Y · #361): 行ごとの タイプ の選ばせる理由 · 担当者が選んだ値 (S.modal.typePick) */
+  function compassRows(iv, snap, picks) {
+    var rows = compassInput(iv), C = C01.COMPASS || {};
+    if (C.type_mode !== 'fill_empty') return rows;
+    var cells = (snap && snap.cells) || {};
+    rows.forEach(function (r) {
+      var ot = [];
+      Object.keys(cells).forEach(function (g) { var t = String((cells[g] || {}).crcf9_type || '').trim().toUpperCase(); if (g !== r.ct_id && t && ot.indexOf(t) < 0) ot.push(t); });
+      r.type_hint = C01.compass.typeHint(r, { carrier: ((snap || {}).carrier || {}).carrier, carrier45r: ((snap || {}).carrier || {}).carrier45r, otherTypes: ot.sort() });
+      if (picks && picks[r.container_id]) r.type_pick = picks[r.container_id];
+    });
+    return rows;
   }
   /* v0.3.50 (R10Q · #176): compass_done 記録の trial — C01.COMPASS.trialUntil (JST) まで true · その後 false */
   function compassTrial() { return C01.compass.trialAt(C01.COMPASS, Date.now()); }
@@ -1218,12 +1249,13 @@ window.C01 = window.C01 || {};
     var last = compassRecords(iv)[0];
     return !!last && !last.value.undo_of;
   }
-  function openCompass(ivNo) {
+  function openCompass(ivNo, reuse) {
     var iv = ivById(ivNo);
     if (!iv) return;
-    S.modal = { kind: 'compass', iv: ivNo };
-    var live = compassLiveOn();
-    var getSnap = live ? compassLive(iv).catch(function (e) { return { error: e.message }; })
+    var prev = reuse && S.modal && S.modal.kind === 'compass' && S.modal.iv === ivNo ? S.modal : null;   /* v0.3.65: タイプを選んだ時 = 読み直さず描き直す */
+    S.modal = { kind: 'compass', iv: ivNo, typePick: prev ? prev.typePick : {} };
+    var live = prev ? prev.live : compassLiveOn();
+    var getSnap = prev ? Promise.resolve(prev.snap) : live ? compassLive(iv).catch(function (e) { return { error: e.message }; })
       : S.src.getJson('compass_now/' + ivNo + '.json').then(function (snap) { return snap; }).catch(function () { return null; });
     getSnap.then(function (snap) {
       if (!S.modal || S.modal.iv !== ivNo) return;
@@ -1236,29 +1268,41 @@ window.C01 = window.C01 || {};
         showModal(html);
         return;
       }
-      var res = C01.compass.compareIv(ivNo, compassInput(iv), snap.cells || {}, snap.dups || {}, C01.COMPASS || null);
-      S.modal.res = res; S.modal.live = live; S.modal.cells = snap.cells || {};
+      var res = C01.compass.compareIv(ivNo, compassRows(iv, snap, S.modal.typePick), snap.cells || {}, snap.dups || {}, C01.COMPASS || null);
+      S.modal.res = res; S.modal.live = live; S.modal.cells = snap.cells || {}; S.modal.snap = snap;
       S.modal.pick = {};
-      res.rows.forEach(function (r) { if (!r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = r.warnings.length === 0; });
+      res.rows.forEach(function (r) {
+        if (!r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = prev && prev.pick && prev.pick[r.ct_id] !== undefined ? prev.pick[r.ct_id] : r.warnings.length === 0;
+      });
+      if (prev) res.rows.forEach(function (r) { if (r.container_id && S.modal.typePick[r.container_id] && !r.skip && Object.keys(r.patch).length) S.modal.pick[r.ct_id] = true; });
       html += '<div class="c01-mb"><div class="c01-csum">' +
         '<span class="c01-cst SAME">同じ ' + res.count.cells.SAME + '</span><span class="c01-cst FILL">空欄→入力 ' + res.count.cells.FILL + '</span>' +
         (res.count.cells.PLAN !== undefined ? '<span class="c01-cst PLAN">予定値→入力 ' + res.count.cells.PLAN + '</span>' : '') +
         '<span class="c01-cst DIFF">違う値 ' + res.count.cells.DIFF + '</span><span class="c01-cst KEEP">値なし ' + res.count.cells.KEEP + '</span>' +
-        (res.count.cells.NOINPUT !== undefined ? '<span class="c01-cst NOINPUT">形態は入力しない</span>' : '') +
+        (res.count.cells.NOINPUT !== undefined ? '<span class="c01-cst NOINPUT">タイプは入力しない</span>' : '') +
+        (res.count.cells.KEEPNOW !== undefined ? '<span class="c01-cst KEEPNOW">値あり(そのまま) ' + res.count.cells.KEEPNOW + '</span>' : '') +
+        (res.count.cells.CHOOSE ? '<span class="c01-cst CHOOSE" id="cmp-choose">タイプを選ぶ ' + res.count.cells.CHOOSE + '</span>' : '') +
         '<span class="t2">PATCH 対象 ' + res.count.patch_rows + '行 · 作業日は入れません</span></div>' +
         (res.all_ok ? '' : '<p class="c01-warnline" id="cmp-reason">' + esc(res.button.reason || '') + (live ? ' — 自動OK・確認済 の行だけ入力できます' : ' — 比較表だけ表示します') + '</p>') +
         '<table class="c01-ctable" id="compass-table"><thead><tr>' + (live ? '<th title="入力する行"><label class="c01-call" title="警告のない行を全て選ぶ（警告のある行は 1 行ずつ確認して選ぶ）"><input type="checkbox" id="compass-all"> 全て選択</label></th>' : '') + '<th>CT</th>' +
-        C01.compass.FIELDS.map(function (f) { return '<th>' + CF_LABEL[f[0]] + '</th>'; }).join('') + '<th>警告・理由</th></tr></thead><tbody>';
+        compassCols().map(function (f) { return '<th>' + CF_LABEL[f] + '</th>'; }).join('') + '<th>警告・理由</th></tr></thead><tbody>';
       res.rows.forEach(function (r) {
         var can = !r.skip && Object.keys(r.patch).length > 0;
         html += '<tr data-crow="' + esc(r.container_id || '') + '"' + (r.ct_id ? ' data-ctid="' + esc(r.ct_id) + '"' : '') + '>' +
           (live ? '<td class="c01-cpick">' + (can ? '<input type="checkbox" data-cpick="' + esc(r.ct_id) + '"' + (S.modal.pick[r.ct_id] ? ' checked' : '') + ' title="' + (r.warnings.length ? '警告あり — 確認して入れる時だけチェック' : 'この行を入力') + '">' : '') + '</td>' : '') +
           '<td class="mono">' + esc(r.ct || '—') + '</td>';
         if (r.skip) {
-          html += '<td colspan="' + C01.compass.FIELDS.length + '" class="c01-skip">' + esc(SKIP_LABEL[r.skip] || r.skip) + '</td>';
+          html += '<td colspan="' + compassCols().length + '" class="c01-skip">' + esc(SKIP_LABEL[r.skip] || r.skip) + '</td>';
         } else {
           r.cells.forEach(function (c) {
-            html += '<td class="c01-cell ' + c.state + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL[c.state]) + '" data-state="' + c.state + '">' +
+            if (c.state === 'CHOOSE') {      /* v0.3.65 (#361): 黄色 · 45GP / 45R / 42GP から選ぶ (選ぶまで入れない) */
+              html += '<td class="c01-cell CHOOSE' + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL.CHOOSE + ' — ' + (c.hint || '')) + '" data-state="CHOOSE" data-field="' + c.field + '">' +
+                '<div class="now">（空）</div><select data-tpick="' + esc(r.container_id || '') + '"><option value="">選ぶ</option>' +
+                ((C01.COMPASS || {}).type_choices || ['45GP', '45R', '42GP']).map(function (t) { return '<option value="' + esc(t) + '"' + (c.put === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
+                '</select><div class="t2 c01-thint">' + esc(c.hint || '') + '</div></td>';
+              return;
+            }
+            html += '<td class="c01-cell ' + c.state + (c.in_patch ? ' in' : '') + '" title="' + esc(STATE_LABEL[c.state]) + '" data-state="' + c.state + '" data-field="' + c.field + '">' +
               (c.state === 'NOINPUT' ? '<div class="now">' + esc(c.now == null ? '（空）' : c.now) + '</div><div class="t2">入力しない</div>' :
               '<div class="now">' + (c.state === 'PLAN' ? '<span class="t2">予定 </span>' : '') + esc(c.now == null ? '（空）' : c.now) + '</div>' + (c.state === 'SAME' || c.state === 'KEEP' ? '' : '<div class="put">→ ' + esc(c.put == null ? '' : c.put) + '</div>')) + '</td>';
           });
@@ -1295,6 +1339,9 @@ window.C01 = window.C01 || {};
       };
       document.querySelectorAll('[data-cpick]').forEach(function (el) {
         el.onchange = function () { S.modal.pick[el.getAttribute('data-cpick')] = el.checked; upd(); };
+      });
+      document.querySelectorAll('[data-tpick]').forEach(function (el) {      /* v0.3.65: タイプを選ぶ → 比較を作り直す (COMPASS は読み直さない) */
+        el.onchange = function () { var k = el.getAttribute('data-tpick'); if (el.value) S.modal.typePick[k] = el.value; else delete S.modal.typePick[k]; openCompass(ivNo, true); };
       });
       /* v0.3.24 (R7X Part D-3): 全て選択 = 警告のない行だけ (CT が別の枠にもある · COMPASS に別の値 (予定値でない) 等の行は外す — 1 行ずつ確認) */
       var noWarn = {};
@@ -1342,7 +1389,10 @@ window.C01 = window.C01 || {};
       var a = C01.compass.compassDoneAction(actionId(), ivNo, S.me.email, jstNow(), ok.map(function (r) { return r.cell; }));
       a.value.failed = bad;
       a.value.trial = compassTrial();               /* v0.3.50 (R10Q · #176): trialUntil (JST) から false */
-      return (ok.length ? writeAction(a) : Promise.resolve()).then(function () {
+      var ivx = ivById(ivNo);
+      var ft = (C01.COMPASS || {}).form_bales && ivx && ok.length ? compassLive(ivx).then(function (sn) { a.value.formtype_blank = C01.compass.formTypeBlank(sn.cells); }, function () { a.value.formtype_blank = null; })
+        : Promise.resolve();                         /* v0.3.65 (#361): 入力の後 形態 · タイプ が空欄の枠 (通関書類送付 の条件) */
+      return ft.then(function () { return ok.length ? writeAction(a) : null; }).then(function () {
         m.busy = false;
         toast('COMPASS 入力: 成功 ' + ok.length + '行' + (bad.length ? ' · 失敗 ' + bad.length + '行（赤の行）' : ''), bad.length ? 'warn' : 'success');
         if (!bad.length) { closeModal(); render(); }
@@ -1362,14 +1412,27 @@ window.C01 = window.C01 || {};
       chain = chain.then(function () {
         return w.getCell(c.ct_id).then(function (now) {
           if (!now) { bad.push({ ct_id: c.ct_id, result: 'ERROR', error: 'GET 失敗' }); return; }
-          var body = {};
+          var body = {}, clearForm = false, FD = C01.compass.FORM_DV;
           Object.keys(c.after || {}).forEach(function (dv) {
+            if (dv === FD) {                         /* v0.3.65 (#361): 形態 (Lookup) — 今 = 入れた BALES の時だけ · 前が空 = 参照を外す (DELETE $ref) */
+              if (String(now[FD] || '').toLowerCase() === String(c.after[FD] || '').toLowerCase()) {
+                if (c.before && c.before[FD]) body[C01.compass.FORM_BIND] = C01.compass.formBind(c.before[FD]); else clearForm = true;
+              }
+              return;
+            }
             var f = names[dv];
             if (C01.compass.nowValue(f, now[dv]) === C01.compass.nowValue(f, c.after[dv])) body[dv] = c.before ? c.before[dv] : null;   /* 今 = 入れた値 の項目だけ戻す */
           });
-          if (!Object.keys(body).length) { bad.push({ ct_id: c.ct_id, result: 'CHANGED', error: '他の値に変わっています — 戻しません' }); return; }
-          return w.apply({ ct_id: c.ct_id, if_match: now['@odata.etag'] || null, body: body }).then(function (r) {
-            if (r.result === 'OK') done.push(r.cell); else bad.push({ ct_id: c.ct_id, result: r.result, error: r.error || null });
+          if (!Object.keys(body).length && !clearForm) { bad.push({ ct_id: c.ct_id, result: 'CHANGED', error: '他の値に変わっています — 戻しません' }); return; }
+          var cell = { ct_id: c.ct_id, fields: [], before: {}, after: {} };
+          var merge = function (r) { r.cell.fields.forEach(function (k) { if (cell.fields.indexOf(k) < 0) cell.fields.push(k); }); Object.assign(cell.before, r.cell.before); Object.assign(cell.after, r.cell.after); };
+          var p1 = Object.keys(body).length ? w.apply({ ct_id: c.ct_id, if_match: now['@odata.etag'] || null, body: body }) : Promise.resolve(null);
+          return p1.then(function (r) {
+            if (r && r.result !== 'OK') return r;
+            if (r) merge(r);
+            return clearForm ? w.clearForm(c.ct_id).then(function (r2) { if (r2.result === 'OK') merge(r2); return r2; }) : r;
+          }).then(function (r) {
+            if (r.result === 'OK') { cell.fields.sort(); done.push(cell); } else bad.push({ ct_id: c.ct_id, result: r.result, error: r.error || null });
           });
         }).catch(function (e) { bad.push({ ct_id: c.ct_id, result: 'ERROR', error: e.message }); });
       });
@@ -4943,7 +5006,7 @@ window.C01 = window.C01 || {};
   /* v0.3.63 (決定 #359): 通関書類送付 (js/customs.js) が使う内部の関数 — 画面の部品 · 記録の書き方は 他のボタンと同じ */
   function customsApi() {
     return { S: S, esc: esc, md: md, toast: toast, showModal: showModal, closeModal: closeModal, writeAction: writeAction, mkAction: mkAction,
-      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode };
+      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords };   /* compassRecords = v0.3.65 (#361) */
   }
   C01.app = { _api: customsApi, start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn, _compassInput: function (ivNo) { var iv = ivById(ivNo); return iv ? compassInput(iv) : null; } };
 })();
