@@ -7,9 +7,9 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.64',
-  date: '2026-11-18',
-  desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
+  version: '0.3.65',
+  date: '2026-11-21',
+  desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
 /* D-6 → 決定 #109 (R6.8) で決まった規則。ここだけ変える (エンジン engine/actions/apply.py ACTION_RULES と同じ規則) */
@@ -71,6 +71,22 @@ C01.SEND = {
   /* v0.3.37 (R9K Part B-0 · 決定 #270): 本番送信 — エンジン remind.json send_mode {test: false, live: true} の時だけ 「送信」 が出る
      (押した職員のメール · 宛先 = 元請だけ · 固定 CC · 送信直前にもう一度確認 C01.remindCheck)。false = 本番の送信ボタンを出さない */
   remindLive: true
+};
+
+/* v0.3.63 (決定 #359 · #302 · #303 · #306 · #338 · #343 · #352): 通関書類送付 — 実況表 IV 見出しの 「通関書類送付」 (Compass入力 の横)。
+   PDF = D-03 自動モード (同じ出所の画面の中 · ?auto=1 · 押した担当者のログイン · COMPASS は読むだけ) · メール = ① 通関依頼 の会話の一番新しいメールに 全員に返信
+   (押した担当者のメール) · 送るのは確認窓で 「送信」 を押した時だけ · 送ったら _actions customs_sent。
+   sendTest: true = 試験モード (宛先 = 押した本人 1 人だけ · 件名の前に [test]) — 実際の宛先へ送る時はこの 1 行を false (管理者の確認の後) */
+C01.CUSTOMS = {
+  enabled: true,
+  sendTest: true,
+  d03Url: 'https://mhlee205.github.io/Shipping_Document/index.html',   /* 同じ出所 (mhlee205.github.io) の時だけ自動モードが動く */
+  ourDomain: 'leenearcorp.com',      /* 自社のメール (① = 自社から送った 通関依頼) */
+  /* 本文 (#352 · 원조토르 6 か月調査 3 節の型) — {broker} = 通関業者の会社名 · {person} = 担当者名 (確認窓で直せる) */
+  body: '{broker}\n{person} 様\n\nいつもお世話になっております。\n通関用の書類を送付いたしますので、ご確認の程お願い致します。\n\n宜しくお願い致します。',
+  /* 署名 = 押した職員 (職員マスターの名前 · メール) + 会社 */
+  signature: '----------------------------------------\n{name}\n株式会社リニア (LEENEAR CORPORATION)\nTEL : +81-3-3528-9850 / FAX : +81-3-3528-9851\n{email}',
+  footer: '✦ Powered by LEENAI Automation System'
 };
 
 /* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 催促 送信直前の確認 — エンジン notify/remind.guard と同じ決まり (エンジンが下書きに付けた allow を使う)。

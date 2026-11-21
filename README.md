@@ -28,6 +28,7 @@
 - 운영 규칙 (결정 #109) = `js/config.js` `C01.RULES` 한 곳 — 엔진 `engine/actions/apply.py` `ACTION_RULES` 와 같은 규칙:
   ① 사람 값 ≠ 엔진 다시 판정 값 → 사람 값 유지 + 「ⓘ」 정보 · ② スロット変更 (⇄) = 모든 직원 — 옮길 칸에 다른 CT 가 있으면 「○○ が入っています。入れ替えますか」 → 入れ替え 1건 (`swap_ct`) · `_actions` 에 누가·언제·전→후 (`slot_before`) · 줄에 「⇄ 枠変更」 · 「元に戻す」 · ③ 체크디짓 틀린 CT = 확인창 「チェックディジットが合いません。もう一度確認してください」 → 확인하면 저장 (`override: ["CT_CHECKDIGIT_OVERRIDE"]` · 確認済 · 自動OK 안 됨 · 줄에 「CD」)
 - 催促 서명 Email (#112) = 누른 직원 (로그인 사용자) 주소 — 초안의 자리표시자 `(送信者のメールアドレス)` 를 미리보기에서 바꿔 보여 줌 (엔진 `engine/notify/remind.py` `with_sender`)
+- 通関書類送付 (v0.3.63 · 결정 #359): `js/customs.js` (버튼 · 확인 창 · 기록) + `js/source.js` `customsFindS1` · `customsFindSent` · `customsSend` (押した職員 Graph · 「送信」 때만) + D-03 v4.13 자동 모드 (`C01.CUSTOMS.d03Url` · 같은 출처 iframe) · 시험 모드 `C01.CUSTOMS.sendTest` 한 줄 · 시험 `python tests/test_customs.py`
 - Compass入力 = 비교표 창 (DRY · `js/compass.js` = 엔진 규칙) · 催促 = 미리보기 창 — **「送信」 은 둘 다 비활성** (R7 이후 · 결정 뒤). `C01.SEND` 한 곳
 - Compass入力 비교 규칙 (D-11 대기 · 기본 OFF): `js/config.js` `C01.COMPASS.follow_same_cond_slot` 한 곳 — 켜면 넣을 CT 가 같은 부킹 同一条件 다른 칸에 이미 있으면 그 칸으로 비교 (엔진 설정 `compass_follow_same_cond_slot` 과 같은 이름·규칙)
 - 미리보기 전용 파일 (local): `_data/compass_now/{IV}.json` (엔진 `tools/compass_dry.py --snap`) · `_data/remind.json` (엔진 `tools/remind_draft.py --tool-data`)
