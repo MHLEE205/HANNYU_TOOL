@@ -641,6 +641,8 @@ tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
 .c01-cwarn { margin: 6px 0; padding-left: 18px; font-size: 12px; }
 .c01-cr { color: var(--err, #e5484d); font-weight: 600; }
 .c01-cy { color: var(--warn); }
+.c01-camb { background: #fff6d6; border: 1px solid #e0b400; border-radius: 6px; padding: 6px 10px; margin: 6px 0; color: #6a4f00; }
+.c01-camb select { margin-top: 4px; max-width: 100%; }
 .c01-cbox { padding: 6px 10px; border-radius: 6px; margin: 6px 0; font-size: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .c01-cred { border: 1px solid var(--err, #e5484d); color: var(--err, #e5484d); }
 .c01-cack { display: inline-block; margin: 4px 0; font-size: 12px; font-weight: 600; color: var(--err, #e5484d); }

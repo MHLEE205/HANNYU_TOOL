@@ -234,7 +234,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.69", page.title() == "LEENAI C-01 搬入票 v0.3.69", page.title())
+            ok("탭 제목 v0.3.70", page.title() == "LEENAI C-01 搬入票 v0.3.70", page.title())
             ok("설정: 통관서류 송부 켜짐 · 시험 모드 (sendTest true) · D-03 주소 = 같은 출처 github.io",
                page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === true && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
             ok("본문 · 서명 · ✦ 설정 (본문 = #352 문구)", page.evaluate("C01.CUSTOMS.body.indexOf('通関用の書類を送付いたしますので、ご確認の程お願い致します。') > 0 && C01.CUSTOMS.footer === '✦ Powered by LEENAI Automation System'"))
@@ -636,6 +636,49 @@ def main():
             page.click(".c01-customs [data-close]")
             page.evaluate('''() => { const A = C01.app._api(); A.S.customsS1 = null; A.S.mine = (A.S.mine || []).filter(m => m.action.action_id !== 'cs-other');
                 A.S.jik.ivs.find(x => x.iv_no === 'TST2611-02').pol = 'YOKOHAMA'; }''')
+            # 20 (v0.3.70 · R12Y10) 道 2 · ① 대화 둘 · 받는 사람 다름 (ambiguous) → 노랑 「宛先を確認 — ① のメールが 2 件あります」 + 대화 고르기 (기본 = picked = 지금과 같음)
+            def conv(k, at, frm, fname, to, picked, n, hit=False):
+                return {"conv": "c" * 15 + k, "picked": picked, "iv_hit": hit, "n": n, "staff": "staff.c@" + OURS, "staff_name": "STAFF C", "ext_doms": 1,
+                        "s1": {"k": "s" + k, "subject": f"新規通関依頼:BKG#{BKG}", "at": at, "from": "staff.c@" + OURS, "from_name": "STAFF C"},
+                        "last": {"k": "l" + k, "subject": f"RE: 新規通関依頼:BKG#{BKG}", "at": at, "from": frm, "from_name": fname,
+                                 "to": [{"a": a, "n": ""} for a in to], "cc": [], "body": "本文 " + k, "body_ok": True}}
+            c1 = conv("1", "2026-11-06T12:00:00", "broker.a@broker.invalid", "BROKERA", ["staff.c@" + OURS], True, 3)
+            c2 = conv("2", "2026-11-05T09:00:00", "broker.q@other.invalid", "BROKERQ", ["staff.c@" + OURS], False, 2)
+            S1a = json.loads(json.dumps(S1)); x = S1a["ivs"][IV]
+            x["last"] = dict(c1["last"]); x["s1"] = dict(c1["s1"]); x["n_conv"] = 3; x["n_s1_conv"] = 2; x["ambiguous"] = True; x["convs"] = [c1, c2]
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", S1a)
+            open2()
+            amb = page.locator("[data-camb='shared']")
+            ok("20 노랑 「宛先を確認 — ① のメールが 2 件あります」 + 고르기 2", amb.count() == 1 and "宛先を確認 — ① のメールが 2 件あります" in amb.inner_text()
+               and page.locator("[data-cconv] option").count() == 2 and page.locator("[data-cconv]").input_value() == "0", amb.all_inner_texts())
+            rc = page.evaluate("C01.customs._recips()")
+            ok("20 기본 = picked 대화 (가장 새 ① · 지금과 같음) 의 받는 사람", [y["a"] for y in rc["to"]][:1] == ["broker.a@broker.invalid"], rc)
+            page.select_option("[data-cconv]", "1")
+            page.wait_for_timeout(300)
+            rc = page.evaluate("C01.customs._recips()")
+            ok("20 다른 대화 고름 → 그 대화 가장 새 메일 받는 사람 (BROKERQ)", [y["a"] for y in rc["to"]][:1] == ["broker.q@other.invalid"] and page.locator("[data-cconv]").input_value() == "1", rc)
+            ready_send()
+            page.click("[data-csendgo]")
+            page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=15000)
+            page.wait_for_timeout(400)
+            cs = [json.loads(f.read_text(encoding="utf-8")) for f in (root / "_actions").rglob("*.json")]
+            cs = sorted([y for y in cs if y.get("action") == "customs_sent" and (y.get("value") or {}).get("route") == "s1_shared"], key=lambda y: y["at"])
+            v = cs[-1]["value"] if cs else {}
+            ok("20 기록 = 고른 대화 (s1_k · s1_conv sha · s1_amb 2) · 시험 = 나 1명", v.get("s1_k") == "l2" and v.get("s1_conv") == "c" * 15 + "2" and v.get("s1_amb") == 2 and v.get("test") is True, v)
+            # 20b ambiguous 아님 (대화 하나) = 노랑 0
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", S1)
+            open2()
+            ok("20b 대화 하나 = 노랑 0 · 고르기 0 (지금과 같음)", page.locator("[data-camb]").count() == 0 and page.locator("[data-cconv]").count() == 0)
+            page.click(".c01-customs [data-close]")
+            # 20c 道 1 (내 메일함 ① 에 返信) + 엔진 ambiguous → 노랑 알림만 (고르기 0)
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", S1a)
+            mail.reset(s1=True)
+            page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
+            page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
+            ok("20c 道 1 + 엔진 ambiguous → 노랑 알림 (data-camb=reply) · 고르기 0", page.locator("[data-croute='s1_reply']").count() == 1 and page.locator("[data-camb='reply']").count() == 1
+               and page.locator("[data-cconv]").count() == 0, page.locator(".c01-customs").inner_text()[:200])
+            page.click(".c01-customs [data-close]")
+            page.evaluate("() => { C01.app._api().S.customsS1 = null; }")
             # 콘솔 오류
             errs = [e for e in RES["console_errors"] if "favicon" not in e and "404" not in e and not ("500" in e and "Failed to load resource" in e)]   # 500 = 7b 形態・タイプ GET 실패 흉내 (R12Y)
             ok("콘솔 오류 0", not errs, errs[:3])

@@ -326,11 +326,26 @@ C01.customs = (function () {
       draw();
     }).catch(function (e) { if (st && st.iv === ivNo) { st.d03 = { ok: false, error: e.message }; st.step = '完了'; draw(); } });
   }
+  /* v0.3.70 (R12Y10): エンジン customs_s1 の ① が 会話 (conversationId) ごとに分かれていて 宛先が違う (ambiguous) 時 — 会話を選べる (既定 = 一番新しい ① の会話 = 今までと同じ) */
+  function convPicked(sh) {
+    var cs = (sh && sh.convs) || [], i;
+    for (i = 0; i < cs.length; i++) if (cs[i].picked) return i;
+    return -1;
+  }
+  function convView(sh, i) {
+    var cv = sh && sh.convs && i >= 0 ? sh.convs[i] : null;
+    if (!cv) return sh;
+    return { s1: cv.s1, last: cv.last, staff: cv.staff, staff_name: cv.staff_name, n_conv: cv.n, s1_count: sh.s1_count, n_s1_conv: sh.n_s1_conv, ambiguous: sh.ambiguous, convs: sh.convs };
+  }
+  function ambOf(ivNo) {
+    var S = api().S, sh = S.customsS1 && S.customsS1.ivs && S.customsS1.ivs[ivNo];
+    return sh && sh.ambiguous ? sh : null;
+  }
   /* v0.3.68 (R12Y7 · #367 Part 2): 宛先の道を決める (確認窓を開いた時 1 回) */
   function pickRoute(iv) {
     if (st.mail) { st.route = 's1_reply'; return; }
     var S = api().S, sh = S.customsS1 && S.customsS1.ivs && S.customsS1.ivs[st.iv];
-    if (sh && sh.last) { st.route = 's1_shared'; st.shared = sh; return; }
+    if (sh && sh.last) { st.route = 's1_shared'; st.sharedAll = sh; st.convI = convPicked(sh); st.shared = convView(sh, st.convI); return; }
     var p = proposal(iv, st.buyer);
     if (p) {
       st.route = 'proposal'; st.prop = p;
@@ -442,6 +457,21 @@ C01.customs = (function () {
     if (st.busy) out.push('送信中');
     return out;
   }
+  /* v0.3.70 (R12Y10): 「宛先を確認」 黄色 — 道 2 = 会話を選ぶ · 道 1 (自分のメールの ① に返信) = 知らせだけ */
+  function ambHtml(esc) {
+    var a = api();
+    if (st.route === 's1_shared' && st.shared && st.shared.ambiguous && (st.shared.convs || []).length) {
+      var cs = st.shared.convs;
+      return '<div class="c01-camb" data-camb="shared"><b>宛先を確認 — ① のメールが ' + cs.length + ' 件あります</b>（会話ごとに宛先が違います · 既定 = 一番新しい ①）<br>' +
+        '<select data-cconv>' + cs.map(function (cv, i) {
+          return '<option value="' + i + '"' + (i === st.convI ? ' selected' : '') + '>' + esc(String(cv.s1.at).slice(0, 16).replace('T', ' ') + ' · ' + (cv.staff_name || a.staffName(cv.staff) || cv.staff) +
+            ' · 社外ドメイン ' + cv.ext_doms + ' · ' + cv.n + ' 通' + (cv.iv_hit ? ' · IV 番号あり' : '') + (cv.picked ? ' · 既定' : '')) + '</option>';
+        }).join('') + '</select></div>';
+    }
+    var am = st.route === 's1_reply' ? ambOf(st.iv) : null;
+    if (am) return '<div class="c01-camb" data-camb="reply"><b>宛先を確認 — ① のメールが ' + (am.n_s1_conv || (am.convs || []).length) + ' 件あります</b>（会社のメールボックス · 会話ごとに宛先が違います · ここでは あなたのメールの一番新しい ① に返信します）</div>';
+    return '';
+  }
   function draw() {
     var a = api(), esc = a.esc;
     if (!st || !a.S.modal || a.S.modal.kind !== 'customs') return;
@@ -479,7 +509,7 @@ C01.customs = (function () {
         '<p class="t2">アドレスは 「,」 か 改行 で区切ります。</p><label class="c01-cack"><input type="checkbox" data-cackto' + (st.ackTo ? ' checked' : '') + '> 宛先を確認しました</label>';
     } else {
       var L = st.route === 's1_reply' ? st.mail.last : st.shared.last;
-      h += (st.route === 's1_shared' ? '<p class="c01-cy" data-cshared>① は ' + esc(st.shared.staff_name || a.staffName(st.shared.staff) || st.shared.staff) + ' のメールにあります — 新しいメールとして同じ宛先に送ります</p>' : '') +
+      h += ambHtml(esc) + (st.route === 's1_shared' ? '<p class="c01-cy" data-cshared>① は ' + esc(st.shared.staff_name || a.staffName(st.shared.staff) || st.shared.staff) + ' のメールにあります — 新しいメールとして同じ宛先に送ります</p>' : '') +
         '<table class="c01-ctab"><tr><th>To</th><td>' + addrs(rc.to) + '</td></tr><tr><th>CC</th><td>' + addrs(rc.cc) + '</td></tr>' +
         '<tr><th>' + (st.route === 's1_reply' ? '返信先' : '① の最新') + '</th><td class="t2">' + esc(String(L.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(L.from_name || L.from) + ' · 会話 ' + (st.route === 's1_reply' ? st.mail.n_conv : st.shared.n_conv) + ' 通</td></tr></table>';
       if (st.route === 's1_shared' && st.shared.staff) h += '<label class="t2"><input type="checkbox" data-cstaff' + (st.addStaff ? ' checked' : '') + '> 担当の ' + esc(st.shared.staff_name || st.shared.staff) + ' を CC に入れる</label>';
@@ -545,6 +575,17 @@ C01.customs = (function () {
     if (ag) ag.onchange = function () { st.again = ag.checked; draw(); };
     var ak = q('[data-cack]');
     if (ak) ak.onchange = function () { st.ack = ak.checked; draw(); };
+    var cvSel = q('[data-cconv]');
+    if (cvSel) cvSel.onchange = function () {
+      var before = st.body == null || st.body === bodyText(st);
+      st.convI = +cvSel.value; st.shared = convView(st.sharedAll, st.convI);
+      return brokerSig(mailLike(), brokerGuess(mailLike())).then(function (gs) {
+        if (!st || st.route !== 's1_shared') return;
+        st.broker = gs.broker; st.person = gs.person; st.brokerDom = gs.dom; st.nameSrc = gs.src;
+        if (before) st.body = null;              /* 本文を直していなければ 宛名を選んだ会話で作り直す */
+        draw();
+      });
+    };
     var sf = q('[data-cstaff]');
     if (sf) sf.onchange = function () { st.addStaff = sf.checked; draw(); };
     var at = q('[data-cackto]');
@@ -592,7 +633,8 @@ C01.customs = (function () {
           red: (r.warnings || []).filter(function (w) { return w.red; }).map(function (w) { return w.item; }),
           real_to_n: rc.to.length, real_cc_n: rc.cc.length, broker_dom: st.brokerDom || '', broker_line: String(st.body || '').split(/\r?\n/)[0].trim(),
           broker_person: personLine(st.body), name_src: st.nameSrc || null, route: route,
-          s1_k: route === 's1_shared' ? st.shared.last.k : undefined, s1_staff: route === 's1_shared' ? st.shared.staff : undefined,
+          s1_k: route === 's1_shared' ? st.shared.last.k : undefined, s1_amb: route === 's1_shared' && st.shared.ambiguous ? (st.shared.convs || []).length : undefined,
+          s1_conv: route === 's1_shared' && st.shared.ambiguous && st.convI >= 0 ? st.shared.convs[st.convI].conv : undefined, s1_staff: route === 's1_shared' ? st.shared.staff : undefined,
           prop_src: route === 'proposal' ? st.prop.src : undefined } }));
     }).then(function () {
       a.toast((test ? '試験送信しました（あなた宛て）' : '送信しました') + ' — ' + ivNo, 'ok');

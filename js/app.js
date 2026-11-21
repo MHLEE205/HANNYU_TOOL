@@ -2512,6 +2512,7 @@ window.C01 = window.C01 || {};
         var fd = needPick[k], q = diffQ[fd];
         var typed = needPick.length === 1 ? S.panelInput.trim() : '';
         var val = typed || S.picks[fd][1], src = typed ? '手入力' : S.picks[fd][0];
+        if (!KEEP_SRC[src]) src = '手入力';      /* v0.3.70 (R12Y10): 「業者フォルダ名」 · 「配送報告書（参考…）」 などは エンジンの出所の名前に無い → 手入力 (人の値) */
         var v = C01.validate.field(fd, val);
         if (!v.ok) { toast(FIELD_LABEL[fd] + ': ' + v.error, 'error'); return; }
         acts.push(mkAction('confirm_value', { iv: iv.iv_no, ct: r.ct, field: fd, value: v.value, source: src, queue_id: q.queue_id }));
