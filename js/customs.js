@@ -309,13 +309,14 @@ C01.customs = (function () {
   }
   function makePdf() {
     var ivNo = st.iv;
+    st.prevD03 = st.d03 && st.d03.ok ? st.d03 : null;        /* v0.3.74 (R12Y18 Part 1): 作り直し中も前の選択表 · PDF の大きさを残す (位置が動かない) */
     st.step = 'D-03'; st.d03 = null; draw();
     var o = { iv: ivNo, bl: st.bl, blWhy: st.blWhy };
     if (st.prevCons != null) o.prevCons = st.prevCons;
     Object.keys(st.over).forEach(function (k) { o[k] = st.over[k]; });
     return runD03(o).then(function (r) {
       if (!st || st.iv !== ivNo) return;
-      st.d03 = r; st.step = '完了';
+      st.d03 = r; st.step = '完了'; st.prevD03 = null;
       if (st.pdfUrl) URL.revokeObjectURL(st.pdfUrl);
       st.pdfUrl = null;
       if (r && r.ok) {
@@ -324,7 +325,7 @@ C01.customs = (function () {
         st.pdfUrl = URL.createObjectURL(new Blob([u8], { type: 'application/pdf' }));
       }
       draw();
-    }).catch(function (e) { if (st && st.iv === ivNo) { st.d03 = { ok: false, error: e.message }; st.step = '完了'; draw(); } });
+    }).catch(function (e) { if (st && st.iv === ivNo) { st.d03 = { ok: false, error: e.message }; st.step = '完了'; st.prevD03 = null; draw(); } });
   }
   /* v0.3.70 (R12Y10): エンジン customs_s1 の ① が 会話 (conversationId) ごとに分かれていて 宛先が違う (ambiguous) 時 — 会話を選べる (既定 = 一番新しい ① の会話 = 今までと同じ) */
   function convPicked(sh) {
@@ -430,6 +431,8 @@ C01.customs = (function () {
     if (!a.graphMode() || !(a.S.me && a.S.me.email) || typeof a.S.src.customsSend !== 'function') out.push('Microsoft 365 でログインした職員だけ送信できます');
     if (!st.route) out.push('宛先がありません（① 通関依頼 も 最近この港へ送った宛先 もありません）');
     if (st.route === 's1_shared' && !st.shared.last.body_ok) out.push('① の本文をまだ読めていません — 数分後に もう一度開いてください');
+    /* v0.3.74 (R12Y18 · #377): 実際の送付 · 道 2 (会社のメールボックスの ①) = 「宛先を確認しました」 のチェックが要る (道 3 = 今までどおり · 道 1 = チェックなし) */
+    if (st.route === 's1_shared' && !testMode() && !st.ackTo) out.push('宛先を確認して 「宛先を確認しました」 にチェックしてください');
     if (st.route === 'proposal') {
       var badA = parseAddrs(st.editTo).concat(parseAddrs(st.editCc)).filter(function (x) { return !ADDR_RE.test(x); });
       if (badA.length) out.push('アドレスの形が違います（' + badA.join(' / ') + '）');
@@ -478,9 +481,11 @@ C01.customs = (function () {
     var iv = a.ivById(st.iv) || {};
     var r = st.d03, ready = st.step === '完了';
     var h = '<div class="c01-mh"><b>通関書類送付</b><span class="mono">' + esc(st.iv) + '</span><span class="t2">BKG ' + esc(iv.bkg_no || '') + ' · CY ' + esc(a.md(iv.cy_cut)) + '</span>' +
-      (testMode() ? '<span class="c01-trial" data-ctrial>試験モード（宛先 = あなた 1 人だけ · 件名 [test] · 通関業者には送りません）</span>' : '<span class="c01-trial c01-live">本番（押した職員のメールから通関業者へ送ります）</span>') +
+      (testMode() ? '<span class="c01-trial" data-ctrial>試験モード（宛先 = あなた 1 人だけ · 件名 [test] · 通関業者には送りません）</span>'
+        : '<span class="c01-trial c01-live" data-clive title="押した職員のメールから 下の宛先 (通関業者) へ送ります">実際に通関業者へ送ります</span>') +      /* v0.3.74 (R12Y18 · #377) */
       '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mbody c01-cbody">';
-    if (!ready) {
+    var regen = !ready && st.step === 'D-03' && !!st.prevD03;
+    if (!ready && !regen) {
       h += '<p class="c01-cstep">' + (st.step === 'D-03' ? '⟳ D-03 で IV・PL・SI を作成中…（COMPASS を読むだけ）' : '⟳ ① 通関依頼 メール · 送付記録 を確認中…') + '</p>';
     }
     st.err.forEach(function (e) { h += '<p class="c01-warn2">' + esc(e) + '</p>'; });
@@ -514,6 +519,7 @@ C01.customs = (function () {
         '<tr><th>' + (st.route === 's1_reply' ? '返信先' : '① の最新') + '</th><td class="t2">' + esc(String(L.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(L.from_name || L.from) + ' · 会話 ' + (st.route === 's1_reply' ? st.mail.n_conv : st.shared.n_conv) + ' 通</td></tr></table>';
       if (st.route === 's1_shared' && st.shared.staff) h += '<label class="t2"><input type="checkbox" data-cstaff' + (st.addStaff ? ' checked' : '') + '> 担当の ' + esc(st.shared.staff_name || st.shared.staff) + ' を CC に入れる</label>';
       if (st.route === 's1_shared' && !st.shared.last.body_ok) h += '<p class="c01-warn2">① の本文をまだ読めていません（エンジンの次の周期で読みます）</p>';
+      if (st.route === 's1_shared' && !testMode()) h += '<br><label class="c01-cack"><input type="checkbox" data-cackto' + (st.ackTo ? ' checked' : '') + '> 宛先を確認しました</label>';
     }
     if (st.route) {
       var xd = extDoms(rc);
@@ -526,24 +532,26 @@ C01.customs = (function () {
     h += '<section class="c01-csec"><h4>件名</h4><div class="mono c01-csubj">' + esc(st.route ? subject() : '—') + '</div>' +
       '<h4>本文（直せます' + (st.route === 's1_reply' ? ' · 下に 返信の元のメールが付きます' : st.route === 's1_shared' ? ' · 下に ① の一番新しいメールを引用します' : '') + '）</h4>' + nameSrcLine() + '<textarea class="c01-cbodytxt" data-cbody rows="12">' + esc(st.body || '') + '</textarea></section>';
     // 選んだ値
-    h += '<section class="c01-csec"><h4>D-03 の選択（既定と理由 · 変えると PDF を作り直します）</h4>';
-    if (r && r.ok) {
-      var P = r.picks, av = r.si_avail || [];
-      var sel = function (k, cur) { return '<select data-cpick="' + k + '">' + av.map(function (n) { return '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>S/I' + '①②③④'[n - 1] + '</option>'; }).join('') + '</select>'; };
+    h += '<section class="c01-csec"><h4>D-03 の選択（既定と理由 · 変えると PDF を作り直します）' + (regen ? ' <span class="c01-cstep" data-cregen>⟳ PDF を作り直し中…</span>' : '') + '</h4>';
+    var rv = r || (regen ? st.prevD03 : null);          /* 作り直し中 = 前の表 (押せない) */
+    if (rv && rv.ok) {
+      var P = rv.picks, av = rv.si_avail || [];
+      var dis = regen ? ' disabled' : '';
+      var sel = function (k, cur) { return '<select data-cpick="' + k + '"' + dis + '>' + av.map(function (n) { return '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>S/I' + '①②③④'[n - 1] + '</option>'; }).join('') + '</select>'; };
       h += '<table class="c01-ctab">' +
         '<tr><th>S/I (IV·PL)</th><td>' + sel('ivSino', P.ivSino.v) + '</td><td class="t2' + (P.ivSino.red ? ' c01-cr' : '') + '">' + esc(P.ivSino.why) + '</td></tr>' +
         '<tr><th>S/I (SI)</th><td>' + sel('siSino', P.siSino.v) + '</td><td class="t2' + (P.siSino.red ? ' c01-cr' : '') + '">' + esc(P.siSino.why) + '</td></tr>' +
         '<tr><th>POD</th><td>' + podCell(P) + '</td><td class="t2' + (P.pod.red ? ' c01-cr' : '') + '">' + esc(P.pod.why) + '</td></tr>' +
-        '<tr><th>FOB 運賃</th><td><label><input type="checkbox" data-cfreight' + (P.freight.v ? ' checked' : '') + '> 表示</label></td><td class="t2' + (P.freight.red ? ' c01-cr' : '') + '">' + esc(P.freight.why) + '</td></tr>' +
-        '<tr><th>B/L 形態</th><td><select data-cbl><option value=""' + (!P.bl.v ? ' selected' : '') + '>（選んでください）</option>' +
+        '<tr><th>FOB 運賃</th><td><label><input type="checkbox" data-cfreight' + (P.freight.v ? ' checked' : '') + dis + '> 表示</label></td><td class="t2' + (P.freight.red ? ' c01-cr' : '') + '">' + esc(P.freight.why) + '</td></tr>' +
+        '<tr><th>B/L 形態</th><td><select data-cbl' + dis + '><option value=""' + (!P.bl.v ? ' selected' : '') + '>（選んでください）</option>' +
         ['original', 'waybill', 'surrender'].map(function (k) { return '<option value="' + k + '"' + (P.bl.v === k ? ' selected' : '') + '>' + BL_LABEL[k] + '</option>'; }).join('') + '</select></td><td class="t2' + (!P.bl.v ? ' c01-cr' : '') + '">' + esc(st.blWhy) + '</td></tr></table>';
       // 警告
-      var W = r.warnings || [];
-      var cmp = cmpCompass(st.g, r.info);
+      var W = rv.warnings || [];
+      var cmp = cmpCompass(st.g, rv.info);
       if (W.length || cmp.length) {
         h += '<ul class="c01-cwarn">' + W.map(function (w) { return '<li class="' + (w.red ? 'c01-cr' : 'c01-cy') + '">' + esc(w.item) + ': ' + esc(w.text) + '</li>'; }).join('') +
           cmp.map(function (x) { return '<li class="c01-cr">COMPASS ≠ 実況表: ' + esc(x) + '</li>'; }).join('') + '</ul>';
-        if (W.some(function (w) { return w.red; })) h += '<label class="c01-cack"><input type="checkbox" data-cack' + (st.ack ? ' checked' : '') + '> 赤の警告を確認しました</label>';
+        if (W.some(function (w) { return w.red; })) h += '<label class="c01-cack"><input type="checkbox" data-cack' + (st.ack ? ' checked' : '') + dis + '> 赤の警告を確認しました</label>';
       }
     } else if (r && !r.ok) {
       h += '<p class="c01-warn2">D-03: ' + esc(r.error || '失敗') + '</p>';
@@ -551,13 +559,14 @@ C01.customs = (function () {
     h += '</section>';
     // PDF
     h += '<section class="c01-csec"><h4>添付 ' + (r && r.ok ? '<span class="mono">' + esc(r.file) + '</span> · ' + r.pages + ' ページ · ' + Math.round(r.bytes / 1024) + ' KB' : '') + '</h4>' +
-      (st.pdfUrl ? '<iframe class="c01-cpdf" title="PDF" src="' + st.pdfUrl + '"></iframe>' : '<p class="t2">—</p>') + '</section>';
+      (st.pdfUrl && !regen ? '<iframe class="c01-cpdf" title="PDF" src="' + st.pdfUrl + '"></iframe>' : regen ? '<div class="c01-cpdf c01-cpdf-wait">⟳ PDF を作り直し中…</div>' : '<p class="t2">—</p>') + '</section>';
     h += '</div>';
     if (st.sendErr) h = h.replace(/<\/div>$/, '') + '<p class="c01-warn2 c01-csenderr" data-csenderr>送信できませんでした: ' + esc(st.sendErr) + '</p></div>';
     var bl = ready ? blockers() : ['準備中'];
     h += '<div class="c01-mf"><span class="t2 c01-cwhy" data-cwhy>' + esc(bl.length ? '送れません: ' + bl[0] + (bl.length > 1 ? '（ほか ' + (bl.length - 1) + '）' : '') : '送信できます') + '</span><span class="c01-flex"></span>' +
-      '<button class="c01-btn-pri" data-csendgo' + (bl.length ? ' disabled' : '') + '>' + (testMode() ? '送信（試験 · 自分あて）' : '送信') + '</button></div>';
-    a.showModal(h, 'c01-customs');
+      '<button class="c01-btn-pri" data-csendgo' + (bl.length ? ' disabled' : '') + '>' + (testMode() ? '送信（試験 · 自分あて）' : '送信（通関業者へ）') + '</button></div>';
+    a.showModal(h, 'c01-customs', !!st.drawn);          /* v0.3.74 (R12Y18 Part 1): 2 回目からの描き直し = スクロール位置 · フォーカスそのまま */
+    st.drawn = true;
     bind();
   }
   function bind() {
@@ -578,7 +587,7 @@ C01.customs = (function () {
     var cvSel = q('[data-cconv]');
     if (cvSel) cvSel.onchange = function () {
       var before = st.body == null || st.body === bodyText(st);
-      st.convI = +cvSel.value; st.shared = convView(st.sharedAll, st.convI);
+      st.convI = +cvSel.value; st.shared = convView(st.sharedAll, st.convI); st.ackTo = false;      /* 宛先が変わる = もう一度確認 */
       return brokerSig(mailLike(), brokerGuess(mailLike())).then(function (gs) {
         if (!st || st.route !== 's1_shared') return;
         st.broker = gs.broker; st.person = gs.person; st.brokerDom = gs.dom; st.nameSrc = gs.src;
@@ -587,7 +596,7 @@ C01.customs = (function () {
       });
     };
     var sf = q('[data-cstaff]');
-    if (sf) sf.onchange = function () { st.addStaff = sf.checked; draw(); };
+    if (sf) sf.onchange = function () { st.addStaff = sf.checked; st.ackTo = false; draw(); };
     var at = q('[data-cackto]');
     if (at) at.onchange = function () { st.ackTo = at.checked; draw(); };
     m.querySelectorAll('[data-cedit]').forEach(function (el) {
@@ -615,7 +624,7 @@ C01.customs = (function () {
     var again = !!(lastLive(iv) || st.sent.some(function (x) { return !x.test; }));
     var subj = subject();
     var RW = { s1_reply: '① に 全員に返信', s1_shared: '① と同じ宛先へ 新しいメール（① は ' + ((st.shared && (st.shared.staff_name || st.shared.staff)) || '') + ' のメール）', proposal: '最近この港へ送った宛先（提案 · 確認済み）' };
-    var msg = (test ? '【試験】 あなた (' + a.S.me.email + ') だけに送ります。' : st.iv + ' の通関書類を 宛先 ' + rc.to.length + ' 件 · CC ' + rc.cc.length + ' 件 に送ります（あなたのメールから）。') +
+    var msg = (test ? '【試験】 あなた (' + a.S.me.email + ') だけに送ります。' : '【実際に通関業者へ送ります】 ' + st.iv + ' の通関書類を 宛先 ' + rc.to.length + ' 件 · CC ' + rc.cc.length + ' 件 に送ります（あなたのメールから）。') +
       '\n宛先の道: ' + RW[st.route] + '\n件名: ' + subj + '\n添付: ' + r.file + '（' + r.pages + ' ページ）\nよろしいですか？';
     if (!window.confirm(msg)) return;
     if (again && !window.confirm('この IV はすでに送付済みです。本当にもう一度送りますか？')) return;

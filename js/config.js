@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.73',
+  version: '0.3.74',
   date: '2026-11-22',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -79,7 +79,7 @@ C01.SEND = {
    sendTest: true = 試験モード (宛先 = 押した本人 1 人だけ · 件名の前に [test]) — 実際の宛先へ送る時はこの 1 行を false (管理者の確認の後) */
 C01.CUSTOMS = {
   enabled: true,
-  sendTest: true,
+  sendTest: false,   /* 11/22 형님 결정 #377 · 실제 송부 */
   d03Url: 'https://mhlee205.github.io/Shipping_Document/index.html',   /* 同じ出所 (mhlee205.github.io) の時だけ自動モードが動く */
   ourDomain: 'leenearcorp.com',      /* 自社のメール (① = 自社から送った 通関依頼) */
   /* 本文 (#352 · 원조토르 6 か月調査 3 節の型) — {broker} = 通関業者の会社名 · {person} = 担当者名 (確認窓で直せる) */

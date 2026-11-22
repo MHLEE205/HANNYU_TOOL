@@ -235,8 +235,15 @@ def main():
             ok("「選ぶ」 행 = 처음 체크 없음 (경고 TYPE_CHOOSE)", page.evaluate("Array.from(document.querySelectorAll('td.c01-cell.CHOOSE')).every(td => { const b = td.closest('tr').querySelector('[data-cpick]'); return !b || !b.checked; })"))
             cid0 = ch.first.get_attribute("data-tpick")
             n2 = len(REQ)
-            ch.first.select_option("45R")
+            # v0.3.74 (R12Y18 Part 1): 창이 작아 스크롤된 상태에서 タイプ 고름 → 다시 그려도 scrollTop · 포커스 그대로
+            vp0 = page.viewport_size
+            page.set_viewport_size({"width": vp0["width"], "height": 420})
+            sy0 = page.evaluate("(k) => { const b = document.querySelector('.c01-compass .c01-mb'); b.scrollTop = Math.max(0, Math.min(160, b.scrollHeight - b.clientHeight - 20));"
+                                " const s = document.querySelector('select[data-tpick=\"' + k + '\"]'); s.focus({preventScroll: true}); const y = b.scrollTop; s.value = '45R'; s.dispatchEvent(new Event('change')); return y; }", cid0)
             page.wait_for_function("() => document.getElementById('compass-patch') && document.getElementById('compass-patch').textContent.includes('45R')", timeout=10000)
+            sy1 = page.evaluate("(k) => [document.querySelector('.c01-compass .c01-mb').scrollTop, document.activeElement && document.activeElement.getAttribute('data-tpick') === k]", cid0)
+            page.set_viewport_size(vp0)
+            ok("R12Y18 タイプ 고름 (다시 그림) → 창 scrollTop 그대로 · 포커스 = 그 칸", sy0 > 20 and abs(sy1[0] - sy0) <= 2 and sy1[1] is True, [sy0, sy1])
             pt1 = json.loads(page.locator("#compass-patch").text_content())
             ok("고르면 (45R) 그 행 PATCH 에 crcf9_type 45R · 그 행 체크 · COMPASS 다시 안 읽음 (요청 0)", any(x["body"].get("crcf9_type") == "45R" for x in pt1)
                and page.evaluate("(k) => { const s = document.querySelector('select[data-tpick=\"' + k + '\"]'); const b = s.closest('tr').querySelector('[data-cpick]'); return s.value === '45R' && b && b.checked; }", cid0)

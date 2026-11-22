@@ -15,6 +15,8 @@
 14 (v0.3.66 · #366 ①) POD = 고른 S/I (IV·PL) 의 COMPASS 값 · 값 없는 번호 흐리게 · B/L · Port of Discharge · 못 읽으면 노란 글자 (막지 않음)
 15 (v0.3.68 · #367 Part 1) L 인보이스 = 「国内販売（通関書類は買い手側）」 회색 · 누르면 설명만 (창 0)
 16 (v0.3.68 · #367 Part 2) ① 이 내 메일함에 없음 + 회사 메일함 ① (customs_s1) → 새 메일 (createReplyAll 0) · 같은 To · CC + 담당 직원 CC · ① 인용 · 기록 route s1_shared
+21 (v0.3.74 · #377) 실제 모드 = 띠 「実際に通関業者へ送ります」 · 「送信（通関業者へ）」 · 道 2 · 3 「宛先を確認しました」 체크 전 꺼짐 · 道 1 체크 없음 · 가짜 Graph 받는 사람 = 확인 창
+22 (v0.3.74 · R12Y18 Part 1) 아래 칸 고름 → PDF 다시 만들어도 scrollTop · 포커스 그대로
 17 본문 못 읽은 ① → 막힘 · 18 제안 (POL 만 = 붉은 「宛先を必ず確認」 · 고칠 수 있음 · 확인 체크 전 막힘 · 주소 꼴 검사) · 19 같은 POL · 바이어 송부 기록 = 노란 제안 · 회사 밖 도메인 2+ = 노란 경고
 사용: python tests/test_customs.py [--shots 폴더]"""
 import argparse
@@ -234,9 +236,10 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.73", page.title() == "LEENAI C-01 搬入票 v0.3.73", page.title())
-            ok("설정: 통관서류 송부 켜짐 · 시험 모드 (sendTest true) · D-03 주소 = 같은 출처 github.io",
-               page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === true && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
+            ok("탭 제목 v0.3.74", page.title() == "LEENAI C-01 搬入票 v0.3.74", page.title())
+            ok("설정: 통관서류 송부 켜짐 · 실제 모드 (sendTest false · v0.3.74 #377) · D-03 주소 = 같은 출처 github.io",
+               page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
+            page.evaluate("C01.CUSTOMS.sendTest = true")     # 아래 1~20 = 시험 모드 시험 (그대로) · 21 · 22 = 실제 모드
             ok("본문 · 서명 · ✦ 설정 (본문 = #352 문구)", page.evaluate("C01.CUSTOMS.body.indexOf('通関用の書類を送付いたしますので、ご確認の程お願い致します。') > 0 && C01.CUSTOMS.footer === '✦ Powered by LEENAI Automation System'"))
             page.evaluate(TGR.STUB, staff)
             page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")
@@ -679,6 +682,85 @@ def main():
                and page.locator("[data-cconv]").count() == 0, page.locator(".c01-customs").inner_text()[:200])
             page.click(".c01-customs [data-close]")
             page.evaluate("() => { C01.app._api().S.customsS1 = null; }")
+            # 21 (v0.3.74 · R12Y18 · #377) 실제 모드 — 띠 「実際に通関業者へ送ります」 · 단추 「送信（通関業者へ）」 · 道 2 · 3 = 「宛先を確認しました」 체크 전 꺼짐 · 道 1 = 체크 없음
+            page.evaluate("C01.CUSTOMS.sendTest = false")
+            mail.reset(s1=True)
+            page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
+            page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
+            ok("21 실제 모드 띠 = 「実際に通関業者へ送ります」 (노랑) · 試験モード 띠 0", page.locator("[data-clive]").inner_text() == "実際に通関業者へ送ります"
+               and page.locator("[data-ctrial]").count() == 0 and page.evaluate("getComputedStyle(document.querySelector('[data-clive]')).backgroundColor") == "rgb(255, 243, 205)",
+               page.locator(".c01-customs .c01-mh").inner_text())
+            ok("21 단추 글 = 「送信（通関業者へ）」", page.locator("[data-csendgo]").inner_text() == "送信（通関業者へ）", page.locator("[data-csendgo]").inner_text())
+            ready_send()
+            ok("21 道 1 (내 메일함 ①) = 「宛先を確認しました」 칸 없음 · 조건 맞으면 켜짐", page.locator("[data-croute='s1_reply']").count() == 1 and page.locator("[data-cackto]").count() == 0
+               and page.locator("[data-csendgo]").is_enabled(), page.locator("[data-cwhy]").inner_text())
+            ok("21 실제 모드 제목 = [test] 없음", page.locator(".c01-csubj").inner_text().startswith("【通関書類送付_" + IV + "】"), page.locator(".c01-csubj").inner_text())
+            page.click(".c01-customs [data-close]")
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", S1)
+            open2()
+            ready_send()
+            why = page.evaluate("C01.customs._blockers()")
+            ok("21 道 2 (회사 메일함 ①) 실제 = 체크 전 단추 꺼짐 「宛先を確認しました」", page.locator("[data-croute='s1_shared']").count() == 1 and page.locator("[data-cackto]").count() == 1
+               and page.locator("[data-csendgo]").is_disabled() and any("宛先を確認しました" in x for x in why), why)
+            page.check("[data-cackto]")
+            ok("21 道 2 체크 → 켜짐", page.locator("[data-csendgo]").is_enabled(), page.locator("[data-cwhy]").inner_text())
+            page.uncheck("[data-cstaff]")
+            ok("21 道 2 받는 사람 바뀜 (담당 CC 끔) → 체크 풀림 · 꺼짐", not page.locator("[data-cackto]").is_checked() and page.locator("[data-csendgo]").is_disabled())
+            page.check("[data-cstaff]")
+            page.check("[data-cackto]")
+            rc = page.evaluate("C01.customs._recips()")
+            n_d = len(dlg)
+            page.click("[data-csendgo]")
+            page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=15000)
+            page.wait_for_timeout(400)
+            nd = mail.newdraft or {}
+            ok("21 道 2 가짜 Graph 받는 사람 = 확인 창 To · CC 그대로 · 제목 [test] 없음 · send 1", sorted(x["emailAddress"]["address"] for x in nd.get("toRecipients", [])) == sorted(x["a"] for x in rc["to"])
+               and sorted(x["emailAddress"]["address"] for x in nd.get("ccRecipients", [])) == sorted(x["a"] for x in rc["cc"]) and len(rc["to"]) >= 1
+               and not str(nd.get("subject", "")).startswith("[test]") and mail.sends == 1, [nd.get("toRecipients"), rc])
+            ok("21 실제 확인 창 첫 줄 = 「【実際に通関業者へ送ります】」", len(dlg) > n_d and dlg[n_d].startswith("【実際に通関業者へ送ります】"), dlg[n_d:n_d + 1])
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", BP)
+            open2()
+            ready_send()
+            ok("21 道 3 (제안) 실제 = 체크 전 꺼짐", page.locator("[data-croute='proposal']").count() == 1 and page.locator("[data-csendgo]").is_disabled()
+               and any("宛先を確認しました" in x for x in page.evaluate("C01.customs._blockers()")))
+            page.check("[data-cackto]")
+            rc = page.evaluate("C01.customs._recips()")
+            ok("21 道 3 체크 → 켜짐", page.locator("[data-csendgo]").is_enabled(), page.locator("[data-cwhy]").inner_text())
+            page.click("[data-csendgo]")
+            page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=15000)
+            page.wait_for_timeout(400)
+            nd = mail.newdraft or {}
+            ok("21 道 3 가짜 Graph 받는 사람 = 확인 창 그대로 · send 1", [x["emailAddress"]["address"] for x in nd.get("toRecipients", [])] == [x["a"] for x in rc["to"]]
+               and [x["emailAddress"]["address"] for x in nd.get("ccRecipients", [])] == [x["a"] for x in rc["cc"]] and mail.sends == 1, [nd.get("toRecipients"), rc])
+            cs = [json.loads(f.read_text(encoding="utf-8")) for f in (root / "_actions").rglob("*.json")]
+            cs = [x for x in cs if x.get("action") == "customs_sent" and (x.get("value") or {}).get("test") is False and (x.get("value") or {}).get("route") in ("s1_shared", "proposal")]
+            ok("21 기록 test false (道 2 · 3)", len(cs) == 2, len(cs))
+            # 22 (v0.3.74 · R12Y18 Part 1) 아래 칸 (B/L · S/I) 고름 → PDF 다시 만들어도 창 스크롤 그대로 · 포커스 그 칸
+            page.evaluate("() => { C01.app._api().S.customsS1 = null; }")
+            mail.reset(s1=True)
+            page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
+            page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
+            y0 = page.evaluate("""() => { const b = document.querySelector('.c01-customs .c01-cbody'), s = document.querySelector('[data-cbl]');
+                b.scrollTop = 0; b.scrollTop = Math.min(s.getBoundingClientRect().top - b.getBoundingClientRect().top - 40, b.scrollHeight - b.clientHeight - 120);
+                window.__regen = []; window.__mo = new MutationObserver(function () { const m = document.querySelector('[data-cregen]'), bb = document.querySelector('.c01-customs .c01-cbody');
+                  if (m && bb) window.__regen.push([bb.scrollTop, document.querySelectorAll('.c01-cpdf-wait').length]); });
+                window.__mo.observe(document.getElementById('c01-modal'), {childList: true, subtree: true});
+                return [b.scrollTop, b.scrollHeight, b.clientHeight]; }""")
+            ok("22 시험 준비: 창이 스크롤됨 (B/L 칸까지 내림)", y0[0] > 100, y0)
+            page.evaluate("() => { const s = document.querySelector('[data-cbl]'); s.focus({preventScroll: true}); s.value = 'waybill'; s.dispatchEvent(new Event('change')); }")
+            page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+            rg = page.evaluate("() => { window.__mo.disconnect(); return window.__regen; }")
+            mid = [rg[0][0], True, rg[0][1]] if rg else [-1, False, 0]
+            y1 = page.evaluate("() => [document.querySelector('.c01-customs .c01-cbody').scrollTop, !!(document.activeElement && document.activeElement.hasAttribute('data-cbl')), document.querySelector('[data-cbl]').value]")
+            ok("22 B/L 고름 → 다시 만드는 중에도 · 다 만든 뒤에도 scrollTop 그대로 · 포커스 = B/L 칸", abs(mid[0] - y0[0]) <= 2 and abs(y1[0] - y0[0]) <= 2 and y1[1] is True and y1[2] == "waybill", [y0, mid, y1])
+            ok("22 다시 만드는 중 표시 = 칸 제목 옆 (위 줄 생김 0) · PDF 자리 같은 높이", mid[1] is True and mid[2] == 1, mid)
+            page.evaluate("() => { const s = document.querySelector('[data-cpick=siSino]'); s.focus({preventScroll: true}); s.value = s.options[s.options.length - 1].value; s.dispatchEvent(new Event('change')); }")
+            page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+            y2 = page.evaluate("() => [document.querySelector('.c01-customs .c01-cbody').scrollTop, document.activeElement && document.activeElement.getAttribute('data-cpick')]")
+            ok("22 S/I 고름 → scrollTop 그대로 · 포커스 = 그 칸", abs(y2[0] - y0[0]) <= 2 and y2[1] == "siSino", [y0, y2])
+            page.screenshot(path=str(shots / "customs_live_scroll.png"), full_page=False)
+            page.click(".c01-customs [data-close]")
+            page.evaluate("C01.CUSTOMS.sendTest = true")
             # 콘솔 오류
             errs = [e for e in RES["console_errors"] if "favicon" not in e and "404" not in e and not ("500" in e and "Failed to load resource" in e)]   # 500 = 7b 形態・タイプ GET 실패 흉내 (R12Y)
             ok("콘솔 오류 0", not errs, errs[:3])

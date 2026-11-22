@@ -651,6 +651,9 @@ tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
 .c01-ctest { color: var(--text2); font-size: 11px; margin-left: 4px; }
 .c01-csent { margin-left: 4px; }
 .c01-modal.c01-customs .c01-cbody { padding: 4px 16px 8px; }
+/* v0.3.74 (R12Y18 · #377): 実際の送付 = 黄色の帯 · PDF 作り直し中 = 同じ高さ (位置が動かない) */
+.c01-trial.c01-live { background: #fff3cd; color: #6a4f00; border: 1px solid #e0b400; }
+.c01-cpdf-wait { display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 13px; background: var(--surface2, transparent); }
 /* v0.3.66 (R12Y3 · #366): 通関書類送付 — POD = S/I の値 · 宛名の出どころ · 送信失敗の知らせ (閉じるまで残る) */
 .c01-cpods { display: flex; flex-direction: column; gap: 2px; }
 .c01-cpodl { white-space: nowrap; }

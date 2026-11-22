@@ -1185,12 +1185,39 @@ window.C01 = window.C01 || {};
     });
   }
   function closeModal() { var m = $('c01-modal'); if (m) { m.hidden = true; m.innerHTML = ''; } S.modal = null; }
-  function showModal(html, cls) {
+  /* v0.3.74 (R12Y18 Part 1): keep = 同じ窓を描き直す時 — 本文のスクロール位置 · 押していた項目のフォーカスを戻す
+     (通関書類送付 の確認窓 · Compass入力 の タイプ選択 で 選ぶたびに一番上へ戻っていた)。押していた項目が 作り直し中で押せない = 次の描き直しで戻す */
+  function modalFocusKey(el) {
+    if (!el || !el.attributes) return null;
+    for (var i = 0; i < el.attributes.length; i++) {
+      var at = el.attributes[i];
+      if (at.name.indexOf('data-') === 0) return '[' + at.name + (at.value ? '="' + (window.CSS && CSS.escape ? CSS.escape(at.value) : at.value) + '"' : '') + ']';
+    }
+    return el.id ? '#' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) : null;
+  }
+  function showModal(html, cls, keep) {
     var m = $('c01-modal');
+    var y = 0, fk = null;
+    if (keep && !m.hidden) {
+      var b0 = m.querySelector('.c01-mb, .c01-mbody');
+      if (b0) y = b0.scrollTop;
+      var ae = document.activeElement;
+      fk = ae && ae !== document.body && m.contains(ae) ? modalFocusKey(ae) : S.modalFocus;
+    }
+    S.modalFocus = null;
     m.innerHTML = '<div class="c01-mbg" id="m-bg"></div><div class="c01-modal' + (cls ? ' ' + cls : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
     m.hidden = false;
     $('m-bg').onclick = closeModal;
     m.querySelectorAll('[data-close]').forEach(function (el) { el.onclick = closeModal; });
+    if (keep) {
+      var b1 = m.querySelector('.c01-mb, .c01-mbody');
+      if (b1 && y) b1.scrollTop = y;
+      if (fk) {
+        var fe = null;
+        try { fe = m.querySelector(fk); } catch (e) { fe = null; }
+        if (fe && !fe.disabled) { try { fe.focus({ preventScroll: true }); } catch (e) { /* 古いブラウザ */ } } else if (fe) S.modalFocus = fk;
+      }
+    }
   }
   /* ── v0.3.19 (R7T 決定 #190): Compass入力 = 実際に入力 (ログインした人の権限 · 試験運用中)。
      graph モード + C01.SEND.compass + C01.COMPASS.dvUrl の時だけ COMPASS (Dataverse) を職員トークンで GET → 比較表 → チェックした行だけ
@@ -1364,7 +1391,7 @@ window.C01 = window.C01 || {};
           '<button id="compass-send" class="c01-btn-pri" disabled aria-disabled="true" title="R6 はローカル DRY">DRY — 送信しません</button>';
       }
       html += '</div>';
-      showModal(html, 'c01-compass');
+      showModal(html, 'c01-compass', !!prev);              /* v0.3.74 (R12Y18 Part 1): タイプを選んで描き直す時 = スクロール位置 · フォーカスそのまま */
       if (!live) return;
       if (vp.ok) {
         $('compass-verify').onclick = function () { compassVerify(ivNo); };
