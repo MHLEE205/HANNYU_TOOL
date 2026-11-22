@@ -458,6 +458,9 @@ button.st-wait.c01-candbtn { background: none; border: 1px dashed var(--warn, #c
 /* v0.3.33 (R8Z Part A · B · #258): 業者・IV 未定 = メール情報 · ZIP の中身 · 業者登録 */
 .c01-holdmail { display: grid; gap: 2px; padding: 4px 0; font-size: 12px; }
 .c01-holdmail .k { color: var(--c-text-2, inherit); margin-right: 6px; }
+/* v0.3.75 (R12Y22 Part 1): 判定に使わない値 (折りたたみ) */
+.c01-unused { font-size: 11px; margin: 2px 0 0; color: var(--text2); }
+.c01-unused ul { margin: 2px 0 0 16px; padding: 0; }
 .c01-zipents { font-size: 12px; margin: 4px 0; }
 .c01-zipents ul { margin: 4px 0 0 16px; padding: 0; max-height: 160px; overflow: auto; }
 .c01-regsender { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); display: grid; gap: 6px; }

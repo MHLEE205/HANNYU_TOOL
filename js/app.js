@@ -1697,6 +1697,16 @@ window.C01 = window.C01 || {};
   }
   function editKey(row, fd) { return row.container_id + '|' + fd; }
   function editQid(row, fd) { var k = 'edit|' + row.container_id + '|' + fd; return hkey(k) + hkey(k + '|2'); }
+  /* v0.3.75 (R12Y22 Part 1): エンジン v0.5.168 (out_diff_skip_not_counted) が 値の違い から外した値 (判定に使わない値 · 形式に合わない手書き など) —
+     消さずに 行の値の下へ 折りたたみ 「判定に使わない値 n」 (開くと 出所 · 値 · 理由)。行に unused_vals が無い = 何も出さない (今までどおり) */
+  var UNUSED_WHY = { seal_pattern_unresolved_not_counted: '船会社のシール番号の形式に合わない', seal_confusable_not_counted: '似た字だけ一致' };
+  function unusedHtml(row, fd) {
+    var xs = ((row && row.unused_vals) || []).filter(function (u) { return u && u.field === fd; });
+    if (!xs.length) return '';
+    return '<details class="c01-unused" data-unused="' + fd + '"><summary>判定に使わない値 ' + xs.length + '</summary><ul>' + xs.map(function (u) {
+      return '<li><span class="t2">' + esc(u.src || '') + '</span> <span class="mono">' + esc(u.value == null ? '' : String(u.value)) + '</span> <small class="t2">' + esc(UNUSED_WHY[u.why] || '判定に使わない') + '</small></li>';
+    }).join('') + '</ul></details>';
+  }
   function editCell(iv, row, fd, src, ov) {
     var x = statusOf(row, iv, ov);
     var h = x.human[fd];
@@ -1709,7 +1719,7 @@ window.C01 = window.C01 || {};
       (h ? '<span class="c01-hm2" title="' + esc('人の値 · ' + staffName(h.by) + ' · ' + String(h.at || '').slice(0, 16).replace('T', ' ')) + '">✓ ' + (h.source === '手入力' ? '修正' : '確認') + '</span>' : '') +
       (ed ? '' : '<button class="c01-edit" data-edit="' + esc(editKey(row, fd)) + '"' + (why ? ' disabled title="' + esc(why) + '"' : ' title="この値を修正（人の値が優先 · 決定 #109）"') + '>✎ 修正</button>') +
       (!ed && h && valueEditOn() && h.action_id && !h.pending ? '<button class="c01-undo2" data-vundo="' + esc(fd) + '" title="この人の値を取り消して前の値に戻す（記録が残ります）">元に戻す</button>' : '') + '</label>';
-    if (!ed) return '<div class="c01-field ro" data-ef="' + fd + '">' + lab + '<div class="mono rov">' + (v == null || v === '' ? '<span class="t2">—</span>' : num(v)) + '</div></div>';
+    if (!ed) return '<div class="c01-field ro" data-ef="' + fd + '">' + lab + '<div class="mono rov">' + (v == null || v === '' ? '<span class="t2">—</span>' : num(v)) + '</div>' + unusedHtml(row, fd) + '</div>';
     return '<div class="c01-field ro editing" data-ef="' + fd + '">' + lab + '<div class="c01-editrow"><input id="edit-in" class="q-in" value="' + esc(S.qedit.value) + '" placeholder="正しい値" aria-label="' + FIELD_LABEL[fd] + ' を修正">' +
       '<button class="c01-btn-pri" id="edit-save">保存</button><button class="c01-btn-ghost2" id="edit-cancel">やめる</button></div>' +
       (S.qedit.err ? '<p class="c01-err" id="edit-err">' + esc(S.qedit.err) + '</p>' : '') + '<span class="hint">' + esc(hintOf(fd)) + ' · 人の値が優先（決定 #109）</span></div>';
@@ -1888,6 +1898,7 @@ window.C01 = window.C01 || {};
     return ' <span class="c01-ibadge c01-inspref" data-info="insp_ref" title="' + esc('検査書類の ' + (fs.length ? fs.join('・') : 'N/W・G/W') + ' は値の出どころに数えません') + '">検査書類は参考</span>';
   }
   C01.inspRefBadge = inspRefBadge;
+  C01.unusedHtml = unusedHtml;          /* v0.3.75 (R12Y22 Part 1) 試験用 */
   /* v0.3.49 (R10H Part 1 · #305 ③): エンジンが 2 行を 1 行にまとめた行 (同一seal統合 · 同一搬入票(再送) · 行まとめ(人)) = 「2行→1行」 (表示だけ) */
   var MERGE_TEXT = { '同一seal統合': '同じシールの 書類の行 と 写真の行 を 1 行にまとめました（写真の CT · 書類の CT は参考）',
     '同一搬入票(再送)': '同じ搬入票の再送（同じ絵 · 同じ重量）— 新しい行を作らず この行に参考としてまとめました（値は変わりません）',

@@ -4067,6 +4067,23 @@ def r12y14_checks(page, root, shots):
     page.screenshot(path=str(shots / "r12y14_inspref.png"))
 
 
+def r12y22_checks(page, root, shots):
+    """v0.3.75 (R12Y22 Part 1): 行 unused_vals (エンジン out_diff_skip_not_counted が 値の違い から外した値) → 値の下に 折りたたみ 「判定に使わない値 n」 ·
+    その欄の値だけ · 閉じた状態 · 開くと 出所 · 値 · 理由 · unused_vals 無し = 何も出さない (今までどおり)."""
+    row = {"unused_vals": [{"field": "seal", "src": "搬入票", "value": "XX12", "why": "seal_pattern_unresolved_not_counted"},
+                           {"field": "seal", "src": "写真", "value": "XX13", "why": "other_not_counted"},
+                           {"field": "n_w", "src": "搬入票", "value": 100, "why": None}]}
+    got = page.evaluate("""a => ['seal', 'n_w', 'ct'].map(function (f) { var d = document.createElement('div'); d.innerHTML = C01.unusedHtml(a[0], f);
+        var x = d.querySelector('details.c01-unused'); return x ? [x.querySelector('summary').textContent, x.open, [].map.call(x.querySelectorAll('li'), function (l) { return l.textContent; })] : null; })
+        .concat([C01.unusedHtml({}, 'seal'), C01.unusedHtml(null, 'seal'), C01.unusedHtml({unused_vals: [{field: 'seal', src: '<b>', value: '<i>x</i>', why: null}]}, 'seal')])""", [row])
+    ok("R12Y22 seal 2 = 「判定に使わない値 2」 · 閉じている · 出所 · 値 · 理由", got[0] and got[0][0] == "判定に使わない値 2" and got[0][1] is False
+       and got[0][2] == ["搬入票 XX12 船会社のシール番号の形式に合わない", "写真 XX13 判定に使わない"], got[0])
+    ok("R12Y22 n_w 1 · 値 数字 · 理由なし = 判定に使わない", got[1] and got[1][0] == "判定に使わない値 1" and got[1][2] == ["搬入票 100 判定に使わない"], got[1])
+    ok("R12Y22 その欄に無い · unused_vals 無し · 行 null = 空", got[2] is None and got[3] == "" and got[4] == "", got[2:5])
+    ok("R12Y22 文字は esc (タグにならない)", "<b>" not in got[5] and "&lt;b&gt;" in got[5] and "&lt;i&gt;" in got[5], got[5])
+    page.screenshot(path=str(shots / "r12y22_unused.png"))
+
+
 def r10x_checks(page, root, shots, engine_frz):
     """v0.3.53 (R10X · #309 · 엔진 v0.5.125 cycle_input_slot_check): 「入力後の差異」 why compass_slot 만인 카드 = 「COMPASSの配置を正とする」 (input_slot_take) ·
     「新しい値でCompass再入力」 안 냄 · 확인 창 (취소 = 기록 0) · action = 엔진 v0.5.125 action.schema · queue 스키마 (why compass_slot)."""
@@ -4682,11 +4699,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.74", page.title() == "LEENAI C-01 搬入票 v0.3.74", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.75", page.title() == "LEENAI C-01 搬入票 v0.3.75", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.74" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.75" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
@@ -5226,6 +5243,7 @@ def main():
             r12y11_checks(page, root, shots, a.engine_r12x)
             r12y12_checks(page, root, shots)
             r12y14_checks(page, root, shots)
+            r12y22_checks(page, root, shots)
             # 4 테마
             for th in ("dark", "light", "leenai", "focus"):
                 page.evaluate(f"localStorage.setItem('leenai_theme','{th}'); document.documentElement.setAttribute('data-theme','{th}')")
