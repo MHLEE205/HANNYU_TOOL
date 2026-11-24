@@ -91,7 +91,7 @@ C01.CUSTOMS = {
   domesticPrefix: 'L',
   /* v0.3.76 (R12Y37 · #380 ③ Part 3B): 写真 · 搬入票 を zip → 会社の SharePoint (PHOTO_V2/_customs_share/{IV}/{時刻}/) →
      「リンクを知っている全員」 · 見るだけ · shareDays 日 のリンクを本文に入れて送る (zip はエンジンが 7 日後に消す · 送付の記録にあるものだけ)。
-     'off' = 出さない · 'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · 件名 [test]) · 'on' = 実際の送付 (형님 の rpa@ 試験メール確認の後) */
+     'off' = 出さない · 'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · 件名 [test]) · 'on' = 実際の送付 (rpa@ 試験メールの確認の後) */
   shareLink: 'admin_test',
   shareDays: 7
 };
