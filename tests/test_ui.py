@@ -4504,7 +4504,7 @@ def r11g_checks(page, root, shots, engine):
     man = {"schema_version": 1, "kind": "manual", **MAN.output()}
     ok("R11G manual.json = 엔진 스키마", SC.errors(man, SC.load("manual")) == [])
     # ① 매뉴얼 버튼 이름 = TOOL 화면 글자 (공개 전 자동 대조 · #305)
-    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "js/customs.js", "js/linkab.js", "photo.html"))   # customs.js = v0.3.65 (通関書類送付 버튼)
+    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "js/customs.js", "js/linkab.js", "js/sidedoc.js", "photo.html"))   # customs.js = v0.3.65 (通関書類送付 버튼) · sidedoc.js = v0.3.77 (⟲ 90° · ⟳ 90° · 180°)
     miss = [b for b in man["buttons"] if b not in src]
     ok("R11G 매뉴얼 버튼 이름 = TOOL 화면 글자 (" + str(len(man["buttons"])) + "개 · 없음 0)", not miss and len(man["buttons"]) >= 20, miss)
     imiss = [x for x in man["images"] if not (TOOL / "docs" / x).is_file()]
