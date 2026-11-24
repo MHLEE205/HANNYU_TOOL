@@ -6,7 +6,13 @@
    - 送ったら _actions customs_sent (IV · 誰 · いつ · メール ID · PDF sha256 · 選んだ値)
    v0.3.68 (R12Y7 · #367): 宛先の道 (route) — ① 自分のメールボックスの ① に 全員に返信 (s1_reply) → ② 無ければ 会社のメールボックスの ① の会話
    (エンジン customs_s1.json) と同じ宛先へ 新しいメール · ① を引用 (s1_shared) → ③ それも無ければ 「この港へ最近送った宛先」 の提案 (proposal · 直せる) → ④ 宛先 0 = 止める。
-   L インボイス (国内販売 · #218) = 送付ボタンの代わりに 「国内販売（通関書類は買い手側）」 */
+   L インボイス (国内販売 · #218) = 送付ボタンの代わりに 「国内販売（通関書類は買い手側）」
+   v0.3.76 (R12Y37 · #380): ① 通関業者ごとの 追加書類 (エンジン customs_broker_req.json · 형님の表) — 写真（PHOTO）・搬入票 が要る通関業者 = 確認窓の一番上に黄色 ·
+   既定のボタン = 「下書きで保存」 (送らない · Outlook で添付して送る) · 「送信」 は 「追加書類は別に送ります」 のチェックの後だけ · 表に無い宛先 = 「必要書類を確認してください」。
+   ② 「下書きで保存」 = 送信と同じ下書き (宛先 · 件名 · 本文 · PDF を確かめる) を作って 送らない → Outlook で開くリンク · _actions customs_draft · 実況表 「下書き作成済」 →
+   その職員の 「通関書類送付_{IV}」 メールをエンジンが見たら 「送付済」 (エンジン iv.customs_mail)。
+   ③ (Part 3B · C01.CUSTOMS.shareLink) 写真 · 搬入票 を zip にして 会社の SharePoint (PHOTO_V2/_customs_share) に置き 「リンクを知っている全員」 · 見るだけ · 7 日のリンクを本文に入れて送る —
+   'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · [test]) · 'on' = 実際の送付 (형님の確認の後) · 'off' = 出さない */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -14,20 +20,26 @@ C01.customs = (function () {
   var A = null;
   function api() { return A || (A = C01.app._api()); }
   function on() { return !!(C01.CUSTOMS && C01.CUSTOMS.enabled); }
-  function testMode() { return !(C01.CUSTOMS && C01.CUSTOMS.sendTest === false); }
+  function testMode() { return !(C01.CUSTOMS && C01.CUSTOMS.sendTest === false) || !!(st && st.shareTest); }      /* v0.3.76: 管理者のリンク試験 = 試験モード */
   var BL_LABEL = { original: 'Original B/L', waybill: 'WAY BILL', surrender: 'SURRENDER' };
   var BL_CLS = { ORIG: 'original', WAY: 'waybill', SUR: 'surrender', original: 'original', waybill: 'waybill', surrender: 'surrender' };
 
   /* ── 送付の記録 (エンジン iv.customs_sent + 自分 · 他の人の _actions) — 新しい順 ── */
-  function records(iv) {
+  function records(iv, kind) {
+    kind = kind || 'customs_sent';                       /* v0.3.76 (R12Y37 · #380 ②): customs_draft (下書きで保存) も同じ形 */
     var S = api().S, xs = [], seen = {};
-    ((iv && iv.customs_sent) || []).forEach(function (x) { seen[x.action_id] = 1; xs.push({ action_id: x.action_id, by: x.by, at: x.at, value: x.value || {} }); });
+    ((iv && iv[kind]) || []).forEach(function (x) { seen[x.action_id] = 1; xs.push({ action_id: x.action_id, by: x.by, at: x.at, value: x.value || {} }); });
     (S.actions || []).concat(S.mine || []).forEach(function (x) {
       var a = x.action || x;
-      if (a.action === 'customs_sent' && iv && a.iv === iv.iv_no && !seen[a.action_id]) { seen[a.action_id] = 1; xs.push({ action_id: a.action_id, by: a.by, at: a.at, value: a.value || {} }); }
+      if (a.action === kind && iv && a.iv === iv.iv_no && !seen[a.action_id]) { seen[a.action_id] = 1; xs.push({ action_id: a.action_id, by: a.by, at: a.at, value: a.value || {} }); }
     });
     return xs.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
   }
+  /* v0.3.76 (R12Y37 · #380 ②): エンジンが見た 「通関書類送付_{IV}」 メール (自社 · RE/FW でない · [test] を除く) — 新しい順 */
+  function mailSeen(iv) {
+    return ((iv && iv.customs_mail) || []).filter(function (x) { return !x.test; }).slice().sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+  }
+  function lastDraft(iv) { return records(iv, 'customs_draft').filter(function (x) { return !x.value.test; })[0] || null; }
   function lastLive(iv) { return records(iv).filter(function (x) { return !x.value.test; })[0] || null; }
   function lastTest(iv) { return records(iv).filter(function (x) { return x.value.test; })[0] || null; }
 
@@ -67,8 +79,12 @@ C01.customs = (function () {
     a.S.customsG[iv.iv_no] = g;
     var l = lastLive(iv), t = lastTest(iv);
     if (l) return '<button class="c01-done c01-csent" data-csend="' + esc(iv.iv_no) + '" title="' + esc('通関書類 送付済 ' + String(l.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(l.by) + ' — 押すと記録 · 再送付') + '">✓ 通関書類 送付済 ' + esc(a.md(String(l.at).slice(0, 10))) + ' · ' + esc(a.staffName(l.by)) + '</button>';
+    var ms = mailSeen(iv)[0];            /* v0.3.76: TOOL の記録が無くても 職員のメール (下書き → Outlook で送った · 手で送った) を見たら 送付済 */
+    if (ms) return '<button class="c01-done c01-csent" data-csend="' + esc(iv.iv_no) + '" data-csent-mail="1" title="' + esc('通関書類送付 のメール ' + String(ms.at).slice(0, 16).replace('T', ' ') + ' · ' + (a.staffName(ms.from) || ms.from) + '（エンジンが受信したメール）— 押すと記録 · 再送付') + '">✓ 通関書類 送付済 ' + esc(a.md(String(ms.at).slice(0, 10))) + ' · ' + esc(a.staffName(ms.from) || ms.from) + '</button>';
+    var dr = lastDraft(iv);
+    var dmark = dr ? ' <small class="c01-cdraftmark" data-cdraftmark title="' + esc('下書きを保存 ' + String(dr.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(dr.by) + ' — Outlook で送ると 送付済 になります') + '">下書き作成済 ' + esc(a.md(String(dr.at).slice(0, 10))) + ' · ' + esc(a.staffName(dr.by)) + '</small>' : '';
     var miss = lacks(g);
-    var tmark = t ? ' <small class="c01-ctest" title="' + esc('試験送付 ' + String(t.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(t.by)) + '">試験済 ' + esc(a.md(String(t.at).slice(0, 10))) + '</small>' : '';
+    var tmark = dmark + (t ? ' <small class="c01-ctest" title="' + esc('試験送付 ' + String(t.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(t.by)) + '">試験済 ' + esc(a.md(String(t.at).slice(0, 10))) + '</small>' : '');
     if (miss.length) return '<button class="c01-blocked c01-csend-off" data-csend="' + esc(iv.iv_no) + '" data-csend-off="1" title="' + esc('まだ送れません: ' + miss.join(' · ')) + '">通関書類送付</button>' + tmark;
     return '<button class="c01-btn-pri c01-csend" data-csend="' + esc(iv.iv_no) + '" title="D-03 で IV・PL・SI を作り、① 通関依頼 の宛先へ送ります（送る前に確認窓）">✉ 通関書類送付</button>' + tmark;
   }
@@ -271,7 +287,8 @@ C01.customs = (function () {
     if (domestic(iv)) { a.toast(DOM_TEXT, 'info'); return; }
     if (off) { a.toast('まだ送れません: ' + lacks(g).join(' · '), 'error'); return; }
     st = { iv: ivNo, g: g, step: '準備中', mail: null, sent: [], d03: null, err: [], bl: '', blWhy: '', over: {}, ack: false, again: false, busy: false, body: null, broker: '', person: '',
-      si: undefined, nameSrc: null, sendErr: '', route: '', shared: null, prop: null, addStaff: true, editTo: '', editCc: '', ackTo: false };
+      si: undefined, nameSrc: null, sendErr: '', route: '', shared: null, prop: null, addStaff: true, editTo: '', editCc: '', ackTo: false,
+      extraAck: false, draftDone: null, shareTest: false, ph: null, shareStep: '' };
     a.S.modal = { kind: 'customs', iv: ivNo };
     draw();
     var src = a.S.src;
@@ -290,7 +307,11 @@ C01.customs = (function () {
     }).catch(function () { return null; }) : Promise.resolve(null)) : Promise.resolve(0);
     /* v0.3.68 (R12Y7 · #367 Part 2): customs_s1.json = エンジンの meta.customs_s1 がある時だけ読む (会社のメールボックスの ① · 最近の宛先) */
     var pS1 = a.S.meta && a.S.meta.customs_s1 ? src.getJson(String(a.S.meta.customs_s1)).then(function (x) { a.S.customsS1 = x; }, function () { a.S.customsS1 = a.S.customsS1 || null; }) : Promise.resolve();
-    Promise.all([pMail, pSent, pBl, pFt, pCb, pS1]).then(function (r) {
+    /* v0.3.76 (R12Y37 · #380 ①): customs_broker_req.json = エンジンの meta.customs_broker_req がある時だけ読む (無い = 案内なし · 今までどおり) */
+    var pReq = a.S.customsReq === undefined && a.S.meta && a.S.meta.customs_broker_req ? src.getJson(String(a.S.meta.customs_broker_req)).then(function (x) { a.S.customsReq = x; }, function () { a.S.customsReq = null; }) : Promise.resolve();
+    /* v0.3.76 (#380 ③): 写真 · 搬入票 の一覧 (_data/photos/{IV}.json · 枚数 · 大きさ) — リンク送付の時だけ使う */
+    var pPh = shareCfg() !== 'off' ? src.getJson('photos/' + ivNo + '.json').then(function (x) { if (st && st.iv === ivNo) st.ph = x; }, function () { if (st && st.iv === ivNo) st.ph = null; }) : Promise.resolve();
+    Promise.all([pMail, pSent, pBl, pFt, pCb, pS1, pReq, pPh]).then(function (r) {
       if (!st || st.iv !== ivNo) return;
       st.mail = r[0]; st.sent = r[1] || []; st.buyer = (r[2] || {}).buyer || ''; st.si = (r[2] || {}).si; st.ftBlank = r[3];
       pickRoute(iv);
@@ -424,6 +445,55 @@ C01.customs = (function () {
     return '<div style="font-family:\'Meiryo\',\'Yu Gothic\',sans-serif;font-size:10pt;color:#333;border-top:1px solid #b5c4df;margin-top:12pt;padding-top:6pt">' +
       esc(head + String(L.body || '')).replace(/\n/g, '<br>') + '</div>';
   }
+  /* ── v0.3.76 (R12Y37 · #380 ①): 通関業者ごとの 追加書類 — エンジン customs_broker.req_of と同じ決まり (アドレス登録が先 · 次にドメイン · 表に無い社外ドメイン = 要確認) ── */
+  var EXTRA_NAME = { PHOTO: '写真（PHOTO）', '搬入票': '搬入票' };
+  function reqOf(rc) {
+    var rq = api().S.customsReq;
+    if (!rq || !rq.domains) return { on: false, extra: [], brokers: [], unknown: [] };
+    var our = String((C01.CUSTOMS && C01.CUSTOMS.ourDomain) || 'leenearcorp.com').toLowerCase();
+    var ex = [], br = [], unk = [];
+    rc.to.concat(rc.cc).forEach(function (x) {
+      var ad = String(x.a || '').trim().toLowerCase(), d = domOf(ad);
+      if (!d || d === our) return;
+      var hit = (rq.addrs || {})[ad] || rq.domains[d];
+      if (!hit) { if (unk.indexOf(d) < 0) unk.push(d); return; }
+      if (br.indexOf(hit.broker) < 0) br.push(hit.broker);
+      (hit.extra || []).forEach(function (k) { if (ex.indexOf(k) < 0) ex.push(k); });
+    });
+    ex.sort(function (p, q) { return (p === 'PHOTO' ? 0 : 1) - (q === 'PHOTO' ? 0 : 1); });
+    return { on: true, extra: ex, brokers: br, unknown: unk };
+  }
+  function reqNow() { return st && st.route ? reqOf(recips()) : { on: false, extra: [], brokers: [], unknown: [] }; }
+  /* v0.3.76 (#380 ③): リンク送付の設定 'off' | 'admin_test' | 'on' */
+  function shareCfg() { var v = C01.CUSTOMS && C01.CUSTOMS.shareLink; return v === 'on' || v === 'admin_test' ? v : 'off'; }
+  function isAdmin() { return !!(api().S.me && api().S.me.admin); }
+  function shareOn() {
+    var rq = reqNow();
+    if (!rq.extra.length) return false;
+    var c = shareCfg();
+    return c === 'on' || (c === 'admin_test' && isAdmin() && !!st.shareTest);
+  }
+  /* 写真 · 搬入票 の一覧 (実況表のこの IV の行の CT · 枠外は除く) */
+  function shareFiles() {
+    var ph = st.ph || {}, rq = reqNow(), g = st.g || {};
+    var cts = {};
+    (g.rows || []).filter(function (x) { return x.kind !== 'missing' && !x.over && x.r && x.r.container_id; }).forEach(function (x) { cts[x.r.container_id] = (x.vals || {}).ct || x.r.ct || ''; });
+    var photos = [], noPhoto = [], docs = [];
+    if (rq.extra.indexOf('PHOTO') >= 0) {
+      Object.keys(cts).forEach(function (cid) {
+        var c = (ph.containers || []).filter(function (x) { return x.container_id === cid; })[0];
+        var ps = (c && c.photos) || [];
+        if (!ps.length) noPhoto.push(cts[cid] || cid);
+        ps.forEach(function (p) { if (p.path) photos.push({ ct: cts[cid] || (c && c.ct) || 'CT', path: p.path, size: p.size || 0 }); });
+      });
+    }
+    if (rq.extra.indexOf('搬入票') >= 0) (ph.docs || []).forEach(function (d) { if (d.path) docs.push({ path: d.path, size: d.size || 0 }); });
+    var sum = function (xs) { return xs.reduce(function (s, x) { return s + (x.size || 0); }, 0); };
+    return { photos: photos, docs: docs, noPhoto: noPhoto, photoBytes: sum(photos), docBytes: sum(docs), needDocs: rq.extra.indexOf('搬入票') >= 0, needPhoto: rq.extra.indexOf('PHOTO') >= 0 };
+  }
+  function mb(n) { return (Math.round(n / 1048576 * 10) / 10) + ' MB'; }
+  function shareDays() { var d = Number(C01.CUSTOMS && C01.CUSTOMS.shareDays); return d > 0 && d <= 30 ? d : 7; }
+  function untilMd(days) { var d = new Date(Date.now() + days * 864e5 + 9 * 36e5); return (d.getUTCMonth() + 1) + '/' + d.getUTCDate(); }
   /* 送れない理由 (送信ボタンを止める) */
   function blockers() {
     var a = api(), out = [];
@@ -460,6 +530,24 @@ C01.customs = (function () {
     if (st.busy) out.push('送信中');
     return out;
   }
+  /* v0.3.76 (#380 ②③): 「送信」 だけの追加の理由 (下書きで保存 は blockers() だけ) */
+  function sendBlockers() {
+    var out = blockers().slice();
+    var rq = reqNow();
+    if (rq.extra.length && !shareOn() && !st.extraAck) out.push('この通関業者は ' + rq.extra.map(function (k) { return EXTRA_NAME[k] || k; }).join('・') + ' も必要です — 下書きで保存するか 「追加書類は別に送ります」 にチェック');
+    if (shareOn()) {
+      var sf = shareFiles();
+      if (!st.ph) out.push('写真 · 搬入票 の一覧を読めません');
+      else if (sf.needPhoto && !sf.photos.length) out.push('写真がありません（リンクで送れません）');
+      else if (sf.needDocs && !sf.docs.length) out.push('搬入票がありません（リンクで送れません）');
+    }
+    return out;
+  }
+  function draftBlockers() {
+    var out = blockers().slice();
+    if (st.shareTest) out.push('リンクの試験中は 下書き を作れません（送信で試験してください）');
+    return out;
+  }
   /* v0.3.70 (R12Y10): 「宛先を確認」 黄色 — 道 2 = 会話を選ぶ · 道 1 (自分のメールの ① に返信) = 知らせだけ */
   function ambHtml(esc) {
     var a = api();
@@ -489,8 +577,14 @@ C01.customs = (function () {
       h += '<p class="c01-cstep">' + (st.step === 'D-03' ? '⟳ D-03 で IV・PL・SI を作成中…（COMPASS を読むだけ）' : '⟳ ① 通関依頼 メール · 送付記録 を確認中…') + '</p>';
     }
     st.err.forEach(function (e) { h += '<p class="c01-warn2">' + esc(e) + '</p>'; });
+    h += reqHtml(esc);
     // 送付済み
     var l = lastLive(iv), sentMail = st.sent.filter(function (x) { return !x.test; });
+    var seenM = mailSeen(iv);
+    if (!sentMail.length && seenM.length) sentMail = seenM.map(function (x) { return { at: x.at, from: x.from, from_name: a.staffName(x.from) || x.from }; });       /* v0.3.76: エンジンが見たメール */
+    var dr0 = lastDraft(iv);
+    if (dr0 && !l && !sentMail.length) h += '<div class="c01-cbox c01-cy" data-cdraftrec><b>下書き作成済</b> ' + esc(String(dr0.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(a.staffName(dr0.by)) +
+      ' — まだ送られていません（Outlook の 下書き から送ってください）' + (dr0.value && dr0.value.web_link ? ' <a href="' + esc(dr0.value.web_link) + '" target="_blank" rel="noopener">Outlook で開く</a>' : '') + '</div>';
     if (l || sentMail.length) {
       h += '<div class="c01-cbox c01-cred"><b>送付済み</b> ' + (l ? esc(String(l.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(a.staffName(l.by)) + '（記録）' : '') +
         (sentMail.length ? ' · メール ' + sentMail.length + ' 通（' + esc(String(sentMail[0].at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(sentMail[0].from_name || sentMail[0].from) + '）' : '') +
@@ -562,9 +656,7 @@ C01.customs = (function () {
       (st.pdfUrl && !regen ? '<iframe class="c01-cpdf" title="PDF" src="' + st.pdfUrl + '"></iframe>' : regen ? '<div class="c01-cpdf c01-cpdf-wait">⟳ PDF を作り直し中…</div>' : '<p class="t2">—</p>') + '</section>';
     h += '</div>';
     if (st.sendErr) h = h.replace(/<\/div>$/, '') + '<p class="c01-warn2 c01-csenderr" data-csenderr>送信できませんでした: ' + esc(st.sendErr) + '</p></div>';
-    var bl = ready ? blockers() : ['準備中'];
-    h += '<div class="c01-mf"><span class="t2 c01-cwhy" data-cwhy>' + esc(bl.length ? '送れません: ' + bl[0] + (bl.length > 1 ? '（ほか ' + (bl.length - 1) + '）' : '') : '送信できます') + '</span><span class="c01-flex"></span>' +
-      '<button class="c01-btn-pri" data-csendgo' + (bl.length ? ' disabled' : '') + '>' + (testMode() ? '送信（試験 · 自分あて）' : '送信（通関業者へ）') + '</button></div>';
+    h += footHtml(ready);
     a.showModal(h, 'c01-customs', !!st.drawn);          /* v0.3.74 (R12Y18 Part 1): 2 回目からの描き直し = スクロール位置 · フォーカスそのまま */
     st.drawn = true;
     bind();
@@ -576,10 +668,17 @@ C01.customs = (function () {
     var ta = q('[data-cbody]');
     if (ta) ta.oninput = function () {
       st.body = ta.value;
-      var bl = blockers(), go = q('[data-csendgo]'), w = q('[data-cwhy]');
+      var bl = sendBlockers(), dl = draftBlockers(), go = q('[data-csendgo]'), dg = q('[data-cdraftgo]'), w = q('[data-cwhy]');
       if (go) go.disabled = bl.length > 0;
-      if (w) w.textContent = bl.length ? '送れません: ' + bl[0] + (bl.length > 1 ? '（ほか ' + (bl.length - 1) + '）' : '') : '送信できます';
+      if (dg) dg.disabled = dl.length > 0;
+      if (w) w.textContent = whyText(bl, dl);
     };
+    var xa = q('[data-cextra]');
+    if (xa) xa.onchange = function () { st.extraAck = xa.checked; draw(); };
+    var stt = q('[data-csharetest]');
+    if (stt) stt.onchange = function () { st.shareTest = stt.checked; st.extraAck = false; st.body = st.body; draw(); };
+    var dgo = q('[data-cdraftgo]');
+    if (dgo) dgo.onclick = saveDraft;
     var ag = q('[data-cagain]');
     if (ag) ag.onchange = function () { st.again = ag.checked; draw(); };
     var ak = q('[data-cack]');
@@ -617,23 +716,152 @@ C01.customs = (function () {
     var go = q('[data-csendgo]');
     if (go) go.onclick = send;
   }
+  /* ── v0.3.76 (R12Y37 · #380): 黄色の案内 · ボタン ── */
+  function reqHtml(esc) {
+    if (!st || !st.route || st.step !== '完了') return '';
+    var rq = reqNow();
+    if (!rq.on) return '';
+    var h = '';
+    if (rq.extra.length) {
+      var names = rq.extra.map(function (k) { return EXTRA_NAME[k] || k; }).join('・');
+      if (shareOn()) {
+        var sf = shareFiles(), days = shareDays();
+        h += '<div class="c01-cbox c01-cy c01-creq" data-creq="share"><b>' + esc(names) + ' を リンク で送ります</b>（会社の SharePoint · 「リンクを知っている全員」 · 見るだけ · ' + days + ' 日（' + esc(untilMd(days)) + ' まで）· その後 zip は消えます）<br>' +
+          (sf.needPhoto ? 'PHOTO.zip: 写真 ' + sf.photos.length + ' 枚 · ' + esc(mb(sf.photoBytes)) : '') + (sf.needPhoto && sf.needDocs ? ' / ' : '') +
+          (sf.needDocs ? '搬入票.zip: ' + sf.docs.length + ' ファイル · ' + esc(mb(sf.docBytes)) : '') +
+          (sf.noPhoto.length ? '<br><span class="c01-cr" data-cnophoto>写真なしCT: ' + esc(sf.noPhoto.join(' · ')) + '（送った後に来た写真は入りません）</span>' : '') +
+          (st.shareStep ? '<br><span class="c01-cstep" data-csharestep>⟳ ' + esc(st.shareStep) + '</span>' : '') + '</div>';
+      } else {
+        h += '<div class="c01-cbox c01-cy c01-creq" data-creq="extra"><b>この通関業者は ' + esc(names) + ' も必要です。</b>下書きで保存して、Outlook で添付してから送信してください。' +
+          (rq.brokers.length ? '<span class="t2">（' + esc(rq.brokers.join(' · ')) + '）</span>' : '') +
+          '<br><label class="c01-cack"><input type="checkbox" data-cextra' + (st.extraAck ? ' checked' : '') + '> 追加書類は別に送ります（この画面から 「送信」 する）</label></div>';
+      }
+    } else if (rq.unknown.length) {
+      h += '<div class="c01-cbox c01-cy c01-creq" data-creq="unknown"><b>必要書類を確認してください</b>（通関業者の表にない宛先: ' + esc(rq.unknown.join(' · ')) + '）</div>';
+    }
+    if (shareCfg() === 'admin_test' && isAdmin() && rq.extra.length) {
+      h += '<label class="c01-cack c01-csharet" data-csharetbox><input type="checkbox" data-csharetest' + (st.shareTest ? ' checked' : '') + '> 管理者: 写真・搬入票リンクの試験（宛先 = 自分 1 人 · 件名 [test] · 通関業者には送りません）</label>';
+    }
+    return h;
+  }
+  function whyText(bl, dl) {
+    if (!bl.length) return '送信できます';
+    if (!dl.length) return '下書きで保存できます · 送信: ' + bl[bl.length - 1];
+    return '送れません: ' + bl[0] + (bl.length > 1 ? '（ほか ' + (bl.length - 1) + '）' : '');
+  }
+  function footHtml(ready) {
+    var bl = ready ? sendBlockers() : ['準備中'], dl = ready ? draftBlockers() : ['準備中'];
+    var rq = ready ? reqNow() : { extra: [] };
+    var draftFirst = rq.extra.length > 0 && !shareOn();          /* 追加書類が要る = 既定 = 下書きで保存 */
+    var dBtn = '<button class="' + (draftFirst ? 'c01-btn-pri' : 'c01-btn-ghost2') + '" data-cdraftgo' + (dl.length ? ' disabled' : '') + ' title="送らずに Outlook の 下書き に保存します（宛先 · 件名 · 本文 · PDF 添付は 送信 と同じ）">下書きで保存</button>';
+    var sBtn = '<button class="' + (draftFirst ? 'c01-btn-ghost2' : 'c01-btn-pri') + '" data-csendgo' + (bl.length ? ' disabled' : '') + '>' + (testMode() ? '送信（試験 · 自分あて）' : '送信（通関業者へ）') + '</button>';
+    return '<div class="c01-mf"><span class="t2 c01-cwhy" data-cwhy>' + api().esc(whyText(bl, dl)) + '</span><span class="c01-flex"></span>' + dBtn + ' ' + sBtn + '</div>';
+  }
+  function mailArgs() {
+    var r = st.d03, rc = recips(), route = st.route;
+    return { replyToId: route === 's1_reply' ? st.mail.last.id : null, newMail: route !== 's1_reply', conv: null, subject: subject(),
+      html: bodyHtml(st.body || '') + (route === 's1_shared' ? quoteHtml(st.shared.last) : ''), pdf_b64: r.pdf_b64, file: r.file,
+      to: rc.to.map(function (x) { return x.a; }), cc: rc.cc.map(function (x) { return x.a; }), forceTest: !!st.shareTest };
+  }
+  /* v0.3.76 (R12Y37 · #380 ②): 下書きで保存 — 送信と同じ下書きを作って 送らない → Outlook で開くリンク · _actions customs_draft */
+  function saveDraft() {
+    var a = api();
+    if (draftBlockers().length) return;
+    var rq = reqNow(), iv = a.ivById(st.iv);
+    var prev = lastDraft(iv) || (st.draftDone ? { at: st.draftDone.at } : null);
+    var msg = '送らずに Outlook の 下書き に保存します（' + (testMode() ? '試験モード: 宛先 = あなた 1 人' : '宛先 ' + recips().to.length + ' 件 · CC ' + recips().cc.length + ' 件') + '）。\n件名: ' + subject() +
+      (rq.extra.length ? '\n\nOutlook で ' + rq.extra.map(function (k) { return EXTRA_NAME[k] || k; }).join('・') + ' を添付してから送信してください。' : '') + '\nよろしいですか？';
+    if (!window.confirm(msg)) return;
+    if (prev && !window.confirm('この IV の下書きはもう作ってあります（' + String(prev.at).slice(0, 16).replace('T', ' ') + '）。もう一つ作りますか？（Outlook の 下書き に 2 つになります）')) return;
+    st.busy = true; st.sendErr = ''; draw();
+    var ivNo = st.iv, r = st.d03, args = mailArgs();
+    args.draftOnly = true;
+    a.S.src.customsSend(args).then(function (res) {
+      var v = { test: res.test, route: st.route, subject: args.subject, to: res.to, cc: res.cc, to_n: res.to.length, cc_n: res.cc.length, draft_id: res.draft_id, web_link: res.web_link || '',
+        internet_message_id: res.internet_message_id || '', file: r.file, pages: r.pages, pdf_sha256: r.sha256, extra: rq.extra, brokers: rq.brokers, req_unknown: rq.unknown,
+        broker_dom: st.brokerDom || '', real_to_n: recips().to.length, real_cc_n: recips().cc.length };
+      return a.writeAction(a.mkAction('customs_draft', { iv: ivNo, ct: null, field: null, source: null, value: v })).then(function () { return res; });
+    }).then(function (res) {
+      if (!st || st.iv !== ivNo) return;
+      st.busy = false;
+      st.draftDone = { at: new Date().toISOString(), link: res.web_link || '' };
+      a.toast('下書きを保存しました — Outlook の 下書き から送ってください · ' + ivNo, 'ok');
+      draw();
+      var m = document.getElementById('c01-modal');
+      var box = document.createElement('div');
+      box.className = 'c01-cbox c01-cok';
+      box.setAttribute('data-cdraftok', '1');
+      box.innerHTML = '<b>下書きを保存しました</b>（送っていません）。Outlook で ' + (rq.extra.length ? a.esc(rq.extra.map(function (k) { return EXTRA_NAME[k] || k; }).join('・')) + ' を添付して ' : '') + '送信してください。 ' +
+        (res.web_link ? '<a href="' + a.esc(res.web_link) + '" target="_blank" rel="noopener" data-cdraftlink>Outlook で開く</a>' : '');
+      var mb0 = m && m.querySelector('.c01-mbody');
+      if (mb0) mb0.insertBefore(box, mb0.firstChild);
+    }).catch(function (e) {
+      if (st) { st.busy = false; st.sendErr = '下書き: ' + e.message; draw(); }
+      stickyErr('下書きを保存できませんでした: ' + e.message);
+    });
+  }
+  /* v0.3.76 (R12Y37 · #380 ③ Part 3B): 写真 · 搬入票 zip → SharePoint (PHOTO_V2/_customs_share/{IV}/{時刻}/) → リンク (全員 · 見るだけ · 7 日) */
+  function jstStamp() {
+    var d = new Date(Date.now() + 9 * 36e5), p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + '-' + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds());
+  }
+  function base(p) { return String(p || '').split('/').pop(); }
+  function prepareShare() {
+    var a = api(), src = a.S.src, sf = shareFiles(), ivNo = st.iv;
+    if (typeof src.customsShareUpload !== 'function' || typeof src.customsFileBytes !== 'function' || typeof C01.zipStore !== 'function') return Promise.reject(new Error('この画面ではリンクを作れません'));
+    var step = function (s) { if (st && st.iv === ivNo) { st.shareStep = s; draw(); } };
+    var get = function (xs, i, acc) {
+      if (i >= xs.length) return Promise.resolve(acc);
+      step('写真・搬入票 を読んでいます ' + (i + 1) + '/' + xs.length);
+      return src.customsFileBytes(xs[i].path).then(function (b) { acc.push({ x: xs[i], data: b }); return get(xs, i + 1, acc); });
+    };
+    var all = sf.photos.concat(sf.docs);
+    return get(all, 0, []).then(function (got) {
+      step('zip を作っています');
+      var used = {}, uniq = function (n) { var k = n, i = 2; while (used[k]) { k = n.replace(/(\.[^.\/]*)?$/, '_' + i + '$1'); i += 1; } used[k] = 1; return k; };
+      var ph = [], dc = [];
+      got.forEach(function (g) {
+        if (sf.photos.indexOf(g.x) >= 0) ph.push({ name: uniq(g.x.ct + '/' + base(g.x.path)), data: g.data });
+        else dc.push({ name: uniq('搬入票/' + base(g.x.path)).replace(/^搬入票\//, ''), data: g.data });
+      });
+      var zips = [];
+      if (sf.needPhoto) zips.push({ name: 'PHOTO.zip', bytes: C01.zipStore(ph), n: ph.length });
+      if (sf.needDocs) zips.push({ name: '搬入票.zip', bytes: C01.zipStore(dc), n: dc.length });
+      var days = shareDays(), exp = new Date(Date.now() + days * 864e5).toISOString();
+      step('SharePoint に置いて リンクを作っています');
+      var stamp = jstStamp();
+      if (st) st.shareUp = true;                      /* ここから先の失敗 = zip が SharePoint に残っているかもしれない */
+      return src.customsShareUpload(ivNo, stamp, zips, exp).then(function (files) {
+        return { place: 'sp', root: (C01.SOURCE && C01.SOURCE.spLabel || 'PHOTO_V2') + '/_customs_share', iv: ivNo, stamp: stamp, days: days, expires: exp, until: untilMd(days),
+          no_photo_ct: sf.noPhoto, files: files };
+      });
+    });
+  }
+  function shareHtml(sh) {
+    var esc = api().esc;
+    var label = { 'PHOTO.zip': '写真', '搬入票.zip': '搬入票' };
+    return '<div style="font-family:\'Meiryo\',\'Yu Gothic\',sans-serif;font-size:10.5pt;margin-top:8pt">写真・搬入票は下記リンクからダウンロードしてください（' + esc(sh.until) + ' まで有効）<br>' +
+      sh.files.map(function (f) { return esc(label[f.name] || f.name) + '（' + esc(f.name) + ' · ' + f.n + ' ファイル · ' + esc(mb(f.size)) + '）: <a href="' + esc(f.url) + '">' + esc(f.url) + '</a>'; }).join('<br>') + '</div>';
+  }
   function send() {
     var a = api();
-    if (blockers().length) return;
+    if (sendBlockers().length) return;
+    var useShare = shareOn();
     var r = st.d03, rc = recips(), iv = a.ivById(st.iv), test = testMode();
     var again = !!(lastLive(iv) || st.sent.some(function (x) { return !x.test; }));
     var subj = subject();
     var RW = { s1_reply: '① に 全員に返信', s1_shared: '① と同じ宛先へ 新しいメール（① は ' + ((st.shared && (st.shared.staff_name || st.shared.staff)) || '') + ' のメール）', proposal: '最近この港へ送った宛先（提案 · 確認済み）' };
     var msg = (test ? '【試験】 あなた (' + a.S.me.email + ') だけに送ります。' : '【実際に通関業者へ送ります】 ' + st.iv + ' の通関書類を 宛先 ' + rc.to.length + ' 件 · CC ' + rc.cc.length + ' 件 に送ります（あなたのメールから）。') +
-      '\n宛先の道: ' + RW[st.route] + '\n件名: ' + subj + '\n添付: ' + r.file + '（' + r.pages + ' ページ）\nよろしいですか？';
+      '\n宛先の道: ' + RW[st.route] + '\n件名: ' + subj + '\n添付: ' + r.file + '（' + r.pages + ' ページ）' +
+      (useShare ? '\n写真・搬入票: zip を SharePoint に置き リンク (' + shareDays() + ' 日) を本文に入れます' : '') + '\nよろしいですか？';
     if (!window.confirm(msg)) return;
     if (again && !window.confirm('この IV はすでに送付済みです。本当にもう一度送りますか？')) return;
     st.busy = true; st.sendErr = ''; draw();
     var ivNo = st.iv;
     var route = st.route;
-    a.S.src.customsSend({ replyToId: route === 's1_reply' ? st.mail.last.id : null, newMail: route !== 's1_reply', conv: null, subject: subj,
-      html: bodyHtml(st.body || '') + (route === 's1_shared' ? quoteHtml(st.shared.last) : ''), pdf_b64: r.pdf_b64, file: r.file,
-      to: rc.to.map(function (x) { return x.a; }), cc: rc.cc.map(function (x) { return x.a; }) }).then(function (res) {
+    var args = mailArgs(), share = null, rq = reqNow();
+    (useShare ? prepareShare().then(function (sh) { share = sh; args.html = bodyHtml(st.body || '') + shareHtml(sh) + (route === 's1_shared' ? quoteHtml(st.shared.last) : ''); if (st) st.shareStep = 'メールを送っています'; })
+      : Promise.resolve()).then(function () { return a.S.src.customsSend(args); }).then(function (res) {
       return a.writeAction(a.mkAction('customs_sent', { iv: ivNo, ct: null, field: null, source: null,
         value: { test: res.test, again: again, subject: subj, to: res.to, cc: res.cc, to_n: res.to.length, cc_n: res.cc.length,
           internet_message_id: res.internet_message_id, file: r.file, pages: r.pages, pdf_sha256: r.sha256, d03: r.version,
@@ -644,12 +872,15 @@ C01.customs = (function () {
           broker_person: personLine(st.body), name_src: st.nameSrc || null, route: route,
           s1_k: route === 's1_shared' ? st.shared.last.k : undefined, s1_amb: route === 's1_shared' && st.shared.ambiguous ? (st.shared.convs || []).length : undefined,
           s1_conv: route === 's1_shared' && st.shared.ambiguous && st.convI >= 0 ? st.shared.convs[st.convI].conv : undefined, s1_staff: route === 's1_shared' ? st.shared.staff : undefined,
-          prop_src: route === 'proposal' ? st.prop.src : undefined } }));
+          prop_src: route === 'proposal' ? st.prop.src : undefined,
+          extra: rq.on ? rq.extra : undefined, extra_ack: rq.extra.length && !share ? !!st.extraAck : undefined,
+          share: share ? { place: share.place, root: share.root, stamp: share.stamp, days: share.days, expires: share.expires, no_photo_ct: share.no_photo_ct,
+            files: share.files.map(function (f) { return { name: f.name, item_id: f.item_id, path: f.path, size: f.size, n: f.n, url: f.url }; }) } : undefined } }));
     }).then(function () {
       a.toast((test ? '試験送信しました（あなた宛て）' : '送信しました') + ' — ' + ivNo, 'ok');
       st = null; a.closeModal(); a.render();
     }).catch(function (e) {
-      if (st) { st.busy = false; st.sendErr = e.message; draw(); }
+      if (st) { st.busy = false; st.shareStep = ''; st.sendErr = e.message + (share || st.shareUp ? '（zip は SharePoint に残っている場合があります · リンクは期限で切れます）' : ''); st.shareUp = false; draw(); }
       stickyErr('送信できませんでした: ' + e.message);
     });
   }
@@ -696,5 +927,6 @@ C01.customs = (function () {
   }
   return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
     _greeting: greeting, _sigCompany: sigCompany, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
-    _subject: function () { return st ? subject() : null; } };
+    _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
+    _draftBlockers: function () { return st ? draftBlockers() : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
 })();

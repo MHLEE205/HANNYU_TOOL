@@ -422,7 +422,8 @@ C01.sources = (function () {
   Graph.prototype.customsSend = function (m) {
     var self = this;
     var C = C01.CUSTOMS || {};
-    var test = C.sendTest !== false;
+    /* v0.3.76 (R12Y37 · #380 ③): forceTest = 管理者の 「写真・搬入票リンクの試験」 (設定が実際の送付でも 自分 1 人 · [test]) */
+    var test = C.sendTest !== false || !!(m && m.forceTest);
     var low = function (a) { return String(a || '').trim().toLowerCase(); };
     if (!C.enabled || !m || !(m.replyToId || m.newMail) || (m.replyToId && m.newMail) || !m.pdf_b64 || !m.file) return Promise.reject(new Error('送信の条件がそろっていません — 送信しません'));
     var me = low((LEENAI.user || {}).email);
@@ -488,10 +489,67 @@ C01.sources = (function () {
           (other.length ? 'ほかの添付: ' + other.join(' / ') : '') + '）— 送信しません（下書きは 下書き フォルダに残っています）');
       }
       if (m.conv && d.conversationId && d.conversationId !== m.conv) throw new Error('① の会話ではありません — 送信しません');
+      /* v0.3.76 (R12Y37 · #380 ②): 「下書きで保存」 = ここまで同じ (宛先 · 件名 · 添付を確かめた下書き) · 送らない → Outlook で開くリンク (webLink) */
+      if (m.draftOnly) {
+        return J('GET', 'me/messages/' + encodeURIComponent(draft.id) + '?$select=webLink').then(function (w) {
+          return { ok: true, draft: true, test: test, draft_id: draft.id, web_link: (w && w.webLink) || '', internet_message_id: d.internetMessageId || '', to: to, cc: cc };
+        });
+      }
       return J('POST', 'me/messages/' + encodeURIComponent(draft.id) + '/send', null).then(function () {
         return { ok: true, test: test, internet_message_id: d.internetMessageId || '', to: to, cc: cc };
       });
     });
+  };
+  /* v0.3.76 (R12Y37 · #380 ③): 写真 · 搬入票 の 1 ファイル (PHOTO_V2 の相対パス · GET だけ) → Uint8Array */
+  Graph.prototype.customsFileBytes = function (rel) {
+    return this._fetch(this._item(rel) + '/content').then(function (r) {
+      if (!r.ok) throw new Error(rel.split('/').pop() + ' を読めません (' + r.status + ')');
+      return r.arrayBuffer();
+    }).then(function (b) { return new Uint8Array(b); });
+  };
+  /* v0.3.76 (R12Y37 · #380 ③ · Part 3B): 写真 · 搬入票 zip を 会社の SharePoint (PHOTO_V2/_customs_share/{IV}/{時刻}/) に置き、
+     「リンクを知っている全員」 · 見るだけ · 期限つきのリンクを作る (押した職員のログイン)。
+     鍵: 置き場所 = _customs_share/{IV}/{時刻}/ の下だけ · 名前 = PHOTO.zip / 搬入票.zip だけ · 同じ名前があれば失敗 (上書きしない) ·
+         リンクの範囲が anonymous でなければ 失敗 (通関業者が開けないリンクを送らない) · 期限が返らなければ 失敗 */
+  var SHARE_TOP = '_customs_share';
+  var SHARE_NAMES = ['PHOTO.zip', '搬入票.zip'];
+  Graph.prototype.customsShareUpload = function (ivNo, stamp, zips, expiresIso) {
+    var self = this;
+    if (!/^[A-Z]{1,4}\d{4}-\d{1,3}$/.test(String(ivNo || '')) || !/^\d{8}-\d{6}$/.test(String(stamp || ''))) return Promise.reject(new Error('置き場所の名前が違います'));
+    if (!(zips || []).length || zips.some(function (z) { return SHARE_NAMES.indexOf(z.name) < 0 || !(z.bytes instanceof Uint8Array) || !z.bytes.length; })) return Promise.reject(new Error('zip の名前 · 中身が違います'));
+    var J = function (method, url, body) {
+      return self._fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: body == null ? undefined : JSON.stringify(body) }).then(function (r) {
+        if (r.status === 403) throw new Error('SharePoint の権限がありません (403)');
+        if (!r.ok) return r.text().then(function (x) { var c = ''; try { c = (JSON.parse(x).error || {}).code || ''; } catch (e) { c = ''; } throw new Error(method + ' 失敗 (' + r.status + (c ? ' ' + c : '') + ')'); });
+        return r.json();
+      });
+    };
+    var out = [];
+    var one = function (z) {
+      var rel = SHARE_TOP + '/' + ivNo + '/' + stamp + '/' + z.name;
+      return J('POST', self._item(rel) + '/createUploadSession', { item: { '@microsoft.graph.conflictBehavior': 'fail' } }).then(function (us) {
+        var u8 = z.bytes, CH = 320 * 1024 * 10, pos = 0, last = null;
+        var next = function () {
+          if (pos >= u8.length) return Promise.resolve(last);
+          var end = Math.min(pos + CH, u8.length);
+          return fetch(us.uploadUrl, { method: 'PUT', headers: { 'Content-Range': 'bytes ' + pos + '-' + (end - 1) + '/' + u8.length }, body: u8.slice(pos, end) }).then(function (r) {
+            if (!r.ok) throw new Error(z.name + ' のアップロード失敗 (' + r.status + ')');
+            pos = end;
+            return (end >= u8.length ? r.json() : Promise.resolve(null)).then(function (j) { last = j; return next(); });
+          });
+        };
+        return next();
+      }).then(function (item) {
+        if (!item || !item.id || item.size !== z.bytes.length) throw new Error(z.name + ' の大きさが合いません');
+        return J('POST', GRAPH + 'drives/' + LEENAI.SP.DRIVE_ID + '/items/' + encodeURIComponent(item.id) + '/createLink', { type: 'view', scope: 'anonymous', expirationDateTime: expiresIso }).then(function (lk) {
+          var L = (lk && lk.link) || {};
+          if (L.scope !== 'anonymous' || !L.webUrl) throw new Error('「リンクを知っている全員」 のリンクを作れません（範囲 = ' + (L.scope || '不明') + '）');
+          if (!lk.expirationDateTime) throw new Error('リンクの期限を付けられません');
+          out.push({ name: z.name, item_id: item.id, path: rel, size: item.size, n: z.n, url: L.webUrl, expires: lk.expirationDateTime, perm_id: lk.id || '' });
+        });
+      });
+    };
+    return zips.reduce(function (p, z) { return p.then(function () { return one(z); }); }, Promise.resolve()).then(function () { return out; });
   };
   Graph.prototype.getStaff = function () {
     /* 担当港 = 共通マスター pol_staff (SharePoint · 列 staff = 担当 · assist = 補助 · 値 = 職員コード)

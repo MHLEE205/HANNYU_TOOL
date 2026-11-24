@@ -7,8 +7,8 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.75',
-  date: '2026-11-22',
+  version: '0.3.76',
+  date: '2026-11-24',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
@@ -88,7 +88,12 @@ C01.CUSTOMS = {
   signature: '----------------------------------------\n{name}\n株式会社リニア (LEENEAR CORPORATION)\nTEL : +81-3-3528-9850 / FAX : +81-3-3528-9851\n{email}',
   footer: '✦ Powered by LEENAI Automation System',
   /* v0.3.68 (R12Y7 · #367 Part 1 · #218): この文字で始まる IV = 国内販売 (L インボイス) — 送付ボタンの代わりに 「国内販売（通関書類は買い手側）」 */
-  domesticPrefix: 'L'
+  domesticPrefix: 'L',
+  /* v0.3.76 (R12Y37 · #380 ③ Part 3B): 写真 · 搬入票 を zip → 会社の SharePoint (PHOTO_V2/_customs_share/{IV}/{時刻}/) →
+     「リンクを知っている全員」 · 見るだけ · shareDays 日 のリンクを本文に入れて送る (zip はエンジンが 7 日後に消す · 送付の記録にあるものだけ)。
+     'off' = 出さない · 'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · 件名 [test]) · 'on' = 実際の送付 (형님 の rpa@ 試験メール確認の後) */
+  shareLink: 'admin_test',
+  shareDays: 7
 };
 
 /* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 催促 送信直前の確認 — エンジン notify/remind.guard と同じ決まり (エンジンが下書きに付けた allow を使う)。
