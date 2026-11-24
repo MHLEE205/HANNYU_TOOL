@@ -1870,6 +1870,10 @@ window.C01 = window.C01 || {};
     if (rr.length) out += ' <span class="c01-ibadge" data-info="reread" title="' + esc(rr.map(rereadText).join(' / ')) + '">再判読</span>';
     var si = slotInfo(iv, r, ov);
     if (si) out += ' <span class="c01-ibadge" data-info="slot_change" title="' + esc(slotInfoText(iv, si)) + '">⇄ 枠変更</span>';
+    /* v0.3.77 (R12Y38 · #381 (가) · エンジン v0.5.172 out_slot_from_human): 人の 枠変更 で 残りの枠が一つに決まった行 (同一条件の空き枠) — 表示だけ (判定に影響なし) */
+    var sfh = r.slot_from_human;
+    if (sfh && !si) out += ' <span class="c01-ibadge c01-sfhbadge" data-info="slot_from_human" title="' + esc((staffName(sfh.by) || '担当者') + ' が ' + (sfh.ct || '（CT 不明）') +
+      ' の枠を変更 → 残りの枠が一つに決まりました' + (sfh.at ? '（' + String(sfh.at).slice(0, 16).replace('T', ' ') + '）' : '')) + '">人の枠変更から</span>';
     /* v0.3.41 (R9O · R9N 리나이에게 1): 自動推薦（仮登録）の送信元 · 「登録しない」 にした送信元の書類 · 写真の行 = 自動OK にしない理由 */
     var ap = (r.info || []).filter(function (s) { return /^(自動推薦発信者|登録しない発信者の写真)/.test(s); });
     /* v0.3.44 (R9U Part 1-2): エンジン cancel_regroup = COMPASS で取消になったブッキングの写真を 新しいブッキングの同じ CT へ まとめた行 (表示だけ) */
@@ -2651,7 +2655,8 @@ window.C01 = window.C01 || {};
       var ext = (String(name).match(/\.([a-z0-9]+)$/i) || [])[1] || '';
       var rot = rotMap(d), pg = d.page || 1;
       out.push({ path: d.path, name: name, page: d.page || null, kind: t, kindText: DOC_KIND[t][0], order: DOC_KIND[t][1], ext: ext.toLowerCase(),
-        rot: ((rot[String(pg)] || rot['*'] || 0) + rotMemGet(rotMemKey(d.sha16, pg))) % 360, fields: (d.fields || []).map(function (f) { return FIELD_LABEL[f] || f; }) });
+        rot: ((rot[String(pg)] || rot['*'] || 0) + rotMemGet(rotMemKey(d.sha16, pg))) % 360, fields: (d.fields || []).map(function (f) { return FIELD_LABEL[f] || f; }),
+        sha16: d.sha16 || '', baseRot: rot[String(pg)] || rot['*'] || 0, docType: d.doc_type || '' });     /* v0.3.77 (R12Y38): 向き = エンジン (baseRot) + 人 (sha16 + ページ) */
     });
     return out.sort(function (a, b) { return a.order - b.order; });
   }
@@ -2676,7 +2681,7 @@ window.C01 = window.C01 || {};
     var f = findRow(key);
     var list = rowDocList(f.r);
     send({ t: 'c01-doc-head', head: { iv: f.iv.iv_no, ct: f.r.ct || '', packer: rowVal(f.iv, f.r, 'packer').v || '', plant: rowVal(f.iv, f.r, 'plant').v || '',
-      docs: list.map(function (d) { return { name: d.name, page: d.page, kind: d.kind, kindText: d.kindText, ext: d.ext, rot: d.rot, fields: d.fields }; }) } });
+      docs: list.map(function (d) { return { name: d.name, page: d.page, kind: d.kind, kindText: d.kindText, ext: d.ext, rot: d.rot, fields: d.fields, sha16: d.sha16, baseRot: d.baseRot }; }) } });
     var next = 0;
     function one() {
       var i = next++;
@@ -2736,8 +2741,9 @@ window.C01 = window.C01 || {};
     (stale ? loadPhotos(f.iv.iv_no, f.iv.photos_sig || undefined) : Promise.resolve()).then(function () {
       var d = photosOf(key) || { list: [] };
       var list = d.list || [];
+      var sd = photoSideDocs(f.r);
       send({ t: 'c01-photo-head', head: { iv: f.iv.iv_no, ct: f.r.ct || '', packer: rowVal(f.iv, f.r, 'packer').v || '', plant: rowVal(f.iv, f.r, 'plant').v || '',
-        n: list.length, vals: photoVals(f),
+        n: list.length, vals: photoVals(f), docs: sd.docs, docsOther: sd.other,
         photos: list.map(function (p, i) { var o = photoKindSrc(p); o.no = p.no || i + 1; o.name = String(p.path || '').split('/').pop(); if (p.box) o.box = p.box; return o; }) } });
       var next = 0;
       function one() {
@@ -2754,11 +2760,38 @@ window.C01 = window.C01 || {};
       return Promise.all([one(), one(), one()]);
     });
   }
+  /* ── v0.3.77 (R12Y38 · #382 朴 改善依頼 ①): 写真ページの右 = その CT の 搬入票 (PDF のその行のページ · FAX のページ · Excel) ──
+     rows[].docs のうち 搬入票 (エンジン doc_type · 無ければファイル名) と Excel だけ · 複数 = 写真ページの上のタブ · ほかの書類の数 = 「📄 で」 の案内だけ。
+     ファイルは 写真ページが見る時に 1 件ずつ頼む (c01-photo-docreq) — 写真と同じく このタブが読み Blob を渡す (写真ページはログインしない · Graph 0) */
+  function photoSideDocs(r) {
+    var list = rowDocList(r);
+    var docs = list.filter(function (d) { return d.kind === 'hannyuhyo' || d.kind === 'excel'; });
+    return { docs: docs.map(function (d) {
+      return { name: d.name, page: d.page, kind: d.kind, kindText: d.kindText, ext: d.ext, sha16: d.sha16, baseRot: d.baseRot, docType: d.docType, fields: d.fields };
+    }), other: list.length - docs.length };
+  }
+  function servePhotoDoc(win, h, i) {
+    var send = function (m) { m.k = h; try { win.postMessage(m, msgOrigin()); } catch (e) { /* タブが閉じた */ } };
+    var key = S.jik ? keyByHash(h) : null;
+    var f = key ? findRow(key) : null;
+    var list = f ? rowDocList(f.r).filter(function (d) { return d.kind === 'hannyuhyo' || d.kind === 'excel'; }) : [];
+    var d = list[i];
+    if (!d) { send({ t: 'c01-photo-doc', i: i, err: 'この書類は今の実況表にありません — 実況表から開き直してください' }); return; }
+    var web = /^(xlsx|xlsm|xls|csv)$/.test(d.ext) && S.src && typeof S.src.webUrl === 'function' ? S.src.webUrl(d.path).catch(function () { return ''; }) : Promise.resolve('');
+    var pu = isFolder() ? S.src.resolveUrl(d.path) : Promise.resolve(S.src.fileUrl(d.path));
+    Promise.all([pu, web]).then(function (x) {
+      if (!x[0]) return send({ t: 'c01-photo-doc', i: i, err: fileErrText(d.path), web: x[1] || '' });
+      return fetch(x[0]).then(function (r) { if (!r.ok) throw new Error('http' + r.status); return r.blob(); })
+        .then(function (b) { send({ t: 'c01-photo-doc', i: i, blob: b, web: x[1] || '' }); });
+    }).catch(function () { send({ t: 'c01-photo-doc', i: i, err: fileErrText(d.path) }); });
+  }
   window.addEventListener('message', function (e) {
     var d = e.data;
-    if (!d || typeof d !== 'object' || (d.t !== 'c01-photo-req' && d.t !== 'c01-doc-req') || !e.source) return;
+    if (!d || typeof d !== 'object' || (d.t !== 'c01-photo-req' && d.t !== 'c01-doc-req' && d.t !== 'c01-photo-docreq') || !e.source) return;
     if (e.origin !== location.origin) return;                         /* 同じオリジン (この TOOL) の photo.html · doc.html だけ */
-    (d.t === 'c01-doc-req' ? serveDocs : servePhotos)(e.source, String(d.k || '').replace(/[^0-9a-f]/g, '').slice(0, 8));
+    var h = String(d.k || '').replace(/[^0-9a-f]/g, '').slice(0, 8);
+    if (d.t === 'c01-photo-docreq') { servePhotoDoc(e.source, h, Math.max(0, +d.i || 0)); return; }
+    (d.t === 'c01-doc-req' ? serveDocs : servePhotos)(e.source, h);
   });
   function openLightboxList(title, list, idx) { S.lb = { title: title, list: list, idx: idx || 0 }; renderLightbox(); }
   function renderLightbox() {
@@ -3024,7 +3057,9 @@ window.C01 = window.C01 || {};
         (qph !== null ? '<span class="c01-phcount' + (photoAlert(qph, rowVal(iv, qrow, 'packer').v) ? ' c01-ph-alert' : '') + '" title="' + esc('このコンテナの写真枚数（' + photoRangeText(rowVal(iv, qrow, 'packer').v) + 'は色付き）') + '">写真 ' + qph + '枚</span>' : '') + '<span class="c01-flex"></span>' +
         (baseRot ? '<span class="c01-autorot" id="q-autorot" title="エンジンが判読の時に見つけたページの向きで表示しています（⟳ でさらに回せます）">向き補正 ' + baseRot + '°</span>' : '') +
         (!isPhotos && f.path ? '<button class="c01-tool" id="z-out" aria-label="縮小">−</button><span class="z">' + S.zoom + '%</span><button class="c01-tool" id="z-in" aria-label="拡大">+</button>' +
-          '<button class="c01-tool" id="rot" aria-label="回転">⟳</button>' +
+          '<button class="c01-tool" id="rot-l" aria-label="左に回転" title="左に 90° 回す（画面だけ · 原本は変えない）">⟲</button>' +
+          '<button class="c01-tool" id="rot" aria-label="回転" title="右に 90° 回す（画面だけ · 原本は変えない）">⟳</button>' +
+          '<button class="c01-tool" id="rot-180" aria-label="180°回転" title="180° 回す（上下逆さまの時 · 画面だけ）">180°</button>' +
           (isPdfF ? '<button class="c01-tool" id="pdf-prev" aria-label="前のページ">‹</button><span class="t2" id="pdf-pg">p.' + pdfPg + '</span><button class="c01-tool" id="pdf-next" aria-label="次のページ">›</button>' +
             '' : '<span class="t2">' + (f.page ? 'p.' + f.page : '') + '</span>') : '') +
         (!isPhotos && f.path ? '<button class="c01-btn-sub" id="pdf-open" title="SharePoint で開く（別タブ）">別タブで開く</button>' : '') + '</div>';
@@ -3257,6 +3292,10 @@ window.C01 = window.C01 || {};
     if (zi) zi.onclick = function () { S.zoom = Math.min(200, S.zoom + 20); render(); };
     if (zo) zo.onclick = function () { S.zoom = Math.max(60, S.zoom - 20); render(); };
     if (ro) ro.onclick = function () { S.rot = (S.rot + 90) % 360; rotMemSet(S.rotKey, S.rot); render(); };
+    /* v0.3.77 (R12Y38 · #382 朴 改善依頼 ②): ⟲ 90° · 180° (⟳ と同じ記憶 · 画面だけ) */
+    var rol = $('rot-l'), ro2 = $('rot-180');
+    if (rol) rol.onclick = function () { S.rot = (S.rot + 270) % 360; rotMemSet(S.rotKey, S.rot); render(); };
+    if (ro2) ro2.onclick = function () { S.rot = (S.rot + 180) % 360; rotMemSet(S.rotKey, S.rot); render(); };
     var pel = root.querySelector('.c01-orig [data-pdf]');
     if (pel) {
       var prel = pel.getAttribute('data-pkey') || pel.getAttribute('data-pdf');

@@ -670,3 +670,31 @@ tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
 button.c01-csend-dom { min-height: 30px; display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 6px; border: 1px dashed var(--border); background: transparent; color: var(--text2); font-size: 12px; font-family: inherit; cursor: help; }
 .c01-cerr { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10050; max-width: 760px; display: flex; gap: 12px; align-items: center;
   background: #fff1f1; color: var(--err, #c62828); border: 2px solid var(--err, #e5484d); border-radius: 8px; padding: 10px 14px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+/* v0.3.77 (R12Y38 · #382 朴 改善依頼 ①): 写真ページ = 左 写真 · 右 その CT の 搬入票 · 幅 1200px 未満 = 上下 · 「写真のみ」 = これまで通り */
+.c01-pv-split { flex: 1 1 auto; display: flex; min-height: 0; gap: 4px; }
+.c01-pv-split > .c01-pv-main { flex: 1 1 55%; min-width: 0; }
+.c01-pv-split.only > .c01-pv-main { flex: 1 1 auto; }
+.c01-pv-doc { flex: 1 1 45%; min-width: 0; display: flex; flex-direction: column; padding: 10px 18px 0 0; }
+.c01-pv-doc[hidden] { display: none; }
+.c01-pv-doch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0 8px; min-height: 34px; }
+.c01-pv-doctabs { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.c01-pv-doctabs button { cursor: pointer; }
+.c01-pv-docname { font-size: 11px; color: var(--text2); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c01-pv-doctype { font-size: 11px; color: var(--text2); }
+.c01-pv-doctype.odd { color: var(--warn, #d49a00); font-weight: 600; }
+.c01-pv-docstage { flex: 1 1 auto; height: calc(100vh - 210px); min-height: 240px; border-radius: 10px; background: var(--surface2, var(--surface)); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: auto; }
+.c01-pv-docstage img, .c01-pv-docstage canvas { max-width: 100%; max-height: 100%; }
+.c01-pv-docvals { padding: 6px 0; }
+.c01-pv-doc.fold .c01-pv-docstage, .c01-pv-doc.fold .c01-pv-docvals { display: none; }
+.c01-rotbar { display: inline-flex; gap: 4px; align-items: center; }
+.c01-rotbar .c01-rotnow { min-width: 32px; }
+#pv-only.on { border-color: var(--accent, #3b82f6); }
+.c01-sfhbadge { border-style: dashed; }
+@media (max-width: 1199px) {
+  .c01-pv-split { flex-direction: column; flex: 0 0 auto; }
+  .c01-pv-split > .c01-pv-main { flex: 0 0 auto; }
+  .c01-pv-split:not(.only) .c01-pv-stage { height: 52vh; flex: 1 1 auto; }
+  .c01-pv-doc { flex: 0 0 auto; padding: 6px 18px 0; }
+  .c01-pv-docstage { flex: 0 0 auto; height: 60vh; }
+}
+.c01-rotbar .c01-tool, .c01-pv-fold { width: auto; min-width: 0; height: auto; padding: 3px 8px; white-space: nowrap; line-height: 1.4; }

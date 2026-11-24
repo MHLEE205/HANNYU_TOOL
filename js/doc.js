@@ -2,7 +2,8 @@
    - 実況表 の 「📄」 を押す → 同じウィンドウの新しいタブ (名前 = 'c01-doc-' + 行キーのハッシュ · アドレスは ?k=ハッシュ だけ)
    - ログインしない · Graph を呼ばない: 元の画面 (window.opener = 同じオリジンの TOOL) に postMessage で頼み、見出しと書類 (Blob) を受け取る
    - 書類 = エンジンの rows[].docs (その行の値の出典 · ファイル + ページ) — PDF は その行のページだけ · 画像はそのまま · Excel は SharePoint で開く
-   - 並び: 搬入票 → 計量伝票 → 納品書 · その他 → EIR → Excel (タブ) */
+   - 並び: 搬入票 → 計量伝票 → 納品書 · その他 → EIR → Excel (タブ)
+   - v0.3.77 (R12Y38 · #382 朴 改善依頼 ②): 「⟲ 90°」 「⟳ 90°」 「180°」 = 画面だけ (原本 · PDF は変えない) · このブラウザに覚える (js/sidedoc.js · 確認・入力 と同じ記憶) */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -91,7 +92,8 @@ window.C01 = window.C01 || {};
       '<div class="c01-pv-bar c01-dv-tabs">' + h.docs.map(function (x, j) {
         return '<button class="c01-pv-kind' + (j === i ? ' big on' : '') + '" data-go="' + j + '" title="' + esc(x.name) + '">' + esc(x.kindText) + (x.page ? ' p' + x.page : '') + '</button>';
       }).join(' ') + '<span class="c01-pv-name">' + esc(d.name) + '</span><span class="t2" id="dv-pg"></span>' +
-      (d.fields && d.fields.length ? '<span class="t2">値: ' + esc(d.fields.join('・')) + '</span>' : '') + '</div>' +
+      (d.fields && d.fields.length ? '<span class="t2">値: ' + esc(d.fields.join('・')) + '</span>' : '') +
+      (C01.SideDoc && !/^(xlsx|xlsm|xls|csv)$/.test(d.ext || '') ? '<span class="c01-flex"></span>' + C01.SideDoc.rotBar('dv-rot', d) : '') + '</div>' +
       '<div class="c01-pv-stage-row"><button class="c01-pv-nav" id="pv-prev" aria-label="前の書類">‹</button>' +
       '<div class="c01-pv-stage" id="dv-stage">' + stage(i, d) + '</div>' +
       '<button class="c01-pv-nav" id="pv-next" aria-label="次の書類">›</button></div>';
@@ -99,11 +101,17 @@ window.C01 = window.C01 || {};
     $('pv-prev').onclick = function () { go(P.idx - 1); };
     $('pv-next').onclick = function () { go(P.idx + 1); };
     document.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { go(+b.getAttribute('data-go')); }; });
+    var rotNow = function () { return C01.SideDoc ? C01.SideDoc.shownRot(d) : (+d.rot || 0); };
     $('dv-stage').onwheel = function (e) {
       var el = $('dv-stage').firstElementChild;
       e.preventDefault(); P.scale = Math.max(1, Math.min(4, P.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-      if (el && el.tagName !== 'DIV') el.style.transform = 'scale(' + P.scale + ')' + (el.tagName === 'IMG' ? ' rotate(' + (+d.rot || 0) + 'deg)' : '');
+      if (el && el.tagName !== 'DIV') el.style.transform = 'scale(' + P.scale + ')' + (el.tagName === 'IMG' ? ' rotate(' + rotNow() + 'deg)' : '');
     };
+    if (C01.SideDoc && d.sha16 !== undefined) {               /* v0.3.77: 画像 · PDF = 共通の描き方 (エンジンの向き + 人の角度) · ⟲ ⟳ 180° */
+      C01.SideDoc.bindRot('dv-rot', d, render);
+      if (d.ext !== 'xlsx' && d.ext !== 'xls' && d.ext !== 'xlsm' && d.ext !== 'csv' && P.files[i] && !P.errs[i]) C01.SideDoc.draw($('dv-stage'), d, P.files[i], null);
+      return;
+    }
     if (d.ext === 'pdf' && P.files[i] && !P.errs[i]) renderPdf(i, d);
   }
   function go(i) { P.idx = i; render(); }

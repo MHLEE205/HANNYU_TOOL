@@ -8,7 +8,9 @@
      鮮明化は 0 (R10V 20 枚の測定: clip 2.0 + 鮮明化 0.5 = 刻印の地の模様が強まり 読み取りが 3 枚で変わった · clip 1.5 + 鮮明化 0 = 数字の違い 0)
      原本は常に横に並べる · 「補正画像 · 判断は原本と搬入票で」 · 元のファイルは変えない · AI 費用 0
    - v0.3.55 (R10Y · ZHAN 提案 · #313): 大きい写真 · 拡大・補正 の 2 枚 = 拡大 (ホイール · ＋− · ダブルクリック 2.5 倍 · 指 2 本 · 1〜6 倍) + 引っ張って移動 ·
-     矢印キー (拡大中 = 移動 · 1 倍 = 前へ / 次へ) · 「全体表示」 · 次の写真へ = 元の大きさ (js/zoompan.js · CSS transform だけ)。2 枚は同じ倍率 · 同じ位置 */
+     矢印キー (拡大中 = 移動 · 1 倍 = 前へ / 次へ) · 「全体表示」 · 次の写真へ = 元の大きさ (js/zoompan.js · CSS transform だけ)。2 枚は同じ倍率 · 同じ位置
+   - v0.3.77 (R12Y38 · #382 朴 改善依頼 ①): 右 = その CT の 搬入票 (PDF のその行のページ · FAX のページ · Excel = SharePoint で開く) · 複数 = 上のタブ ·
+     無い = 「搬入票なし」 · 幅 1200px 未満 = 上下 + 右の折りたたみ · 「写真のみ」 = これまでの写真だけ (このブラウザに覚える) · ⟲ ⟳ 180° = 画面だけ (js/sidedoc.js) */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -44,7 +46,8 @@ window.C01 = window.C01 || {};
   }
   C01.photoKind = photoKind;
 
-  var P = { k: '', idx: 0, head: null, imgs: {}, errs: {}, tries: 0, timer: null, scale: 1, gone: false, enh: -1, enhMs: 0, zp: null, zs: null };
+  var P = { k: '', idx: 0, head: null, imgs: {}, errs: {}, tries: 0, timer: null, scale: 1, gone: false, enh: -1, enhMs: 0, zp: null, zs: null,
+    didx: 0, dfiles: {}, derrs: {}, dweb: {}, dreq: {}, only: false, fold: false };
   C01.photoPage = P;
 
   function $(id) { return document.getElementById(id); }
@@ -127,6 +130,62 @@ window.C01 = window.C01 || {};
     if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   function go(i) { P.idx = i; P.enh = -1; P.zs = null; render(); }
+
+  /* ── v0.3.77 (R12Y38 · #382 ①) 右の 搬入票 ── */
+  var ONLY_KEY = 'c01_pv_photo_only';
+  var DT_JA = { hannyuhyo: '搬入票', keiryo: '計量伝票', eir: 'EIR', excel: 'Excel', nouhin: '納品書', vanning_list: 'バンニング表', inspection: '検査', fax_cover: 'FAX 送付状', other: 'その他' };
+  function docLabel(x) {
+    return (x.kind === 'excel' ? 'Excel' : '搬入票') + (x.page ? ' p' + x.page : '');
+  }
+  function renderDoc() {
+    var el = $('pv-doc'), sp = $('pv-split'), ob = $('pv-only');
+    if (!el || !sp) return;
+    if (ob) { ob.textContent = P.only ? '写真 + 搬入票' : '写真のみ'; ob.classList.toggle('on', P.only); }
+    sp.classList.toggle('only', !!P.only);
+    if (P.only || !P.head) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    var docs = P.head.docs || [];
+    var other = +P.head.docsOther || 0;
+    var fold = '<button class="c01-tool c01-pv-fold" id="pv-fold" title="搬入票 を たたむ / ひらく">' + (P.fold ? '▸ ひらく' : '▾ たたむ') + '</button>';
+    if (!docs.length) {
+      el.innerHTML = '<div class="c01-pv-doch"><span class="c01-pv-kind big">搬入票</span><span class="c01-flex"></span>' + fold + '</div>' +
+        (P.fold ? '' : '<div class="c01-pv-docstage c01-pv-docnone"><div class="c01-pv-msg" id="pv-docnone">搬入票なし' +
+          (other ? '<br><span class="t2">ほかの書類 ' + other + ' 件は 実況表 の 📄 で見られます</span>' : '') + '</div></div>');
+      el.classList.toggle('fold', !!P.fold);
+      $('pv-fold').onclick = function () { P.fold = !P.fold; renderDoc(); };
+      return;
+    }
+    var n = docs.length;
+    var i = ((P.didx % n) + n) % n;
+    P.didx = i;
+    var d = docs[i];
+    d.web = P.dweb[i] || d.web;
+    var dt = d.docType ? (DT_JA[d.docType] || d.docType) : '種類不明';
+    var odd = d.kind === 'hannyuhyo' && d.docType !== 'hannyuhyo';     /* #305: エンジン区分が 搬入票 でない (無い) 書類 = そのまま見せて 区分を出す */
+    el.innerHTML = '<div class="c01-pv-doch">' +
+      (n > 1 ? '<span class="c01-pv-doctabs">' + docs.map(function (x, j) {
+        return '<button class="c01-pv-kind' + (j === i ? ' big on' : '') + '" data-dgo="' + j + '" title="' + esc(x.name) + '">' + esc((j + 1) + '. ' + docLabel(x)) + '</button>';
+      }).join('') + '</span>' : '<span class="c01-pv-kind big">' + esc(docLabel(d)) + '</span>') +
+      '<span class="c01-pv-docname" title="' + esc(d.name) + '">' + esc(d.name) + '</span>' +
+      '<span class="c01-pv-doctype' + (odd ? ' odd' : '') + '" id="pv-doctype" title="エンジンの書類区分">' + esc('区分: ' + dt) + '</span>' +
+      '<span class="c01-flex"></span>' + (P.fold ? '' : C01.SideDoc.rotBar('pv-rot', d)) + fold + '</div>' +
+      (P.fold ? '' : '<div class="c01-pv-docstage" id="pv-docstage"></div>' +
+        (d.fields && d.fields.length ? '<div class="t2 c01-pv-docvals">この書類の値: ' + esc(d.fields.join('・')) + '</div>' : ''));
+    el.classList.toggle('fold', !!P.fold);
+    $('pv-fold').onclick = function () { P.fold = !P.fold; renderDoc(); };
+    el.querySelectorAll('[data-dgo]').forEach(function (b) { b.onclick = function () { P.didx = +b.getAttribute('data-dgo'); renderDoc(); }; });
+    if (P.fold) return;
+    C01.SideDoc.bindRot('pv-rot', d, renderDoc);
+    C01.SideDoc.draw($('pv-docstage'), d, P.dfiles[i], P.derrs[i]);
+    if (!P.dfiles[i] && !P.derrs[i] && !P.dreq[i]) {
+      P.dreq[i] = 1;
+      var op = null;
+      try { op = window.opener; } catch (e) { op = null; }
+      if (op && !op.closed) { try { op.postMessage({ t: 'c01-photo-docreq', k: P.k, i: i }, origin()); } catch (e) { /* なし */ } }
+      else P.derrs[i] = '元の画面 (実況表) が見つかりません';
+    }
+  }
+  C01.photoDoc = renderDoc;
 
   /* ── v0.3.51 (R10V · #308) 拡大・補正 ── */
   var ENH = { MAX_EDGE: 1600, ZOOM_MAX: 3, MARGIN: 0.25, MIN_PAD: 12, TILES: 8, CLIP: 1.5, SHARP: 0 };
@@ -255,8 +314,19 @@ window.C01 = window.C01 || {};
     if (d.t === 'c01-photo-head') {
       clearTimeout(P.timer);
       Object.keys(P.imgs).forEach(function (i) { try { URL.revokeObjectURL(P.imgs[i]); } catch (x) { /* なし */ } });
+      Object.keys(P.dfiles).forEach(function (i) { try { URL.revokeObjectURL(P.dfiles[i]); } catch (x) { /* なし */ } });
       P.head = d.head || { photos: [] }; P.imgs = {}; P.errs = {};
+      P.didx = 0; P.dfiles = {}; P.derrs = {}; P.dweb = {}; P.dreq = {};
       render();
+      renderDoc();
+      return;
+    }
+    if (d.t === 'c01-photo-doc' && P.head) {
+      var j = +d.i;
+      if (d.blob && typeof Blob !== 'undefined' && d.blob instanceof Blob) P.dfiles[j] = URL.createObjectURL(d.blob);
+      else P.derrs[j] = d.err || '読めませんでした';
+      if (d.web) P.dweb[j] = d.web;
+      if (j === P.didx) renderDoc();
       return;
     }
     if (d.t === 'c01-photo-img' && P.head) {
@@ -275,6 +345,13 @@ window.C01 = window.C01 || {};
     $('pv-sys').textContent = (I.sys || 'C-01') + ' 写真';
     $('pv-theme').onclick = nextTheme;
     applyTheme(curTheme());
+    try { P.only = localStorage.getItem(ONLY_KEY) === '1'; } catch (e) { P.only = false; }
+    $('pv-only').onclick = function () {
+      P.only = !P.only;
+      try { if (P.only) localStorage.setItem(ONLY_KEY, '1'); else localStorage.removeItem(ONLY_KEY); } catch (e) { /* 覚えないだけ */ }
+      renderDoc();
+      render();
+    };
     var q = new URLSearchParams(location.search);
     P.k = String(q.get('k') || '').replace(/[^0-9a-f]/g, '').slice(0, 8);
     P.idx = +(q.get('i') || 0) || 0;

@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="app.css">
 <script src="js/config.js"></script>
 <script src="js/zoompan.js"></script>
+<script src="js/sidedoc.js"></script>
 <script src="js/photo.js"></script>
 </head>
 <body class="c01-pv-body">
@@ -20,9 +21,10 @@
   <div class="c01-pv-head" id="pv-head"><span class="c01-pv-wait">読み込み中…</span></div>
   <span class="c01-flex"></span>
   <span class="c01-pv-ver" id="pv-ver"></span>
+  <button class="ln-btn-ghost" id="pv-only" title="右の 搬入票 を出す / 出さない（写真のみ）">写真のみ</button>
   <button class="ln-btn-ghost" id="pv-theme">🌙 ダーク</button>
 </header>
-<main class="c01-pv-main" id="pv-main"></main>
-<footer class="c01-pv-foot">← → で写真を切り替え · ホイール · ダブルクリックで拡大 · 拡大中は引っ張って移動（矢印キーでも） · 拡大・補正 = 確認用の画像（判断は原本と搬入票で） · ✦ Powered by LEENAI Automation System</footer>
+<div class="c01-pv-split" id="pv-split"><main class="c01-pv-main" id="pv-main"></main><aside class="c01-pv-doc" id="pv-doc" hidden></aside></div>
+<footer class="c01-pv-foot">← → で写真を切り替え · ホイール · ダブルクリックで拡大 · 拡大中は引っ張って移動（矢印キーでも） · 拡大・補正 = 確認用の画像（判断は原本と搬入票で） · 右 = この CT の 搬入票（⟲ ⟳ 180° は画面だけ · 原本は変えない） · ✦ Powered by LEENAI Automation System</footer>
 </body>
 </html>

@@ -194,7 +194,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.76", page.title() == "LEENAI C-01 搬入票 v0.3.76", page.title())
+            ok("탭 제목 v0.3.77", page.title() == "LEENAI C-01 搬入票 v0.3.77", page.title())
             ok("설정: shareLink = admin_test · shareDays 7 · zipStore 있음", page.evaluate("C01.CUSTOMS.shareLink === 'admin_test' && C01.CUSTOMS.shareDays === 7 && typeof C01.zipStore === 'function'"))
             page.evaluate("C01.CUSTOMS.sendTest = true")
             page.evaluate(TGR.STUB, staff)
