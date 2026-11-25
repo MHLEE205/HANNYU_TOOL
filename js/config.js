@@ -59,13 +59,14 @@ C01.SOURCE = {
   spLabel: 'PHOTO_V2'     /* 画面に出す名前 (長いパスの代わり) */
 };
 
-/* v0.2.0 (R6): Compass入力 · 催促 は下書き・比較表だけ。送信ボタンは常に無効 (R7 以降 · 決定のあと) */
+/* Compass入力 · 催促 の送信の決まり (v0.2.0 R6 の 「下書き・比較表だけ · 送信ボタンは常に無効」 は 今は違う · R12Y41 で注釈だけ直した)。
+   今の動き: Compass入力 = 実際に入力 (compass) · 催促 = 本番送信 (remindLive + エンジン remind.json send_mode) */
 C01.SEND = {
   /* v0.3.19 (R7T 決定 #190): Compass入力 = 実際に入力 (graph モード · ログインした人のトークン = その人の権限 · 記録 + 元に戻す)。
      false = 比較表だけ (DRY · 送信ボタン無効) */
   compass: true,
   /* v0.3.22 (R7V Part B · 決定 #191): 催促 = 下書き → 担当者が「送信」。remindTest = 試験モード (件名 [test] · 宛先 = エンジン remind.json send_mode.to 1 件だけ)。
-     11/24 の実際の送信への切り替えは 管理者の確認の後 (この版には 実際の宛先へ送るコードが無い — remindTest: false にすると 送信ボタンが消えるだけ) */
+     v0.3.37 (R9K) から 本番送信は remindLive + エンジン send_mode で決まる (今は 本番)。remindTest は エンジンが send_mode.test: true の時 (試験の時) だけ効く */
   remind: true,
   remindTest: true,
   /* v0.3.37 (R9K Part B-0 · 決定 #270): 本番送信 — エンジン remind.json send_mode {test: false, live: true} の時だけ 「送信」 が出る
