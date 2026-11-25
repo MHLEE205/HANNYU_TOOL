@@ -7,7 +7,7 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.77',
+  version: '0.3.78',
   date: '2026-11-25',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
@@ -91,9 +91,12 @@ C01.CUSTOMS = {
   domesticPrefix: 'L',
   /* v0.3.76 (R12Y37 · #380 ③ Part 3B): 写真 · 搬入票 を zip → 会社の SharePoint (PHOTO_V2/_customs_share/{IV}/{時刻}/) →
      「リンクを知っている全員」 · 見るだけ · shareDays 日 のリンクを本文に入れて送る (zip はエンジンが 7 日後に消す · 送付の記録にあるものだけ)。
-     'off' = 出さない · 'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · 件名 [test]) · 'on' = 実際の送付 (rpa@ 試験メールの確認の後) */
-  shareLink: 'admin_test',
-  shareDays: 7
+     'off' = 出さない · 'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · 件名 [test]) · 'on' = 実際の送付
+     v0.3.78 (R12Y40 · #384 · 11/25 決定 D-220 (가)): 'on' = 追加書類の要る通関業者は 全員 既定で 下書きで保存 · 送信 とも リンク入り ·
+     リンクを作れない (「全員」 の範囲にならない · 置けない · shareTimeoutSec 秒を超えた) = 止めずに 0.3.76 の動き (PDF だけ + Outlook で添付) · _actions customs_share_error */
+  shareLink: 'on',
+  shareDays: 7,
+  shareTimeoutSec: 180
 };
 
 /* v0.3.37 (R9K Part A-1 · 決定 #263 · #264): 催促 送信直前の確認 — エンジン notify/remind.guard と同じ決まり (エンジンが下書きに付けた allow を使う)。

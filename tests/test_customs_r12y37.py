@@ -10,7 +10,7 @@
  R8 엔진이 본 메일 (iv.customs_mail · test 아님) = 머리줄 「✓ 通関書類 送付済」 · [test] 메일 = 아님
  R9 링크 (관리자 시험): 관리자 아님 = 체크 없음 · 관리자 = 체크 → 시험 모드 · zip 2 (PHOTO · 搬入票) → _customs_share/{IV}/{時刻}/ · createLink anonymous · view · 7 일 →
     본문 링크 + 「まで有効」 · 받는 사람 = 나 1명 · [test] · 기록 share (item id · 경로 · 크기 · 장수) · zip 안 = CT 폴더 + 사진 수 = 목록 · 写真なしCT 표시
- R10 링크 범위가 anonymous 아님 = 보내지 않음 (send 0) · 오류 문구
+ R10 링크 범위가 anonymous 아님 = 보내지 않음 (send 0) · v0.3.78: 노랑 「リンクを作れませんでした」 (0.3.76 동작으로)
  R11 shareLink 'off' = 관리자 체크 없음
 사용: python tests/test_customs_r12y37.py [--shots 폴더]"""
 import argparse
@@ -194,8 +194,9 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.77", page.title() == "LEENAI C-01 搬入票 v0.3.77", page.title())
-            ok("설정: shareLink = admin_test · shareDays 7 · zipStore 있음", page.evaluate("C01.CUSTOMS.shareLink === 'admin_test' && C01.CUSTOMS.shareDays === 7 && typeof C01.zipStore === 'function'"))
+            ok("탭 제목 v0.3.78", page.title() == "LEENAI C-01 搬入票 v0.3.78", page.title())
+            ok("설정: shareLink = on (v0.3.78 · #384) · shareDays 7 · zipStore 있음", page.evaluate("C01.CUSTOMS.shareLink === 'on' && C01.CUSTOMS.shareDays === 7 && typeof C01.zipStore === 'function'"))
+            page.evaluate("C01.CUSTOMS.shareLink = 'admin_test'")     # 아래 R1~R11 = 0.3.76 의 관리자 시험 길 그대로 (on 은 tests/test_customs_r12y40.py)
             page.evaluate("C01.CUSTOMS.sendTest = true")
             page.evaluate(TGR.STUB, staff)
             page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")
@@ -369,9 +370,12 @@ def main():
             page.check("[data-csharetest]")
             page.wait_for_timeout(200)
             page.click("[data-csendgo]")
-            page.wait_for_selector("[data-csenderr]", timeout=30000)
-            ok("R10 범위 organization = send 0 · 오류 「リンクを知っている全員」 · zip 남음 알림", mail.sends == 0 and "リンクを知っている全員" in page.locator("[data-csenderr]").inner_text()
-               and "zip は SharePoint に残っている場合があります" in page.locator("[data-csenderr]").inner_text(), page.locator("[data-csenderr]").inner_text())
+            page.wait_for_selector("[data-creq='sharefail']", timeout=30000)
+            # v0.3.78 (R12Y40 · #384): 링크 못 만듦 = 보내지 않고 0.3.76 동작 (노랑 「リンクを作れませんでした」 + 「追加書類は別に送ります」) · 이유에 「リンクを知っている全員」
+            ok("R10 범위 organization = send 0 · 노랑 「リンクを作れませんでした」 (이유 「リンクを知っている全員」) · 「追加書類は別に送ります」 다시 나옴",
+               mail.sends == 0 and "写真・搬入票のリンクを作れませんでした。Outlook で添付してください" in page.locator("[data-creq='sharefail']").inner_text()
+               and "リンクを知っている全員" in page.locator("[data-creq='sharefail']").inner_text() and page.locator("[data-cextra]").count() == 1,
+               page.locator("[data-creq='sharefail']").inner_text())
             close()
             page.evaluate("() => { const e = document.getElementById('c01-cerr'); if (e) e.remove(); }")
             # R11 off

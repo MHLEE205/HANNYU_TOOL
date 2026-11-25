@@ -1,0 +1,409 @@
+# ✦ Powered by LEENAI Automation System — v0.3.78 (R12Y40 · #383 · #384) 통관 송부 「下書きで保存」 링크 · 링크 실전 (shareLink on) · 링크 못 만듦 = 0.3.76 동작 · 宛先 (가장 새 메일이 우리 쪽)
+"""Playwright · 가명 fixtures · 가짜 Graph · 가짜 D-03 · 가짜 SharePoint (실제 메일 · SharePoint · COMPASS 호출 0). 확인:
+ L1 'on' · 관리자 아님 · 추가 필요 = 링크 안내 (「写真 n 枚・搬入票 n 件 · リンク有効 m/d まで」) · 관리자 체크 없음 · 送信 가능 · 시험 띠 0
+ L2 下書きで保存 (on) = zip 2 → createLink (anonymous · view · 7 일) → createReplyAll → PATCH (본문 링크 2 · 받는 사람 = 실제) → 첨부 → 다시 읽기 → webLink · send 0 ·
+    _actions customs_draft share (item id · url · 장수) · test false · 확인 창 「写真 n 枚・搬入票 n 件 · リンク有効」 · 완료 상자 링크 줄
+ L3 送信 (on) = send 1 · 받는 사람 = 실제 · 본문 링크 · customs_sent share
+ L4 下書き · 링크 범위 organization = 下書き 그대로 (PDF 만 · 링크 0) · customs_share_error (draft · link) · customs_draft share_error · 노랑 「リンクを作れませんでした」
+ L5 送信 · 링크 범위 organization = send 0 · customs_share_error (send) · 노랑 + 「追加書類は別に送ります」 → 체크 → send 1 (링크 0 · extra_ack)
+ L6 시간 초과 (shareTimeoutSec 아주 작음) = 下書き 그대로 (PDF 만) · 오류 「時間切れ」 기록
+ L7 사진 0 (미리 앎) = 노랑 「リンクを作れませんでした」 (写真がありません) · 下書き = PDF 만 · customs_share_error (precheck) · 올림 0
+ L8 LOTOS (추가 없음) = 링크 안내 0 · 올림 0
+ L9 admin_test · 관리자 체크 = 下書き 막지 않음 · 下書き = 받는 사람 실제 · [test] 아님 · 링크 · 확인 창 「下書きのみ · 送信は Outlook で」
+ W1 가장 새 메일 = 통관업자 (지금과 같음) · W2 가장 새 메일 = 우리 직원 (To = 그 메일 To · 우리 쪽 CC 만) ·
+ W3 우리 직원끼리 FW 만 (그 앞 통관업자 메일 기준) · W4 통관업자 CC 만 있던 우리 RE · W5 통관업자가 To 를 바꿔 답함 (우리 직원 To = 노랑) ·
+ W6 사외 0 = 「宛先を確認しました」 필수 + 노랑 「宛先に社内の人が入っています」
+사용: python tests/test_customs_r12y40.py [--shots 폴더]"""
+import argparse
+import base64
+import json
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_graph as TGR   # noqa: E402
+import test_customs as TC  # noqa: E402
+import test_customs_r12y37 as T37  # noqa: E402
+
+TOOL = Path(__file__).resolve().parent.parent
+RES = {"checks": [], "console_errors": []}
+DRIVE = TGR.DRIVE
+OURS = TC.OURS
+ME = TC.ME
+IV = TC.IV
+BKG = TC.BKG
+BR_A, BR_B = "broker.a@broker.invalid", "broker.b@broker.invalid"
+ST_B, ST_Z, RCP = "staff.b@" + OURS, "staff.z@" + OURS, "rcp@" + OURS
+REQ = T37.REQ
+
+
+def ok(name, cond, detail=""):
+    RES["checks"].append({"name": name, "ok": bool(cond), "detail": str(detail)[:300]})
+    print(("OK  " if cond else "NG  ") + name + (f" — {detail}" if detail and not cond else ""), flush=True)
+
+
+class Mail(T37.Mail):
+    """대화를 바꿀 수 있는 가짜 메일함 (conv = [(id, from, to, cc, at)] · 첫 줄 = ①)"""
+    conv = None
+
+    def msgs(self):
+        if not self.conv:
+            return super().msgs()
+        r = lambda a: {"emailAddress": {"address": a, "name": a.split("@")[0].upper()}}
+        out = []
+        for i, (mid, frm, to, cc, at) in enumerate(self.conv):
+            subj = (f"新規通関依頼:BKG#{BKG}, CUT11/10 (TOKYO TO TEST)" if i == 0 else f"RE: 新規通関依頼:BKG#{BKG}, CUT11/10 (TOKYO TO TEST)")
+            out.append({"id": mid, "subject": subj, "conversationId": "CONV1", "sentDateTime": at, "receivedDateTime": at, "isDraft": False,
+                        "from": r(frm), "toRecipients": [r(x) for x in to], "ccRecipients": [r(x) for x in cc], "internetMessageId": "<" + mid + ">",
+                        "bodyPreview": "お疲れ様です。" if frm.endswith("@" + OURS) else "いつもお世話になっております。"})
+        return out
+
+
+S1 = ("M1", ME, [BR_A], [ST_B], "2026-11-05T01:00:00Z")
+R1 = ("M2", BR_A, [ME], [BR_B, ST_B], "2026-11-05T03:00:00Z")
+CONVS = {
+    "W1": [S1, R1],
+    "W2": [S1, R1, ("M3", ST_Z, [BR_A], [BR_B, RCP], "2026-11-05T05:00:00Z")],
+    "W3": [S1, R1, ("M3", ST_Z, [ST_B], [], "2026-11-05T05:00:00Z")],
+    "W4": [S1, R1, ("M3", ST_Z, [ST_B], [BR_A], "2026-11-05T05:00:00Z")],
+    "W5": [S1, ("M2", BR_B, [ST_B], [ME], "2026-11-05T03:00:00Z")],
+    "W6": [("M1", ME, [ST_B], [], "2026-11-05T01:00:00Z"), ("M3", ST_B, [ST_Z], [RCP], "2026-11-05T05:00:00Z")],
+}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--shots")
+    a = ap.parse_args()
+    shots = Path(a.shots) if a.shots else Path(tempfile.mkdtemp(prefix="c01_r12y40_shots_"))
+    shots.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="c01_r12y40_"))
+    root = tmp / "HANNYU_TOOL"
+    shutil.copytree(TOOL / "fixtures", root)
+    staff = json.loads((root / "_masters" / "pol_staff.json").read_text(encoding="utf-8"))
+    jp = root / "_data" / "jikkyou.json"
+    jd = json.loads(jp.read_text(encoding="utf-8"))
+    t4 = next(x for x in jd["ivs"] if x["iv_no"] == IV)
+    used = {r["slot_guid"] for r in t4["rows"] if r.get("slot_guid")}
+    free = [x["slot_guid"] for x in t4["slots"] if x["slot_guid"] not in used]
+    for r in t4["rows"]:
+        if not r.get("slot_guid"):
+            r["slot_guid"] = free.pop(0)
+        r["status"] = "自動OK"; r["engine_status"] = "自動OK"; r["reasons"] = []; r["reason_text"] = ""
+    t4["mail_missing"] = []
+    t4["compass_input"] = [{"action_id": "acompasst4", "by": ME, "at": "2026-11-08T09:00:00+09:00", "value": {"cells": []}}]
+    jp.write_text(json.dumps(jd, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    containers = [{"ct": r["ct"], "seal": r["seal"], "nw": r["n_w"], "tw": r["t_w"], "bales": r["bales"]} for r in t4["rows"]]
+    pj = root / "_data" / "photos" / f"{IV}.json"
+    ph = json.loads(pj.read_text(encoding="utf-8"))
+    cid_rows = {r.get("container_id") for r in t4["rows"]}
+    ph_cs = [c for c in ph["containers"] if c["container_id"] in cid_rows]
+    n_photos = sum(len(c["photos"]) for c in ph_cs)
+    n_docs = len(ph.get("docs") or [])
+    pdfp = tmp / "x.pdf"
+    TGR.make_pdf(pdfp)
+    pdf_b64 = base64.b64encode(pdfp.read_bytes()).decode()
+    port = TGR.free_port()
+    srv = subprocess.Popen([sys.executable, str(TOOL / "tools" / "serve_local.py"), "--root", str(TOOL / "fixtures"), "--actions", str(tmp / "local_actions"),
+                            "--port", str(port), "--today", "2026-11-08"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    mail = Mail()
+    share = T37.Share()
+    sp = TGR.make_handler(root)
+    pre = f"/v1.0/drives/{DRIVE}/root:/{TGR.SP}/"
+
+    def graph(route, request):
+        if "/v1.0/me/" in request.url:
+            return mail.handle(route, request)
+        path = unquote(urlparse(request.url).path)
+        J = lambda st, b: route.fulfill(status=st, body=json.dumps(b), headers={"Content-Type": "application/json"})
+        if request.method == "POST" and path.startswith(pre + "_customs_share/") and path.endswith(":/createUploadSession"):
+            rel = path[len(pre):-len(":/createUploadSession")]
+            share.sessions.append(rel)
+            return J(200, {"uploadUrl": "https://upload.example.invalid/s/" + str(len(share.sessions))})
+        if request.method == "POST" and path.startswith(f"/v1.0/drives/{DRIVE}/items/") and path.endswith("/createLink"):
+            iid = path.split("/")[-2]
+            b = json.loads(request.post_data or "{}")
+            share.links.append((iid, b))
+            return J(200, {"id": "perm-" + iid, "link": {"scope": share.scope, "type": b.get("type"), "webUrl": "https://share.example.invalid/" + iid},
+                           "expirationDateTime": b.get("expirationDateTime")})
+        return sp(route, request)
+
+    up_buf = {}
+
+    def upload(route, request):
+        i = int(request.url.rsplit("/", 1)[-1])
+        rel = share.sessions[i - 1]
+        rng = request.headers.get("content-range", "")
+        a0, rest = rng.replace("bytes ", "").split("-")
+        b1, total = rest.split("/")
+        buf = up_buf.setdefault(rel, bytearray())
+        if int(a0) != len(buf):
+            return route.fulfill(status=416, body="{}")
+        buf += request.post_data_buffer or b""
+        if len(buf) < int(total):
+            return route.fulfill(status=202, body=json.dumps({"nextExpectedRanges": [f"{len(buf)}-"]}), headers={"Content-Type": "application/json"})
+        share.files[rel] = bytes(buf)
+        share.n += 1
+        return route.fulfill(status=201, body=json.dumps({"id": f"ITEM{share.n}", "name": rel.split("/")[-1], "size": len(buf)}), headers={"Content-Type": "application/json"})
+
+    def actions(kind):
+        return [x for x in (json.loads(f.read_text(encoding="utf-8")) for f in (root / "_actions").rglob("*.json")) if x.get("action") == kind]
+
+    try:
+        for _ in range(50):
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        with sync_playwright() as p:
+            br = p.chromium.launch()
+            ctx = br.new_context(viewport={"width": 1440, "height": 1000})
+            page = ctx.new_page()
+            page.on("console", lambda m: RES["console_errors"].append(m.text) if m.type == "error" else None)
+            page.on("pageerror", lambda e: RES["console_errors"].append(f"pageerror {e}"))
+            dlg = []
+            page.on("dialog", lambda d: (dlg.append(d.message), d.accept()))
+            page.route("https://graph.microsoft.com/**", graph)
+            page.route("https://upload.example.invalid/**", upload)
+            page.route(f"http://127.0.0.1:{port}/__d03fake.html*", lambda r: r.fulfill(status=200, body=TC.fake_d03(pdf_b64, containers), headers={"Content-Type": "text/html; charset=utf-8"}))
+
+            def dvx(r):
+                if "crcf9_container_informations" in r.request.url:
+                    cs = [{"crcf9_container_no": f"TSTU{i:07d}", "crcf9_type": "45GP", "_crcf9_form_value": "64f45d9f-383c-f011-8c4e-6045bd62e122"} for i in range(3)]
+                    return r.fulfill(status=200, body=json.dumps({"value": cs}), headers={"Content-Type": "application/json"})
+                if "cr49f_s_is" in r.request.url:
+                    return r.fulfill(status=500, body="{}")
+                return r.fulfill(status=200, body=json.dumps({"value": [{"_cr49f_sale_contract_id_value": "SC1"}], "_cr49f_buyer_id_value": "BUYER-T"}),
+                                 headers={"Content-Type": "application/json"})
+            page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
+            page.goto(f"http://127.0.0.1:{port}/")
+            page.wait_for_selector("#ln-splash", timeout=20000)
+            ok("탭 제목 v0.3.78", page.title() == "LEENAI C-01 搬入票 v0.3.78", page.title())
+            ok("설정: shareLink on · sendTest false · shareTimeoutSec 180", page.evaluate("C01.CUSTOMS.shareLink === 'on' && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.shareTimeoutSec === 180"))
+            page.evaluate(TGR.STUB, staff)
+            page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")
+            page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; C01.app.start(new C01.sources.Graph())")
+            page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
+
+            def openw(conv=None):
+                mail.reset(s1=True)
+                mail.conv = conv
+                share.reset()
+                up_buf.clear()
+                page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
+                page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
+
+            def ready():
+                page.select_option("[data-cbl]", "waybill")
+                page.wait_for_function("() => !document.querySelector('.c01-customs .c01-cstep')", timeout=15000)
+                if page.locator("[data-cack]").count():
+                    page.check("[data-cack]")
+                if page.locator("[data-cagain]").count():
+                    page.check("[data-cagain]")
+                t = page.locator("[data-cbody]").input_value().replace("（通関業者の会社名）", "TEST BROKER CORPORATION").replace("（担当者名）", "BROKERA")
+                page.fill("[data-cbody]", t)
+                page.wait_for_timeout(100)
+
+            def close():
+                if page.locator(".c01-customs [data-close]").count():
+                    page.click(".c01-customs [data-close]")
+                    page.wait_for_timeout(200)
+
+            def clean():
+                page.evaluate("""(iv) => { const A = C01.app._api(); delete A.ivById(iv).customs_mail; A.S.mine = []; A.render(); }""", IV)
+                for f in (root / "_actions").rglob("*.json"):
+                    f.unlink()
+
+            def rcp(P):
+                return ([x["emailAddress"]["address"] for x in (P or {}).get("toRecipients", [])], [x["emailAddress"]["address"] for x in (P or {}).get("ccRecipients", [])])
+
+            page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", REQ)
+            # L1
+            openw(); ready()
+            t = page.locator("[data-creq='share']").inner_text() if page.locator("[data-creq='share']").count() else ""
+            sumt = page.locator("[data-csharesum]").inner_text() if page.locator("[data-csharesum]").count() else ""
+            ok("L1 on · 관리자 아님 = 링크 안내 · 「写真 n 枚・搬入票 n 件 · リンク有効 m/d まで」", "リンク で送ります" in t and f"写真 {n_photos} 枚・搬入票 {n_docs} 件 · リンク有効 " in sumt and sumt.endswith(" まで"), [t, sumt])
+            ok("L1 관리자 체크 없음 · 시험 띠 0 · 실제 띠 · 送信 가능 (추가 체크 없이)", page.locator("[data-csharetest]").count() == 0 and page.locator("[data-ctrial]").count() == 0
+               and page.locator("[data-clive]").count() == 1 and page.locator("[data-csendgo]").is_enabled() and page.locator("[data-cextra]").count() == 0, page.evaluate("C01.customs._sendBlockers()"))
+            page.screenshot(path=str(shots / "l1_on.png"), full_page=False)
+            # L2 下書き + 링크
+            n_d = len(dlg)
+            page.click("[data-cdraftgo]")
+            page.wait_for_selector("[data-cdraftok]", timeout=30000)
+            P = mail.patch or {}
+            html = P.get("body", {}).get("content", "")
+            to, cc = rcp(P)
+            ok("L2 확인 창 = 下書き · 「写真 n 枚・搬入票 n 件 · リンク有効」 · Outlook 添付 안내 없음", "下書き に保存" in dlg[n_d] and f"写真 {n_photos} 枚・搬入票 {n_docs} 件 · リンク有効" in dlg[n_d]
+               and "を添付してから送信" not in dlg[n_d], dlg[n_d:])
+            ok("L2 올림 2 · createLink anonymous · view · 7 일", len(share.sessions) == 2 and [s.split("/")[-1] for s in share.sessions] == ["PHOTO.zip", "搬入票.zip"]
+               and len(share.links) == 2 and all(b.get("scope") == "anonymous" and b.get("type") == "view" for _, b in share.links), share.sessions)
+            ok("L2 send 0 · createReplyAll → PATCH → 첨부 → webLink · 받는 사람 = 실제 (통관업자) · 제목 [test] 아님", mail.sends == 0 and to == [BR_A] and cc == [BR_B, ST_B]
+               and not str(P.get("subject", "")).startswith("[test]") and any("webLink" in c for c in mail.calls), [to, cc, P.get("subject")])
+            ok("L2 본문 = 「写真・搬入票は下記リンクからダウンロードしてください（m/d まで有効）」 + 링크 2 (인용 앞)", "写真・搬入票は下記リンクからダウンロードしてください（" in html and "まで有効）" in html
+               and "https://share.example.invalid/ITEM1" in html and "https://share.example.invalid/ITEM2" in html and html.index("share.example.invalid") < html.index("QUOTED"), html[:300])
+            cd = actions("customs_draft")
+            v = cd[0]["value"] if cd else {}
+            sh = v.get("share") or {}
+            ok("L2 _actions customs_draft · test false · share (sp · 파일 2 · item id · url · 장수 · 기한) · to_how reply_all", len(cd) == 1 and v.get("test") is False and sh.get("place") == "sp"
+               and [f["name"] for f in sh.get("files", [])] == ["PHOTO.zip", "搬入票.zip"] and sh["files"][0]["item_id"] == "ITEM1" and sh["files"][0]["url"] == "https://share.example.invalid/ITEM1"
+               and sh["files"][0]["n"] == n_photos and sh.get("days") == 7 and sh.get("expires") and v.get("to_how") == "reply_all" and not actions("customs_sent"), v)
+            ok("L2 완료 상자 = 링크 넣음 줄 · Outlook で開く · 오류 기록 0", page.locator("[data-cdraftshare]").count() == 1 and page.locator("[data-cdraftlink]").count() == 1
+               and not actions("customs_share_error"), page.locator("[data-cdraftok]").inner_text())
+            page.screenshot(path=str(shots / "l2_draft_link.png"), full_page=False)
+            close(); clean()
+            # L3 送信 + 링크
+            openw(); ready()
+            n_d = len(dlg)
+            page.click("[data-csendgo]")
+            page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=30000)
+            page.wait_for_timeout(300)
+            P = mail.patch or {}
+            to, cc = rcp(P)
+            cs = actions("customs_sent")
+            ok("L3 送信 = 실제 · 확인 창 「写真 n 枚」 · send 1 · 받는 사람 실제 · 본문 링크 · customs_sent share 2", "【実際に通関業者へ送ります】" in dlg[n_d] and f"写真 {n_photos} 枚" in dlg[n_d]
+               and mail.sends == 1 and to == [BR_A] and "share.example.invalid/ITEM1" in P.get("body", {}).get("content", "") and len(cs) == 1
+               and len(cs[0]["value"].get("share", {}).get("files", [])) == 2 and cs[0]["value"].get("extra_ack") is None, [dlg[n_d:], to, mail.sends])
+            clean()
+            # L4 下書き · 링크 못 만듦 (organization)
+            openw(); ready()
+            share.scope = "organization"
+            page.click("[data-cdraftgo]")
+            page.wait_for_selector("[data-cdraftok]", timeout=30000)
+            P = mail.patch or {}
+            html = P.get("body", {}).get("content", "")
+            se = actions("customs_share_error")
+            cd = actions("customs_draft")
+            ok("L4 下書き 그대로 (PDF 첨부 1 · 링크 0 · send 0)", mail.sends == 0 and len(mail.atts) == 1 and "share.example.invalid" not in html and "下記リンク" not in html, html[:200])
+            ok("L4 customs_share_error (draft · link · 이유 「リンクを知っている全員」) · customs_draft share_error · share 없음", len(se) == 1 and se[0]["value"]["mode"] == "draft"
+               and se[0]["value"]["stage"] == "link" and "リンクを知っている全員" in se[0]["value"]["msg"] and len(cd) == 1 and "リンクを知っている全員" in cd[0]["value"].get("share_error", "")
+               and not cd[0]["value"].get("share"), [se, cd and cd[0]["value"].get("share_error")])
+            ok("L4 완료 상자 노랑 「リンクを作れませんでした」 · 창 노랑 sharefail + 「追加書類は別に送ります」", page.locator("[data-cdraftsharefail]").count() == 1
+               and page.locator("[data-creq='sharefail']").count() == 1 and page.locator("[data-cextra]").count() == 1, page.locator(".c01-customs").inner_text()[:300])
+            page.screenshot(path=str(shots / "l4_draft_fail.png"), full_page=False)
+            close(); clean()
+            # L5 送信 · 링크 못 만듦 → 0.3.76 동작
+            openw(); ready()
+            share.scope = "organization"
+            page.click("[data-csendgo]")
+            page.wait_for_selector("[data-creq='sharefail']", timeout=30000)
+            se = actions("customs_share_error")
+            ok("L5 send 0 · customs_share_error (send) · 노랑 「写真・搬入票のリンクを作れませんでした。Outlook で添付してください」 · 送信 꺼짐 (체크 전)", mail.sends == 0 and len(se) == 1
+               and se[0]["value"]["mode"] == "send" and "写真・搬入票のリンクを作れませんでした。Outlook で添付してください" in page.locator("[data-creq='sharefail']").inner_text()
+               and page.locator("[data-csendgo]").is_disabled(), page.evaluate("C01.customs._sendBlockers()"))
+            page.check("[data-cextra]")
+            n_up = len(share.sessions)
+            page.click("[data-csendgo]")
+            page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=30000)
+            page.wait_for_timeout(300)
+            cs = actions("customs_sent")
+            ok("L5 체크 → send 1 · 링크 0 (새 올림 0) · customs_sent extra_ack true · share 없음", mail.sends == 1 and len(share.sessions) == n_up and len(cs) == 1
+               and cs[0]["value"].get("extra_ack") is True and not cs[0]["value"].get("share") and "share.example.invalid" not in (mail.patch or {}).get("body", {}).get("content", ""), cs and cs[0]["value"])
+            clean()
+            # L6 시간 초과
+            page.evaluate("C01.CUSTOMS.shareTimeoutSec = 0.001")
+            openw(); ready()
+            page.click("[data-cdraftgo]")
+            page.wait_for_selector("[data-cdraftok]", timeout=30000)
+            se = actions("customs_share_error")
+            ok("L6 시간 초과 = 下書き 그대로 (링크 0 · send 0) · 오류 「時間切れ」 기록", mail.sends == 0 and len(mail.atts) == 1 and "下記リンク" not in (mail.patch or {}).get("body", {}).get("content", "")
+               and len(se) == 1 and "時間切れ" in se[0]["value"]["msg"], se)
+            page.evaluate("C01.CUSTOMS.shareTimeoutSec = 180")
+            close(); clean()
+            page.wait_for_timeout(1500)                    # 시간 초과 뒤에도 돌던 올림이 끝나게
+            # L7 사진 0 (미리 앎)
+            pj2 = root / "_data" / "photos" / f"{IV}.json"
+            ph2 = json.loads(pj2.read_text(encoding="utf-8"))
+            for c in ph2["containers"]:
+                c["photos"] = []
+            pj2.write_text(json.dumps(ph2, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            openw(); ready()
+            t = page.locator("[data-creq='sharefail']").inner_text() if page.locator("[data-creq='sharefail']").count() else ""
+            ok("L7 사진 0 = 노랑 「リンクを作れませんでした」 (写真がありません) · 「追加書類は別に送ります」 · 下書き 기본", "リンクを作れませんでした" in t and "写真がありません" in t
+               and page.locator("[data-cextra]").count() == 1 and "c01-btn-pri" in (page.get_attribute("[data-cdraftgo]", "class") or ""), t)
+            page.click("[data-cdraftgo]")
+            page.wait_for_selector("[data-cdraftok]", timeout=30000)
+            se = actions("customs_share_error")
+            ok("L7 下書き = PDF 만 · 올림 0 · customs_share_error (precheck)", len(share.sessions) == 0 and mail.sends == 0 and len(se) == 1 and se[0]["value"]["stage"] == "precheck", se)
+            close(); clean()
+            pj2.write_text(json.dumps(ph, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            # L8 LOTOS
+            page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", dict(REQ, domains={"broker.invalid": {"broker": "LOTOS", "extra": []}}))
+            openw(); ready()
+            ok("L8 LOTOS = 링크 안내 0 · 노랑 0 · 送信 파랑", page.locator("[data-creq]").count() == 0 and "c01-btn-pri" in (page.get_attribute("[data-csendgo]", "class") or ""))
+            page.click("[data-csendgo]")
+            page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=30000)
+            ok("L8 送信 = 올림 0 · send 1", len(share.sessions) == 0 and mail.sends == 1)
+            clean()
+            page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", REQ)
+            # L9 admin_test · 관리자 下書き
+            page.evaluate("C01.CUSTOMS.shareLink = 'admin_test'; C01.app._api().S.me.admin = true")
+            openw(); ready()
+            page.check("[data-csharetest]")
+            page.wait_for_timeout(200)
+            ok("L9 관리자 체크 = 下書き 막지 않음 · 送信 = [test]", page.locator("[data-cdraftgo]").is_enabled() and page.locator(".c01-csubj").inner_text().startswith("[test] "),
+               page.evaluate("C01.customs._draftBlockers()"))
+            n_d = len(dlg)
+            page.click("[data-cdraftgo]")
+            page.wait_for_selector("[data-cdraftok]", timeout=30000)
+            P = mail.patch or {}
+            to, cc = rcp(P)
+            cd = actions("customs_draft")
+            ok("L9 下書き = 받는 사람 실제 · 제목 [test] 아님 · 링크 · 확인 창 「下書きのみ · 送信は Outlook で」 · send 0", to == [BR_A] and not str(P.get("subject", "")).startswith("[test]")
+               and "下記リンク" in P.get("body", {}).get("content", "") and "下書きのみ · 送信は Outlook で" in dlg[n_d] and mail.sends == 0 and len(cd) == 1
+               and cd[0]["value"].get("share_test") is True and cd[0]["value"].get("test") is False, [to, P.get("subject"), dlg[n_d:]])
+            close(); clean()
+            page.evaluate("C01.CUSTOMS.shareLink = 'on'; C01.app._api().S.me.admin = false")
+            # W1~W6 宛先
+            page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", dict(REQ, domains={"broker.invalid": {"broker": "LOTOS", "extra": []}}))
+            exp = {"W1": ([BR_A], [BR_B, ST_B], "reply_all"), "W2": ([BR_A], [BR_B, RCP], "ours_last"), "W3": ([BR_A], [BR_B, ST_B], "prev_ext"),
+                   "W4": ([BR_A], [BR_B, ST_B], "prev_ext"), "W5": ([BR_B, ST_B], [], "reply_all"), "W6": ([ST_Z], [RCP], "ours_only")}
+            for k in ("W1", "W2", "W3", "W4", "W5", "W6"):
+                openw(CONVS[k]); ready()
+                rc = page.evaluate("C01.customs._recips()")
+                got = ([x["a"] for x in rc["to"]], [x["a"] for x in rc["cc"]], rc.get("how"))
+                yel = page.locator("[data-cours]").count()
+                how_box = page.get_attribute("[data-chow]", "data-chow") if page.locator("[data-chow]").count() else None
+                ok(f"{k} 받는 사람 = {exp[k]}", got == exp[k], got)
+                ok(f"{k} 노랑 「宛先に社内の人が入っています」 = {k in ('W5', 'W6')} · 설명 줄 = {exp[k][2] if exp[k][2] != 'reply_all' else '없음'}",
+                   bool(yel) == (k in ("W5", "W6")) and how_box == (None if exp[k][2] == "reply_all" else exp[k][2]), [yel, how_box])
+                if k == "W2":
+                    page.click("[data-csendgo]")
+                    page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=30000)
+                    page.wait_for_timeout(200)
+                    to, cc = rcp(mail.patch)
+                    cs = actions("customs_sent")
+                    ok("W2 送信 = PATCH 받는 사람 = 창과 같음 (우리 직원 To 0) · createReplyAll 그대로 · to_how", to == [BR_A] and cc == [BR_B, RCP] and mail.sends == 1
+                       and any("createReplyAll" in c for c in mail.calls) and cs and cs[0]["value"].get("to_how") == "ours_last", [to, cc])
+                    clean()
+                    continue
+                if k == "W6":
+                    bl = page.evaluate("C01.customs._sendBlockers()")
+                    ok("W6 「宛先を確認しました」 필수 (道 1 도) · 체크 칸 있음", any("宛先を確認しました" in x for x in bl) and page.locator("[data-cackto]").count() == 1 and page.locator("[data-csendgo]").is_disabled(), bl)
+                    page.check("[data-cackto]")
+                    ok("W6 체크 → 送信 가능", page.locator("[data-csendgo]").is_enabled(), page.evaluate("C01.customs._sendBlockers()"))
+                    page.screenshot(path=str(shots / "w6_ours_only.png"), full_page=False)
+                if k == "W2":
+                    page.screenshot(path=str(shots / "w2_ours_last.png"), full_page=False)
+                close()
+            page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", REQ)
+            errs = [e for e in RES["console_errors"] if "favicon" not in e and "404" not in e and not ("500" in e and "Failed to load resource" in e)]
+            ok("콘솔 오류 0", not errs, errs[:3])
+            br.close()
+    finally:
+        srv.terminate()
+    n_ng = sum(1 for c in RES["checks"] if not c["ok"])
+    print(json.dumps({"checks": len(RES["checks"]), "ng": n_ng, "shots": str(shots)}, ensure_ascii=False))
+    sys.exit(1 if n_ng else 0)
+
+
+if __name__ == "__main__":
+    main()

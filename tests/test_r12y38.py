@@ -1,4 +1,4 @@
-# ✦ Powered by LEENAI Automation System — v0.3.77 (R12Y38 · 결정 #381 · #382) 시험
+# ✦ Powered by LEENAI Automation System — v0.3.78 (R12Y38 · 결정 #381 · #382) 시험
 """Playwright · 가명 fixtures (tools/make_test_data.py) · serve_local (127.0.0.1) — 실제 SharePoint · Graph · COMPASS 호출 0. 확인:
  P2-1 CT 누름 = 사진 탭 · 오른쪽 그 CT 搬入票 (Blob · 원래 탭이 읽음) · 탭 이름 · 주소 = 해시만
  P2-2 搬入票 여러 장 = 위 탭 · 누르면 바뀜 · 「この書類の値」
@@ -130,7 +130,7 @@ def main():
             open_local(page, url)
             page.click("[data-port='all']") if page.locator("[data-port='all']").count() else None
             page.wait_for_timeout(300)
-            ok("판 표시 0.3.77", page.title().endswith("v0.3.77"), page.title())
+            ok("판 표시 0.3.77", page.title().endswith("v0.3.78"), page.title())
 
             # ── P1 표시 ──
             b3 = page.locator(f"tbody[data-iv='{IV}'] tr.c01-row:has-text('{r3['ct']}') [data-info='slot_from_human']")

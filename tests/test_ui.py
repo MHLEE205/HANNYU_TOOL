@@ -4504,7 +4504,7 @@ def r11g_checks(page, root, shots, engine):
     man = {"schema_version": 1, "kind": "manual", **MAN.output()}
     ok("R11G manual.json = 엔진 스키마", SC.errors(man, SC.load("manual")) == [])
     # ① 매뉴얼 버튼 이름 = TOOL 화면 글자 (공개 전 자동 대조 · #305)
-    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "js/customs.js", "js/linkab.js", "js/sidedoc.js", "photo.html"))   # customs.js = v0.3.65 (通関書類送付 버튼) · sidedoc.js = v0.3.77 (⟲ 90° · ⟳ 90° · 180°)
+    src = "".join((TOOL / f).read_text(encoding="utf-8") for f in ("index.html", "js/app.js", "js/photo.js", "js/zoompan.js", "js/compass.js", "js/doc.js", "js/customs.js", "js/linkab.js", "js/sidedoc.js", "photo.html"))   # customs.js = v0.3.65 (通関書類送付 버튼) · sidedoc.js = v0.3.78 (⟲ 90° · ⟳ 90° · 180°)
     miss = [b for b in man["buttons"] if b not in src]
     ok("R11G 매뉴얼 버튼 이름 = TOOL 화면 글자 (" + str(len(man["buttons"])) + "개 · 없음 0)", not miss and len(man["buttons"]) >= 20, miss)
     imiss = [x for x in man["images"] if not (TOOL / "docs" / x).is_file()]
@@ -4699,11 +4699,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.77", page.title() == "LEENAI C-01 搬入票 v0.3.77", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.78", page.title() == "LEENAI C-01 搬入票 v0.3.78", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.77" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.78" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),
