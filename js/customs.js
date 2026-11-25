@@ -40,6 +40,13 @@ C01.customs = (function () {
   function mailSeen(iv) {
     return ((iv && iv.customs_mail) || []).filter(function (x) { return !x.test; }).slice().sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
   }
+  /* v0.3.81 (R12Y52 · #400 後続 · エンジン out_customs_prev_iv): IV 番号が変わった (リブッキング · 同じブッキング) — 前の IV で送った記録 (新しい順) */
+  function prevSent(iv) {
+    return ((iv && iv.customs_prev_iv) || []).slice().sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+  }
+  function prevText(p) {
+    return '前の IV (' + p.iv + ') で ' + api().md(String(p.at).slice(0, 10)) + ' 送付済 · IV 番号が変わりました · 再送が必要か確認';
+  }
   function lastDraft(iv) { return records(iv, 'customs_draft').filter(function (x) { return !x.value.test; })[0] || null; }
   function lastLive(iv) { return records(iv).filter(function (x) { return !x.value.test; })[0] || null; }
   function lastTest(iv) { return records(iv).filter(function (x) { return x.value.test; })[0] || null; }
@@ -85,6 +92,8 @@ C01.customs = (function () {
     var dr = lastDraft(iv);
     var dmark = dr ? ' <small class="c01-cdraftmark" data-cdraftmark title="' + esc('下書きを保存 ' + String(dr.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(dr.by) + ' — Outlook で送ると 送付済 になります') + '">下書き作成済 ' + esc(a.md(String(dr.at).slice(0, 10))) + ' · ' + esc(a.staffName(dr.by)) + '</small>' : '';
     var miss = lacks(g);
+    var pv = prevSent(iv)[0];            /* v0.3.81 (R12Y52): この IV の送付記録 · メールが無く 前の IV で送っていたら 黄色 (二重送付の警告ではない) */
+    if (pv) dmark += ' <small class="c01-cprev" data-cprev title="' + esc(prevText(pv) + ' — ' + String(pv.at).slice(0, 16).replace('T', ' ') + ' · ' + (a.staffName(pv.by) || pv.by)) + '">' + esc(prevText(pv)) + '</small>';
     var tmark = dmark + (t ? ' <small class="c01-ctest" title="' + esc('試験送付 ' + String(t.at).slice(0, 16).replace('T', ' ') + ' · ' + a.staffName(t.by)) + '">試験済 ' + esc(a.md(String(t.at).slice(0, 10))) + '</small>' : '');
     if (miss.length) return '<button class="c01-blocked c01-csend-off" data-csend="' + esc(iv.iv_no) + '" data-csend-off="1" title="' + esc('まだ送れません: ' + miss.join(' · ')) + '">通関書類送付</button>' + tmark;
     return '<button class="c01-btn-pri c01-csend" data-csend="' + esc(iv.iv_no) + '" title="D-03 で IV・PL・SI を作り、① 通関依頼 の宛先へ送ります（送る前に確認窓）">✉ 通関書類送付</button>' + tmark;
@@ -643,6 +652,9 @@ C01.customs = (function () {
     var dr0 = lastDraft(iv);
     if (dr0 && !l && !sentMail.length) h += '<div class="c01-cbox c01-cy" data-cdraftrec><b>下書き作成済</b> ' + esc(String(dr0.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(a.staffName(dr0.by)) +
       ' — まだ送られていません（Outlook の 下書き から送ってください）' + (dr0.value && dr0.value.web_link ? ' <a href="' + esc(dr0.value.web_link) + '" target="_blank" rel="noopener">Outlook で開く</a>' : '') + '</div>';
+    var pv0 = prevSent(iv)[0];
+    if (pv0 && !l && !sentMail.length) h += '<div class="c01-cbox c01-cy" data-cprevbox><b>' + esc(prevText(pv0)) + '</b> — ' + esc(String(pv0.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(a.staffName(pv0.by) || pv0.by) +
+      '（前の IV ' + esc(pv0.iv) + ' の記録 · 通関業者へ 新しい IV 番号で送り直すか確認してください）</div>';      /* v0.3.81 (R12Y52 · #400 後続) */
     if (l || sentMail.length) {
       h += '<div class="c01-cbox c01-cred"><b>送付済み</b> ' + (l ? esc(String(l.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(a.staffName(l.by)) + '（記録）' : '') +
         (sentMail.length ? ' · メール ' + sentMail.length + ' 通（' + esc(String(sentMail[0].at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(sentMail[0].from_name || sentMail[0].from) + '）' : '') +

@@ -12,6 +12,7 @@
     본문 링크 + 「まで有効」 · 받는 사람 = 나 1명 · [test] · 기록 share (item id · 경로 · 크기 · 장수) · zip 안 = CT 폴더 + 사진 수 = 목록 · 写真なしCT 표시
  R10 링크 범위가 anonymous 아님 = 보내지 않음 (send 0) · v0.3.78: 노랑 「リンクを作れませんでした」 (0.3.76 동작으로)
  R11 shareLink 'off' = 관리자 체크 없음
+ R12 (v0.3.81 · R12Y52) 리부킹 옛 IV 송부 (iv.customs_prev_iv) = 머리줄 · 창 노랑 · 送付済 경고 아님 · 새 IV 송부 있으면 노랑 0
 사용: python tests/test_customs_r12y37.py [--shots 폴더]"""
 import argparse
 import base64
@@ -194,7 +195,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.80", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.81", page.title())
             ok("설정: shareLink = on (v0.3.78 · #384) · shareDays 7 · zipStore 있음", page.evaluate("C01.CUSTOMS.shareLink === 'on' && C01.CUSTOMS.shareDays === 7 && typeof C01.zipStore === 'function'"))
             page.evaluate("C01.CUSTOMS.shareLink = 'admin_test'")     # 아래 R1~R11 = 0.3.76 의 관리자 시험 길 그대로 (on 은 tests/test_customs_r12y40.py)
             page.evaluate("C01.CUSTOMS.sendTest = true")
@@ -319,6 +320,26 @@ def main():
             ok("R8 창 = 送付済み 상자 (메일 1통) · 「もう一度送る」", "送付済み" in page.locator(".c01-customs").inner_text() and page.locator("[data-cagain]").count() == 1)
             close()
             page.evaluate("""(iv) => { const A = C01.app._api(); delete A.ivById(iv).customs_mail; A.S.mine = (A.S.mine || []).filter(m => (m.action || m).action !== 'customs_draft'); A.render(); }""", IV)
+            # R12 (v0.3.81 · R12Y52 · #400 후속): 리부킹 = 옛 IV 송부 기록 (iv.customs_prev_iv) → 노랑 (두 번 송부 경고 아님)
+            ok("R12 처음 = 노랑 0 (customs_prev_iv 없음)", page.locator(f'tbody[data-iv="{IV}"] [data-cprev]').count() == 0)
+            page.evaluate("(iv) => { const A = C01.app._api(); A.ivById(iv).customs_prev_iv = [{iv: 'TST0000-OLD', at: '2026-11-07T10:00:00', by: 'staff.a@example.invalid', src: 'mail'}, {iv: 'TST0000-OLD', at: '2026-11-07T10:00:00', by: 'staff.a@example.invalid', src: 'tool'}]; A.render(); }", IV)
+            hd = page.locator(f'tbody[data-iv="{IV}"] .c01-ivhead').inner_text()
+            pv = page.locator(f'tbody[data-iv="{IV}"] [data-cprev]')
+            ok("R12 머리줄 노랑 「前の IV (TST0000-OLD) で 11/07 送付済 · IV 番号が変わりました · 再送が必要か確認」 · 送付済 버튼 아님",
+               pv.count() == 1 and pv.inner_text() == "前の IV (TST0000-OLD) で 11/07 送付済 · IV 番号が変わりました · 再送が必要か確認" and "✓ 通関書類 送付済" not in hd
+               and page.locator(f'tbody[data-iv="{IV}"] [data-csent-mail]').count() == 0, hd)
+            openw(); ready()
+            bx = page.locator("[data-cprevbox]")
+            ok("R12 창 = 노랑 상자 1 · 送付済み 빨강 상자 0 · 「もう一度送る」 0 · 막는 이유에 送付済み 없음",
+               bx.count() == 1 and "IV 番号が変わりました" in bx.inner_text() and page.locator("[data-cagain]").count() == 0
+               and not any("送付済み" in x for x in page.evaluate("C01.customs._sendBlockers()")), page.evaluate("C01.customs._sendBlockers()"))
+            close()
+            page.evaluate("(iv) => { const A = C01.app._api(); A.ivById(iv).customs_mail = [{at: '2026-11-08T12:00:00', from: 'staff.a@example.invalid', test: false}]; A.render(); }", IV)
+            ok("R12 새 IV 로 보낸 메일 있음 = 「✓ 通関書類 送付済」 그대로 · 노랑 0", page.locator(f'tbody[data-iv="{IV}"] [data-csent-mail]').count() == 1 and page.locator(f'tbody[data-iv="{IV}"] [data-cprev]').count() == 0)
+            openw(); ready()
+            ok("R12 창 = 送付済み 빨강 (지금 경고 그대로) · 노랑 상자 0", page.locator("[data-cagain]").count() == 1 and page.locator("[data-cprevbox]").count() == 0)
+            close()
+            page.evaluate("(iv) => { const A = C01.app._api(); delete A.ivById(iv).customs_mail; delete A.ivById(iv).customs_prev_iv; A.render(); }", IV)
             # R9 링크 (관리자 시험)
             page.evaluate("C01.app._api().S.me.admin = true")
             page.evaluate("C01.CUSTOMS.sendTest = false")          # 실제 모드 설정이어도 관리자 시험 = 자기 1명 · [test]
