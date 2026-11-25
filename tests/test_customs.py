@@ -236,7 +236,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.79", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.80", page.title())
             ok("설정: 통관서류 송부 켜짐 · 실제 모드 (sendTest false · v0.3.74 #377) · D-03 주소 = 같은 출처 github.io",
                page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
             page.evaluate("C01.CUSTOMS.sendTest = true")     # 아래 1~20 = 시험 모드 시험 (그대로) · 21 · 22 = 실제 모드

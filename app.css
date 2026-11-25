@@ -568,6 +568,12 @@ body.c01-rdr-on #c01-main { margin-right: 416px; }
 .c01-mtable th, .c01-mtable td { border: 1px solid #ddd; padding: 3px 10px; text-align: left; }
 .c01-mtable td.c01-mdiff { color: #c62828; font-weight: bold; background: #fdecea; }
 .c01-mcheck { display: block; margin: 6px 0; color: #c62828; }
+/* v0.3.80 (R12Y51 · #399): 他の行とまとめる */
+.c01-mplist { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; max-height: 220px; overflow-y: auto; }
+.c01-mpcand { display: block; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; }
+.c01-mpcand.on { border-color: #1e88e5; background: rgba(30, 136, 229, 0.18); }
+.c01-mpmark { color: #2e7d32; }
+.c01-mpwarn { font-weight: bold; }
 .c01-mergebadge { background: #e8f0fe; }
 .c01-modal-merge { max-width: 680px; }
 .c01-modal-merge .c01-mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }

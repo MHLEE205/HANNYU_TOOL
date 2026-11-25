@@ -194,7 +194,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.79", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.80", page.title())
             ok("설정: shareLink = on (v0.3.78 · #384) · shareDays 7 · zipStore 있음", page.evaluate("C01.CUSTOMS.shareLink === 'on' && C01.CUSTOMS.shareDays === 7 && typeof C01.zipStore === 'function'"))
             page.evaluate("C01.CUSTOMS.shareLink = 'admin_test'")     # 아래 R1~R11 = 0.3.76 의 관리자 시험 길 그대로 (on 은 tests/test_customs_r12y40.py)
             page.evaluate("C01.CUSTOMS.sendTest = true")
