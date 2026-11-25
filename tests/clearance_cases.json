@@ -1,0 +1,134 @@
+[
+ {
+  "name": "빈 줄 → 씀",
+  "rec": null,
+  "at": "2026-11-26T01:00:00.000Z",
+  "old": false,
+  "kind": "write",
+  "set": {
+   "tsukan_irai": true,
+   "tsukan_irai_at": "2026-11-26T01:00:00.000Z"
+  }
+ },
+ {
+  "name": "체크 안 함 → 씀",
+  "rec": {
+   "tsukan_irai": false,
+   "tsukan_status": "未",
+   "tsukan_irai_at": "",
+   "updated_by": "x",
+   "updated_at": "2026-11-26T05:00:00.000Z"
+  },
+  "at": "2026-11-26T01:00:00.000Z",
+  "old": false,
+  "kind": "write",
+  "set": {
+   "tsukan_irai": true,
+   "tsukan_irai_at": "2026-11-26T01:00:00.000Z"
+  }
+ },
+ {
+  "name": "사람 체크 · 날짜 빔 → 날짜만",
+  "rec": {
+   "tsukan_irai": true,
+   "tsukan_status": "ED未"
+  },
+  "at": "2026-11-25T01:00:00.000Z",
+  "old": false,
+  "kind": "fill_at",
+  "set": {
+   "tsukan_irai_at": "2026-11-25T01:00:00.000Z"
+  }
+ },
+ {
+  "name": "사람 체크 · 같은 날",
+  "rec": {
+   "tsukan_irai": true,
+   "tsukan_irai_at": "2026-11-25T08:00:00.000Z"
+  },
+  "at": "2026-11-25T01:00:00.000Z",
+  "old": false,
+  "kind": "same",
+  "set": {}
+ },
+ {
+  "name": "사람 체크 · 다른 날 → 그대로",
+  "rec": {
+   "tsukan_irai": true,
+   "tsukan_irai_at": "2026-11-27T08:00:00.000Z"
+  },
+  "at": "2026-11-25T01:00:00.000Z",
+  "old": false,
+  "kind": "human_date",
+  "set": {}
+ },
+ {
+  "name": "사람이 풂 · 송부가 앞",
+  "rec": {
+   "tsukan_irai": false,
+   "tsukan_irai_off_at": "2026-11-26T03:00:00.000Z"
+  },
+  "at": "2026-11-26T01:00:00.000Z",
+  "old": false,
+  "kind": "human_off",
+  "set": {}
+ },
+ {
+  "name": "사람이 풂 · 다시 보냄 → 씀",
+  "rec": {
+   "tsukan_irai": false,
+   "tsukan_irai_off_at": "2026-11-26T03:00:00.000Z"
+  },
+  "at": "2026-11-26T04:00:00.000Z",
+  "old": false,
+  "kind": "write",
+  "set": {
+   "tsukan_irai": true,
+   "tsukan_irai_at": "2026-11-26T04:00:00.000Z"
+  }
+ },
+ {
+  "name": "사람이 풂 · 같은 초 밀리초 뒤",
+  "rec": {
+   "tsukan_irai": false,
+   "tsukan_irai_off_at": "2026-11-26T03:00:00.500Z"
+  },
+  "at": "2026-11-26T03:00:00.000Z",
+  "old": false,
+  "kind": "human_off",
+  "set": {}
+ },
+ {
+  "name": "11/24 전 송부 → 쓰지 않음",
+  "rec": {
+   "tsukan_irai": false
+  },
+  "at": "2026-11-23T10:00:00.000Z",
+  "old": false,
+  "kind": "old",
+  "set": {}
+ },
+ {
+  "name": "JST 11/24 00:30 = UTC 11/23 → 대상",
+  "rec": {
+   "tsukan_irai": false
+  },
+  "at": "2026-11-23T15:30:00.000Z",
+  "old": false,
+  "kind": "write",
+  "set": {
+   "tsukan_irai": true,
+   "tsukan_irai_at": "2026-11-23T15:30:00.000Z"
+  }
+ },
+ {
+  "name": "리부킹 옛 IV → 쓰지 않음",
+  "rec": {
+   "tsukan_irai": false
+  },
+  "at": "2026-11-26T01:00:00.000Z",
+  "old": true,
+  "kind": "rebook_old",
+  "set": {}
+ }
+]

@@ -2,6 +2,13 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.83 (2026-11-26) — R12Y55 (決定 #401 · D-00 要請): 通関依頼済 の自動記録 (影 · エンジン meta.clearance が無い時は 何もしない)
+- 新しい js/clearance.js: 通関書類を送った IV (エンジン iv.customs_done = TOOL の送付 · 職員の 「通関書類送付_{IV}」 メール の早い方) を PORTAL clearance_status.json の records[{IV}] に 「tsukan_irai: true · tsukan_irai_at」 (欄単位 · 読み直し → eTag 条件 PUT · 412 = 読み直して最大 3 回 · updated_by C-01)。
+- 決まり (D-00 R3 回答): 人のチェック済 · 日付が空 = 日付だけ · 日付あり = そのまま · 人が外した (tsukan_irai_off_at) より前の送付 = 書かない · 11/24 前 · リブッキングの前の IV = 書かない。エンジン customs_done.py と同じ例 (tests/clearance_cases.json)。
+- 影 (今): 本番は読むだけ → 「書くもの一覧」 を _actions/clearance_shadow/{日付}/ に (一覧が変わった時 · 書いた時だけ) · 同じ書き方の試験 = D-00 試験用コピー (portal_test/clearance_status_copy.json) にだけ。本番に書くのは C01.CLEARANCE.live と エンジン meta.clearance.mode 'live' の両方 (형님 の決定の後)。
+- 書く時: TOOL を開いた時 · 10 分ごと · 「送信（通関業者へ）」 成功の直後 (試験送信は除く)。js/source.js に 読む · 書く 2 か所だけの関数 (clearancePathOk)。
+- 試験 tests/clearance_node.js (35) · tests/test_clearance.py。
+
 ## 0.3.82 (2026-11-25) — R12Y53: D-223 (リブッキングの 入力固定) 2 つの案の 受け側 (エンジンのデータが無い時は 画面 変化なし)
 - (가) エンジン 行 info INPUT_REBOOK (s3_input_freeze_rebook_release · リブッキングで 固定を外して 新しい枠に置いた行 · 新しい IV の Compass入力 前) がある時:
   行に 青の 「IV変更 · Compass入力 再度必要」 (マウス = 新しい枠は Compass 未入力 · 情報だけ) · IV 見出しに 「IV変更 · Compass入力 再度必要 n」。止めない (状態 · ボタンは今までどおり)。

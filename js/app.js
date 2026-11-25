@@ -5390,6 +5390,7 @@ window.C01 = window.C01 || {};
       render();
       if (S.timer) clearInterval(S.timer);
       S.timer = setInterval(tick, C01.SOURCE.pollMs);
+      if (C01.clearance && graphMode()) C01.clearance.start();          /* v0.3.83 (R12Y55 · #401): 通関依頼済 の記録 (開いた時 · 10 分ごと · エンジン meta.clearance がある時だけ) */
     }).catch(function (e) {
       $('c01-main').innerHTML = '<div class="c01-fatal"><b>データを読めませんでした</b><p>' + esc(e.message) + '</p><p>_data フォルダ (jikkyou.json · queue.json) があるフォルダを選んでください。</p></div>';
     });

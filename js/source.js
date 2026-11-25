@@ -158,7 +158,8 @@ C01.sources = (function () {
 
   /* ── graph (R7A): SharePoint ドキュメント / HANNYU_TOOL (PHOTO_V2) を職員のログイン (LEENAI_COMMON の Graph トークン) で読む・書く ──
      読む: _data/*.json · 写真・原本 (blob URL) · _actions/{日付}/ (一覧 + 中身、eTag が同じなら読み直さない)
-     書く: _actions/{日付}/{action_id}.json だけ (同じ名前があれば書かない = conflictBehavior fail)。ほかの場所への書き込みコード無し */
+     書く: _actions/{日付}/{action_id}.json だけ (同じ名前があれば書かない = conflictBehavior fail)。
+     v0.3.83 (R12Y55): + 通関依頼済 の記録 (_actions/clearance_shadow/) と clearance_status.json (試験用コピー · 本番は live の時だけ) — 下の clearancePathOk */
   var GRAPH = 'https://graph.microsoft.com/v1.0/';
   function Graph() { this.urls = {}; this.acts = {}; }
   function off() { return Promise.reject(new Error('graph モードは無効です (C01.SOURCE.graphEnabled)')); }
@@ -302,6 +303,51 @@ C01.sources = (function () {
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a, null, 1) + '\n' }).then(function (r) {
       if (r.status === 403) throw new Error('SharePoint (' + spName() + ') に書く権限がありません (403)');
       if (!r.ok) throw new Error('送信失敗 (' + r.status + ')');
+      return { file: rel };
+    });
+  };
+  /* v0.3.83 (R12Y55 · 決定 #401): 通関依頼済 の自動記録 (js/clearance.js) — 読む · 書くのは 2 か所だけ:
+     試験用コピー (C01.CLEARANCE.copyPath) と 本番 (livePath · live = true の時だけ · 呼ぶ側も エンジン meta.clearance.mode 'live' を確かめる)。
+     書き方 = If-Match (eTag) 付き PUT (PORTAL v4.10 と同じ) · 412 は呼ぶ側が読み直す。記録 = _actions/clearance_shadow/{日付}/ に新しいファイルだけ */
+  function clearancePathOk(path, live) {
+    var c = C01.CLEARANCE || {};
+    if (!c.enabled || typeof path !== 'string' || !path) return false;
+    if (path === c.copyPath && /\/D-00\/doc_tool_v024\/portal_test\/clearance_status_copy\.json$/.test(path)) return true;
+    return live === true && c.live === true && path === c.livePath;
+  }
+  Graph.prototype._abs = function (path) { return GRAPH + 'drives/' + LEENAI.SP.DRIVE_ID + '/root:/' + enc(path) + ':'; };
+  Graph.prototype.clearanceRead = function (path, live) {
+    var self = this, c = C01.CLEARANCE || {};
+    if (!(clearancePathOk(path, live) || (c.enabled && path === c.livePath))) return Promise.reject(new Error('この場所は読みません'));   /* 本番は 読むだけ なら いつでも */
+    return this._fetch(this._abs(path) + '?$select=id,eTag').then(function (m) {
+      if (!m.ok) throw new Error('読込失敗 ' + m.status);
+      return m.json().then(function (j) {
+        var eTag = j.eTag || '';
+        return self._fetch(self._abs(path) + '/content').then(function (r) {
+          if (!r.ok) throw new Error('読込失敗 ' + r.status);
+          return r.text().then(function (t) {
+            var obj = JSON.parse(t.charCodeAt(0) === 0xfeff ? t.slice(1) : t);
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('clearance_status.json の形が違います');
+            return { obj: obj, eTag: eTag };
+          });
+        });
+      });
+    });
+  };
+  Graph.prototype.clearancePut = function (path, text, eTag, live) {
+    if (!clearancePathOk(path, live)) return Promise.reject(new Error('この場所には書きません'));
+    if (!eTag) return Promise.reject(new Error('eTag がありません (丸ごとの上書きはしません)'));
+    return this._fetch(this._abs(path) + '/content', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': eTag }, body: text })
+      .then(function (r) { return r.status; });
+  };
+  Graph.prototype.writeClearanceShadow = function (rec) {
+    var day = String(rec && rec.at).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return Promise.reject(new Error('記録の日付が不正'));
+    var id = String(rec.at).replace(/[^0-9]/g, '').slice(0, 14) + '_' + Math.random().toString(36).slice(2, 8);
+    var rel = '_actions/clearance_shadow/' + day + '/' + id + '.json';
+    return this._fetch(this._item(rel) + '/content?@microsoft.graph.conflictBehavior=fail',
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec, null, 1) + '\n' }).then(function (r) {
+      if (!r.ok) throw new Error('記録失敗 (' + r.status + ')');
       return { file: rel };
     });
   };

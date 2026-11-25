@@ -7,8 +7,8 @@ window.C01 = window.C01 || {};
 C01.TOOL_INFO = {
   sys: 'C-01',
   name: '搬入票',
-  version: '0.3.82',
-  date: '2026-11-25',
+  version: '0.3.83',
+  date: '2026-11-26',
   desc: '実況表 · 確認・入力 · 写真 · Compass入力 · 催促プレビュー · 通関書類送付（Microsoft 365 でログイン → SharePoint PHOTO_V2 のデータを表示）'
 };
 
@@ -182,4 +182,16 @@ C01.ASK = {
   fixButton: true,
   /* v0.3.57 (R11F · #317): ボタンが無い答え = 「急ぎで依頼」 (CUT 今日・明日 = 赤) · 「改善依頼（一般）」 · 改善依頼の案 = 一般 / 急ぎ · 依頼一覧 区分 — エンジン ask_urgent_request */
   urgentReq: true
+};
+
+/* v0.3.83 (R12Y55 · 決定 #401 · D-00 要請): 通関依頼済 の自動記録 (js/clearance.js) — 送付を確認した IV を PORTAL clearance_status.json に
+   「tsukan_irai: true · tsukan_irai_at」 (欄単位 · eTag · updated_by C-01)。エンジン meta.clearance が無い = 何もしない。
+   影 (今) = 本番は読むだけ → 「書くもの一覧」 を _actions/clearance_shadow に記録 · 試験用コピー (D-00 の portal_test) にだけ書く。
+   live: true は 형님 の決定の後 (エンジン meta.clearance.mode 'live' と 両方) */
+C01.CLEARANCE = {
+  enabled: true,
+  live: false,
+  livePath: '古紙/-. AI 活用/PORTAL/clearance_status.json',
+  copyPath: '古紙/-. AI 活用/D-00/doc_tool_v024/portal_test/clearance_status_copy.json',
+  everyMin: 10
 };

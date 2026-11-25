@@ -1006,6 +1006,7 @@ C01.customs = (function () {
           extra: rq.on ? rq.extra : undefined, extra_ack: rq.extra.length && !share ? !!st.extraAck : undefined,
           share_error: fb ? String(shareWhy()).slice(0, 300) : undefined, share: shareRec(share) } }));
     }).then(function () {
+      if (!test && C01.clearance) C01.clearance.sent(ivNo, new Date().toISOString());   /* v0.3.83 (R12Y55 · #401): 通関依頼済 の記録 (影 = 試験用コピー + 一覧) · 失敗しても送付は終わっている */
       a.toast((test ? '試験送信しました（あなた宛て）' : '送信しました') + ' — ' + ivNo, 'ok');
       st = null; a.closeModal(); a.render();
     }).catch(function (e) {
