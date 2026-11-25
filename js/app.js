@@ -123,7 +123,8 @@ window.C01 = window.C01 || {};
   var IDIFF_WHY = { record: 'Compass入力の記録と、今の行の値・枠が違います', new_doc: 'Compass入力の後で届いた書類・写真の値が、入力した値と違います',
     compass_slot: 'Compass入力の後で、COMPASS ではこの CT が別の枠に入っています',
     merge_undo: 'まとめを元に戻しました — Compass 入力値は そのまま（入力済）',   /* v0.3.67 (R12Y5 · 決定 #365 · エンジン act_merge_undo_keep_freeze) */
-    compass_edited: 'Compass入力の後で、COMPASS の画面で直接 直されています' };   /* v0.3.69 (R12Y9 · #370 · エンジン cycle_input_value_check) */
+    compass_edited: 'Compass入力の後で、COMPASS の画面で直接 直されています',   /* v0.3.69 (R12Y9 · #370 · エンジン cycle_input_value_check) */
+    rebook: 'IV変更 · 入力した枠が 新しいブッキングに無い' };   /* v0.3.82 (R12Y53 · D-223 (나) 受け側 · エンジン out_input_diff_rebook · why rebook) */
   var IDIFF_FIELDS = [['slot', '枠'], ['ct', 'CT番号'], ['seal', 'シール番号'], ['n_w', '正味重量'], ['t_w', '風袋重量'], ['bales', 'ベール数']];
   var FROZEN_LABEL = '入力済';   /* v0.3.60 (R11R · #334): 絞り込みの名前 = 入力済 (自動OK · 確認済 の両方) · 行は 「自動OK ✓入力済」 / 「確認済 ✓入力済」 */
   /* v0.3.60 (R11R · 決定 #334): 自動OK (エンジン = 緑) と 確認済 (人の手 = 青) を 画面全体で分ける — 規則はこの 1 か所だけ。
@@ -153,6 +154,11 @@ window.C01 = window.C01 || {};
     var ts = ok ? new Date(t.getTime() + 9 * 3600 * 1000).toISOString().slice(5, 16).replace('-', '/').replace('T', ' ') : '';
     return '（' + [x.by || '', ts].filter(Boolean).join(' ') + '）';
   }
+  function idiffRebookText(d) {   /* v0.3.82 (R12Y53 · D-223 (나)): 前の IV → 新しい IV (エンジン input_diff.slot.old_iv · new_iv) */
+    var x = Object.keys(d).map(function (f) { return d[f]; }).filter(function (v) { return v && v.why === 'rebook'; })[0];
+    if (!x || !(x.old_iv || x.new_iv)) return '';
+    return '（' + (x.old_iv || '?') + ' → ' + (x.new_iv || '?') + '）';
+  }
   function idiffCompassOnly(q) {   /* v0.3.69 (R12Y9 · #370): 違いが 「COMPASS で直接 直された値」 (why compass_edited) だけのカード */
     var d = q.input_diff || {}, ks = Object.keys(d);
     return ks.length > 0 && ks.every(function (k) { return (d[k] || {}).why === 'compass_edited'; });
@@ -163,7 +169,7 @@ window.C01 = window.C01 || {};
     Object.keys(d).forEach(function (f) { var w = (d[f] || {}).why; if (w && whys.indexOf(w) < 0) whys.push(w); });
     var cur = function (f) { return row ? (f === 'slot' ? row.slot_guid : row[f]) : null; };
     var show = function (f, v) { return f === 'slot' ? idiffSlotText(iv, v) : (v == null || v === '' ? '（空）' : String(v)); };
-    var h = '<div class="c01-hold c01-idiff"><div><span class="k">理由</span> ' + esc(whys.map(function (w) { return (IDIFF_WHY[w] || w) + (w === 'compass_edited' ? idiffWhoText(d) : ''); }).join(' · ') || '入力値と新しい値が違います') + '</div>' +
+    var h = '<div class="c01-hold c01-idiff"><div><span class="k">理由</span> ' + esc(whys.map(function (w) { return (IDIFF_WHY[w] || w) + (w === 'compass_edited' ? idiffWhoText(d) : '') + (w === 'rebook' ? idiffRebookText(d) : ''); }).join(' · ') || '入力値と新しい値が違います') + '</div>' +
       '<table class="c01-same c01-idtab" id="q-idtab"><thead><tr><th></th><th>Compass入力値</th><th>新しい値</th></tr></thead><tbody>';
     IDIFF_FIELDS.forEach(function (fl) {
       var f = fl[0], x = d[f];
@@ -224,6 +230,10 @@ window.C01 = window.C01 || {};
      今日以前は 太字の赤 (旧 実況表と同じ)。予定日は表示だけ — Compass入力 · 判定 · 値の比較には使わない (#103) */
   function slotPlan(iv, guid) { var sl = (iv.slots || []).filter(function (x) { return guid && x.slot_guid === guid; })[0]; return sl && sl.work_date ? sl.work_date : null; }
   /* v0.3.22 (R7V F-2 · 決定 #188): エンジン info 「作業日要確認」 = 枠は作業日なしで決まった行 — 作業日はカードにせず 灰色 「?」 だけ */
+  function rebookHead(iv) {   /* v0.3.82 (R12Y53 · D-223 (가)): IV 見出し — info INPUT_REBOOK の行がある時だけ (無い = 今までどおり) */
+    var n = (iv.rows || []).filter(function (r) { return ((r.info || []).indexOf('INPUT_REBOOK') >= 0); }).length;
+    return n ? '<span class="c01-rbhead" data-rebookhead title="' + esc('IV変更 · 新しい枠は Compass 未入力 → Compass入力 をもう一度してください — ' + n + ' 行（情報だけ · Compass入力 は止めません）') + '">IV変更 · Compass入力 再度必要 ' + n + '</span>' : '';
+  }
   function wdDoubt(r) { return ((r && r.info) || []).filter(function (x) { return String(x).indexOf('作業日要確認') === 0; })[0] || ''; }
   /* v0.3.32 (R8W Part A · 決定 #256): エンジン work_date_src = 'slot_plan' (枠が決まった行の作業日 = 枠の予定作業日) — 値の横に小さく 「予定」 ·
      読んだ作業日 (work_date_read) が違う時はカードに小さく 「読取: MM/DD」 だけ (警告の色なし · 枚数に入らない)。人の値の作業日がある行は今まで通り */
@@ -1048,6 +1058,7 @@ window.C01 = window.C01 || {};
         '<span class="t2">' + (g.onlyUn ? '0/' + g.total + '台 · メール未着' : g.okN + '/' + g.total + '台') + '</span>' +
         (g.overA ? '<span class="c01-overhead" title="' + esc('行が COMPASS の枠 ' + g.total + ' を超える — 枠のない行 ' + g.overA + ' 行 = 間違って作られた行 · 割り当ての間違い · COMPASS の入力漏れの可能性（赤の行）' + wakuWhy(g.iv)) + '">枠外 ' + g.overA + '</span>' : '') +
         (g.overB ? '<span class="c01-wakumi-head" title="' + esc('空き枠はありますが、まだ枠が決まっていない行 ' + g.overB + ' 行（品目 · 営業所などで枠を選べない — 写真 · 書類が届くと決まることがあります。急ぐ時は 「枠変更」 で枠を選んでください）') + '">枠未定 ' + g.overB + '</span>' : '') +
+        rebookHead(iv) +                                          /* v0.3.82 (R12Y53 · D-223 (가) 受け側) */
         '<span class="c01-flex"></span>' +
         (holdOpenN(iv.iv_no, ov) ? '<button class="c01-btn-sub c01-holdlink" data-holdiv="' + esc(iv.iv_no) + '" title="保留中のメールにこの IV の書類らしいファイルがあります（確認・入力「業者・IV 未定」）">候補書類あり (' + holdOpenN(iv.iv_no, ov) + ')</button>' : '') +
         (otherList(iv, ov).length ? '<button class="c01-btn-sub c01-otherct" data-otherct="' + esc(iv.iv_no) + '" title="「他社のコンテナ」にした行（写真・書類をこの IV から外しています · 元に戻せます）">他社のコンテナ ' + otherList(iv, ov).length + '</button>' : '') +
@@ -1547,7 +1558,10 @@ window.C01 = window.C01 || {};
   /* ── #109 行の情報表示 · スロット変更 (全職員 · 入れ替え確認 · _actions に 誰・いつ・前→後 · 元に戻す) ── */
   var INFO_TEXT = { CT_CHECKDIGIT_OVERRIDE: 'チェックディジット不一致を確認して保存（確認済 · 自動OK にしない）',
     AI_GROUP_DIFF: 'AI 区分が異なる — 写真はフォルダ · ファイル名 · 業者ルールでまとめました（AI の写真の区分とは違います · 情報だけ）',
+    INPUT_REBOOK: 'IV変更 · 新しい枠は Compass 未入力 → Compass入力 をもう一度してください（ブッキングの IV 番号が変わり、Compass入力 の固定を外して 新しい枠に置きました · 値はそのまま · 情報だけ）',   /* v0.3.82 (R12Y53 · D-223 (가) 受け側) */
     AUTO_SENDER: '自動推薦発信者（人確認）— 自動推薦（仮登録）の送信元 または 「登録しない」 にした送信元の書類 · 写真がある行です。確認・入力 の 「発信者未登録」 で 業者本人 か確かめてください（それまで 自動OK にしません）' };
+  function rebookRow(r) { return ((r && r.info) || []).indexOf('INPUT_REBOOK') >= 0; }
+  C01.rebookRow = rebookRow;
   function canSlotChange() {
     var R = C01.RULES || {};
     if (R.slotChange === 'all') return true;
@@ -1954,6 +1968,8 @@ window.C01 = window.C01 || {};
     var rs = (r.resend_cand || []).filter(function (f) { return f === 'ct' || f === 'seal'; });
     if (rs.length) out += ' <span class="c01-ibadge c01-rsbadge" data-info="resend_cand" title="' + esc('搬入票は届きましたが、' + rs.map(function (f) { return f === 'ct' ? 'CT番号' : 'シール番号'; }).join(' · ') +
       ' を写真から読めず、ほかの出処もありません — 読める写真の再送をお願いするか、担当者が判断してください（自動では送りません）') + '">再送依頼候補</span>';
+    /* v0.3.82 (R12Y53 · D-223 (가) 受け側 · エンジン s3_input_freeze_rebook_release): info INPUT_REBOOK = リブッキングで固定を外した行 — 新しい枠は Compass 未入力 (情報だけ · 止めない) */
+    if (rebookRow(r)) out += ' <span class="c01-ibadge c01-rbbadge" data-info="input_rebook" title="' + esc(INFO_TEXT.INPUT_REBOOK) + '">IV変更 · Compass入力 再度必要</span>';
     var mg = mergeBadge(r);
     if (mg) out += mg;
     var ib = inspRefBadge(r);
