@@ -236,7 +236,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.78", page.title() == "LEENAI C-01 搬入票 v0.3.78", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.79", page.title())
             ok("설정: 통관서류 송부 켜짐 · 실제 모드 (sendTest false · v0.3.74 #377) · D-03 주소 = 같은 출처 github.io",
                page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
             page.evaluate("C01.CUSTOMS.sendTest = true")     # 아래 1~20 = 시험 모드 시험 (그대로) · 21 · 22 = 실제 모드
@@ -556,12 +556,12 @@ def main():
             ok("16 道 2 표시 = 「① は STAFF C のメールにあります — 新しいメールとして同じ宛先に送ります」", page.locator("[data-croute='s1_shared']").count() == 1
                and "① は STAFF C のメールにあります — 新しいメールとして同じ宛先に送ります" in body, body[:300])
             rc = page.evaluate("C01.customs._recips()")
-            ok("16 받는 사람 = ① 최신 메일 (보낸 사람 + To) · CC (나 빼기) + 담당 직원 CC (기본)", [x["a"] for x in rc["to"]] == ["broker.a@broker.invalid", "staff.c@" + OURS]
-               and [x["a"] for x in rc["cc"]] == ["broker.b@broker.invalid"], rc)
+            ok("16 받는 사람 = ① 최신 메일 (보낸 사람 + To) · To 의 우리 쪽 = CC (v0.3.79 · #385) · CC (나 빼기) + 담당 직원 CC (기본 · 중복 0)", [x["a"] for x in rc["to"]] == ["broker.a@broker.invalid"]
+               and [x["a"] for x in rc["cc"]] == ["staff.c@" + OURS, "broker.b@broker.invalid"], rc)
             page.uncheck("[data-cstaff]")
             rc2 = page.evaluate("C01.customs._recips()")
             page.check("[data-cstaff]")
-            ok("16 담당 직원 CC = 끌 수 있음 (To 에 이미 있으면 그대로 1번)", [x["a"] for x in rc2["cc"]] == ["broker.b@broker.invalid"], rc2)
+            ok("16 담당 직원 CC = 끌 수 있음 (메일 To 에서 이미 CC 로 왔으면 그대로 1번 · v0.3.79)", [x["a"] for x in rc2["cc"]] == ["staff.c@" + OURS, "broker.b@broker.invalid"], rc2)
             ok("16 제목 = [test] 【通関書類送付_IV】RE: {① 제목}", page.locator(".c01-csubj").inner_text() == f"[test] 【通関書類送付_{IV}】RE: 新規通関依頼:BKG#{BKG}, CUT11/10 (KOBE TO TEST)",
                page.locator(".c01-csubj").inner_text())
             ok("16 창 열기만 = 메일 쓰기 0 (POST · PATCH 0)", not any(c.startswith(("POST", "PATCH")) for c in mail.calls), mail.calls)

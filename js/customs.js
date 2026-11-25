@@ -425,7 +425,7 @@ C01.customs = (function () {
     var cc = pick(ccs);
     return { to: to, cc: cc, how: b.how };
   }
-  /* v0.3.78 (R12Y40 · #383 Part 2): 会話の一番新しいメールを 自社 (社内) の人が送った時 — 全員に返信 だと 送った社内の人が To に入る (11/25 形の下書き) →
+  /* v0.3.78 (R12Y40 · #383 Part 2): 会話の一番新しいメールを 自社 (社内) の人が送った時 — 全員に返信 だと 送った社内の人が To に入る (11/25 の下書き) →
      その メールの To · CC をそのまま使う (社内の人は CC だけ)。社外の To が 0 = その前の 社外 (通関業者) のメールを 全員に返信 の形で · それでも 0 = そのまま (「宛先を確認しました」 が要る)。
      how: 'reply_all' (今までどおり) | 'ours_last' | 'prev_ext' | 'ours_only' */
   function ourDom() { return String((C01.CUSTOMS && C01.CUSTOMS.ourDomain) || 'leenearcorp.com').toLowerCase(); }
@@ -433,10 +433,11 @@ C01.customs = (function () {
   function baseRecips(L, conv) {
     var from = L.from ? [{ a: String(L.from).toLowerCase(), n: L.from_name || '' }] : [];
     var lw = function (xs) { return (xs || []).map(function (x) { return { a: String(x.a || '').toLowerCase(), n: x.n || '' }; }); };
-    if (!isOurs(L.from)) return { to: from.concat(lw(L.to)), cc: lw(L.cc), how: 'reply_all' };
     var split = function (to, cc) {
       return { to: to.filter(function (x) { return !isOurs(x.a); }), cc: to.filter(function (x) { return isOurs(x.a); }).concat(cc) };
     };
+    /* v0.3.79 (R12Y42 · #385 ②): 一番新しいメールが 通関業者 でも その To の 社内の人 は CC へ (11/25 NHK の下書き = 通関業者 → 社内の人 To) */
+    if (!isOurs(L.from)) { var r0 = split(from.concat(lw(L.to)), lw(L.cc)); return { to: r0.to, cc: r0.cc, how: 'reply_all' }; }
     var s = split(lw(L.to), lw(L.cc));
     if (s.to.length) return { to: s.to, cc: s.cc, how: 'ours_last' };
     var prev = (conv || []).filter(function (m) { return m && m.id !== L.id && !isOurs(m.from) && String(m.at || '') <= String(L.at || ''); })
@@ -833,7 +834,25 @@ C01.customs = (function () {
       to: rc.to.map(function (x) { return x.a; }), cc: rc.cc.map(function (x) { return x.a; }), forceTest: !forDraft && !!st.shareTest };
   }
   /* 本文 + リンク + (道 2 = ① の引用) */
-  function htmlWithShare(sh) { return bodyHtml(st.body || '') + (sh ? shareHtml(sh) : '') + (st.route === 's1_shared' ? quoteHtml(st.shared.last) : ''); }
+  /* v0.3.79 (R12Y42 · #385 ①): リンクの段落は 署名 · 「✦ Powered by」 の下ではなく 本文の 「宜しくお願い致します。」 のすぐ次 (署名の前) ·
+     あいさつの行が無い本文 = 署名 (---- の行) の前 · 署名も無い = 「✦ Powered by」 の前 · どれも無い = 今までどおり 本文の後 */
+  function shareCut(txt) {
+    var t = String(txt || ''), sig = t.search(/^-{10,}\s*$/m), foot = t.indexOf('✦ Powered by');
+    var end = [sig, foot].filter(function (i) { return i >= 0; }).sort(function (x, y) { return x - y; })[0];
+    var head = end == null ? t : t.slice(0, end), re = /(宜しく|よろしく)お願い(致|いた)します[^\n]*/g, m, cut = -1;
+    while ((m = re.exec(head))) cut = m.index + m[0].length;
+    if (cut >= 0) return cut;
+    if (end != null) return end;
+    return t.length;
+  }
+  function htmlWithShare(sh) {
+    var t = String(st.body || ''), body;
+    if (sh) {
+      var k = shareCut(t), tail = t.slice(k).replace(/^\n/, '');
+      body = bodyHtml(t.slice(0, k)) + shareHtml(sh) + (tail ? bodyHtml(tail) : '');
+    } else body = bodyHtml(t);
+    return body + (st.route === 's1_shared' ? quoteHtml(st.shared.last) : '');
+  }
   function shareRec(sh) {
     return sh ? { place: sh.place, root: sh.root, stamp: sh.stamp, days: sh.days, expires: sh.expires, no_photo_ct: sh.no_photo_ct,
       files: sh.files.map(function (f) { return { name: f.name, item_id: f.item_id, path: f.path, size: f.size, n: f.n, url: f.url, expires: f.expires }; }) } : undefined;
@@ -934,7 +953,7 @@ C01.customs = (function () {
   function shareHtml(sh) {
     var esc = api().esc;
     var label = { 'PHOTO.zip': '写真', '搬入票.zip': '搬入票' };
-    return '<div style="font-family:\'Meiryo\',\'Yu Gothic\',sans-serif;font-size:10.5pt;margin-top:8pt">写真・搬入票は下記リンクからダウンロードしてください（' + esc(sh.until) + ' まで有効）<br>' +
+    return '<div style="font-family:\'Meiryo\',\'Yu Gothic\',sans-serif;font-size:10.5pt;margin-top:8pt;margin-bottom:8pt" data-cshare>写真・搬入票は下記リンクからダウンロードしてください（' + esc(sh.until) + ' まで有効）<br>' +
       sh.files.map(function (f) { return esc(label[f.name] || f.name) + '（' + esc(f.name) + ' · ' + f.n + ' ファイル · ' + esc(mb(f.size)) + '）: <a href="' + esc(f.url) + '">' + esc(f.url) + '</a>'; }).join('<br>') + '</div>';
   }
   function send() {
@@ -1029,7 +1048,7 @@ C01.customs = (function () {
     return '<div class="c01-cpods">' + h + '</div>' + (sub ? '<div class="t2 c01-cpodsub" data-cpodsub>' + esc(sub) + '</div>' : '');
   }
   return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
-    _greeting: greeting, _sigCompany: sigCompany, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
+    _greeting: greeting, _sigCompany: sigCompany, _shareCut: shareCut, _baseRecips: baseRecips, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
     _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
     _draftBlockers: function () { return st ? draftBlockers() : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
 })();

@@ -11,7 +11,7 @@
  L8 LOTOS (추가 없음) = 링크 안내 0 · 올림 0
  L9 admin_test · 관리자 체크 = 下書き 막지 않음 · 下書き = 받는 사람 실제 · [test] 아님 · 링크 · 확인 창 「下書きのみ · 送信は Outlook で」
  W1 가장 새 메일 = 통관업자 (지금과 같음) · W2 가장 새 메일 = 우리 직원 (To = 그 메일 To · 우리 쪽 CC 만) ·
- W3 우리 직원끼리 FW 만 (그 앞 통관업자 메일 기준) · W4 통관업자 CC 만 있던 우리 RE · W5 통관업자가 To 를 바꿔 답함 (우리 직원 To = 노랑) ·
+ W3 우리 직원끼리 FW 만 (그 앞 통관업자 메일 기준) · W4 통관업자 CC 만 있던 우리 RE · W5 통관업자가 To 를 바꿔 답함 (v0.3.79 · #385: 우리 직원 = CC · 노랑 0) ·
  W6 사외 0 = 「宛先を確認しました」 필수 + 노랑 「宛先に社内の人が入っています」
 사용: python tests/test_customs_r12y40.py [--shots 폴더]"""
 import argparse
@@ -187,7 +187,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.78", page.title() == "LEENAI C-01 搬入票 v0.3.78", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.79", page.title())
             ok("설정: shareLink on · sendTest false · shareTimeoutSec 180", page.evaluate("C01.CUSTOMS.shareLink === 'on' && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.shareTimeoutSec === 180"))
             page.evaluate(TGR.STUB, staff)
             page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")
@@ -365,7 +365,7 @@ def main():
             # W1~W6 宛先
             page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", dict(REQ, domains={"broker.invalid": {"broker": "LOTOS", "extra": []}}))
             exp = {"W1": ([BR_A], [BR_B, ST_B], "reply_all"), "W2": ([BR_A], [BR_B, RCP], "ours_last"), "W3": ([BR_A], [BR_B, ST_B], "prev_ext"),
-                   "W4": ([BR_A], [BR_B, ST_B], "prev_ext"), "W5": ([BR_B, ST_B], [], "reply_all"), "W6": ([ST_Z], [RCP], "ours_only")}
+                   "W4": ([BR_A], [BR_B, ST_B], "prev_ext"), "W5": ([BR_B], [ST_B], "reply_all"), "W6": ([ST_Z], [RCP], "ours_only")}
             for k in ("W1", "W2", "W3", "W4", "W5", "W6"):
                 openw(CONVS[k]); ready()
                 rc = page.evaluate("C01.customs._recips()")
@@ -373,8 +373,8 @@ def main():
                 yel = page.locator("[data-cours]").count()
                 how_box = page.get_attribute("[data-chow]", "data-chow") if page.locator("[data-chow]").count() else None
                 ok(f"{k} 받는 사람 = {exp[k]}", got == exp[k], got)
-                ok(f"{k} 노랑 「宛先に社内の人が入っています」 = {k in ('W5', 'W6')} · 설명 줄 = {exp[k][2] if exp[k][2] != 'reply_all' else '없음'}",
-                   bool(yel) == (k in ("W5", "W6")) and how_box == (None if exp[k][2] == "reply_all" else exp[k][2]), [yel, how_box])
+                ok(f"{k} 노랑 「宛先に社内の人が入っています」 = {k == 'W6'} · 설명 줄 = {exp[k][2] if exp[k][2] != 'reply_all' else '없음'}",
+                   bool(yel) == (k == "W6") and how_box == (None if exp[k][2] == "reply_all" else exp[k][2]), [yel, how_box])
                 if k == "W2":
                     page.click("[data-csendgo]")
                     page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=30000)
