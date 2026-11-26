@@ -179,7 +179,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.83", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.84", page.title())
             ok("설정: shareLink on · sendTest false · shareTimeoutSec 180", page.evaluate("C01.CUSTOMS.shareLink === 'on' && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.shareTimeoutSec === 180"))
             page.evaluate(TGR.STUB, staff)
             page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")

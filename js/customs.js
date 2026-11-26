@@ -12,7 +12,9 @@
    ② 「下書きで保存」 = 送信と同じ下書き (宛先 · 件名 · 本文 · PDF を確かめる) を作って 送らない → Outlook で開くリンク · _actions customs_draft · 実況表 「下書き作成済」 →
    その職員の 「通関書類送付_{IV}」 メールをエンジンが見たら 「送付済」 (エンジン iv.customs_mail)。
    ③ (Part 3B · C01.CUSTOMS.shareLink) 写真 · 搬入票 を zip にして 会社の SharePoint (PHOTO_V2/_customs_share) に置き 「リンクを知っている全員」 · 見るだけ · 7 日のリンクを本文に入れて送る —
-   'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · [test]) · 'on' = 実際の送付 (rpa@ 試験メールの確認の後) · 'off' = 出さない */
+   'admin_test' = 管理者の 「写真・搬入票リンクの試験」 だけ (宛先 = 自分 1 人 · [test]) · 'on' = 実際の送付 (rpa@ 試験メールの確認の後) · 'off' = 出さない
+   v0.3.84 (R12Y59 · #404): COMPASS の booking の 「乙仲」 (cr49f_fowarder_id · 押した職員のログインで読むだけ) を 通関業者の表 (customs_broker_req.json) の名前に合わせる —
+   道 3 (提案) = 同じ港 + 同じ乙仲 の宛先だけ (無ければ 表のアドレス · それも無ければ 止める) · 道 1 · 2 = 宛先の通関業者 ≠ 乙仲 なら 赤 + 「宛先を確認しました」 */
 'use strict';
 window.C01 = window.C01 || {};
 
@@ -105,6 +107,59 @@ C01.customs = (function () {
     return LEENAI.auth.token('dataverse').then(function (tok) {
       return fetch(base + '/api/data/v9.2/' + path, { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' } });
     }).then(function (r) { if (!r.ok) throw new Error('COMPASS ' + r.status); return r.json(); });
+  }
+  /* ── v0.3.84 (R12Y59 · #404): COMPASS の booking の 乙仲 (読むだけ) ──
+     state: 'read' (名前あり) | 'blank' (乙仲 空欄) | 'noname' (乙仲 はあるが名前を読めない) | 'error' (booking を読めない) */
+  var BC_NAV = 'cr49f_fowarder_id';
+  function brokerCompass(ivNo) {
+    var q = "cr49f_bookings?$filter=cr49f_invoice_no eq '" + String(ivNo).replace(/'/g, "''") + "'&$select=_cr49f_fowarder_id_value";
+    var first = function (j) { return ((j && j.value) || [])[0] || null; };
+    return dvGet(q + '&$expand=' + BC_NAV + '($select=crcf9_forwarder,crcf9_forwarder_to_email)').then(function (j) {
+      var b = first(j);
+      if (!b) return { state: 'error', why: 'booking なし' };
+      if (!b._cr49f_fowarder_id_value) return { state: 'blank' };
+      var x = b[BC_NAV] || {};
+      var nm = String(x.crcf9_forwarder || '').trim();
+      return nm ? { state: 'read', name: nm, email: String(x.crcf9_forwarder_to_email || '') } : { state: 'noname' };
+    }, function () {
+      return dvGet(q).then(function (j) {
+        var b = first(j);
+        return !b ? { state: 'error', why: 'booking なし' } : b._cr49f_fowarder_id_value ? { state: 'noname' } : { state: 'blank' };
+      }, function (e) { return { state: 'error', why: e.message }; });
+    });
+  }
+  /* 乙仲 の名前 → 通関業者の表の名前 (同じ · 片方が片方を含む · 「/」 で区切った別名 · 株式会社 などを除く) + COMPASS の 乙仲 アドレス → 表 */
+  function normCo(s) {
+    return String(s || '').normalize('NFKC').toLowerCase().replace(/株式会社|有限会社|\(株\)|\(有\)|co\.,?\s*ltd\.?|inc\./g, '').replace(/[\s\u3000・·.,，、]/g, '');
+  }
+  function bcAddrs(bc) { return String((bc && bc.email) || '').split(/[\s,;、，]+/).map(function (x) { return x.trim().toLowerCase(); }).filter(function (x) { return ADDR_RE.test(x); }); }
+  function matchBroker(rq, bc) {
+    var out = [];
+    if (!rq || !bc || bc.state !== 'read') return out;
+    var put = function (b) { if (b && out.indexOf(b) < 0) out.push(b); };
+    var k = normCo(bc.name);
+    (rq.brokers || []).forEach(function (b) {
+      String(b.name || '').split('/').map(normCo).filter(function (x) { return x.length >= 2; }).forEach(function (al) {
+        if (k.length >= 2 && (al === k || al.indexOf(k) >= 0 || k.indexOf(al) >= 0)) put(b.name);
+      });
+    });
+    bcAddrs(bc).forEach(function (ad) { var hit = (rq.addrs || {})[ad] || (rq.domains || {})[domOf(ad)]; if (hit) put(hit.broker); });
+    return out;
+  }
+  /* 確認窓の 乙仲: brokers = 表の名前 (0 = 表で分からない) */
+  function bcNow() {
+    var bc = st && st.bc;
+    if (!bc) return { state: 'none', name: '', brokers: [] };
+    return { state: bc.state, name: bc.name || '', brokers: matchBroker(api().S.customsReq, bc) };
+  }
+  /* 宛先の通関業者 と 乙仲 を比べる — bad = 乙仲 に無い 宛先の通関業者 · noKnown = 宛先の通関業者が表で 1 つも分からない */
+  function bcCheck(rc) {
+    var b = bcNow();
+    if (!st || !st.route || !b.brokers.length) return { on: false, b: b, mismatch: false };
+    var q = reqOf(rc || recips());
+    var bad = q.brokers.filter(function (x) { return b.brokers.indexOf(x) < 0; });
+    var noKnown = !q.brokers.length;
+    return { on: true, b: b, q: q, bad: bad, noKnown: noKnown, mismatch: bad.length > 0 || noKnown };
   }
   /* v0.3.66 (R12Y3 · #366 ①): 販売契約 (SC) を 1 回だけ読み、バイヤーと S/I (POD 1/2/3 · B/L 用 POD · Port of Discharge) を一緒に読む。
      S/I が読めない = si null (確認窓は番号だけ + 黄色 · 送信は止めない — D-03 が PDF に入れた値が正本) */
@@ -298,7 +353,7 @@ C01.customs = (function () {
     if (off) { a.toast('まだ送れません: ' + lacks(g).join(' · '), 'error'); return; }
     st = { iv: ivNo, g: g, step: '準備中', mail: null, sent: [], d03: null, err: [], bl: '', blWhy: '', over: {}, ack: false, again: false, busy: false, body: null, broker: '', person: '',
       si: undefined, nameSrc: null, sendErr: '', route: '', shared: null, prop: null, addStaff: true, editTo: '', editCc: '', ackTo: false,
-      extraAck: false, draftDone: null, shareTest: false, ph: null, shareStep: '' };
+      extraAck: false, draftDone: null, shareTest: false, ph: null, shareStep: '', bc: null, noRouteWhy: '' };
     a.S.modal = { kind: 'customs', iv: ivNo };
     draw();
     var src = a.S.src;
@@ -320,8 +375,10 @@ C01.customs = (function () {
     /* v0.3.76 (R12Y37 · #380 ①): customs_broker_req.json = エンジンの meta.customs_broker_req がある時だけ読む (無い = 案内なし · 今までどおり) */
     var pReq = a.S.customsReq === undefined && a.S.meta && a.S.meta.customs_broker_req ? src.getJson(String(a.S.meta.customs_broker_req)).then(function (x) { a.S.customsReq = x; }, function () { a.S.customsReq = null; }) : Promise.resolve();
     /* v0.3.76 (#380 ③): 写真 · 搬入票 の一覧 (_data/photos/{IV}.json · 枚数 · 大きさ) — リンク送付の時だけ使う */
+    /* v0.3.84 (R12Y59 · #404): COMPASS の 乙仲 (道を決める前に読む) */
+    var pBc = graphOk ? brokerCompass(ivNo).then(function (x) { if (st && st.iv === ivNo) st.bc = x; }) : Promise.resolve();
     var pPh = shareCfg() !== 'off' ? src.getJson('photos/' + ivNo + '.json').then(function (x) { if (st && st.iv === ivNo) st.ph = x; }, function () { if (st && st.iv === ivNo) st.ph = null; }) : Promise.resolve();
-    Promise.all([pMail, pSent, pBl, pFt, pCb, pS1, pReq, pPh]).then(function (r) {
+    Promise.all([pMail, pSent, pBl, pFt, pCb, pS1, pReq, pPh, pBc]).then(function (r) {
       if (!st || st.iv !== ivNo) return;
       st.mail = r[0]; st.sent = r[1] || []; st.buyer = (r[2] || {}).buyer || ''; st.si = (r[2] || {}).si; st.ftBlank = r[3];
       pickRoute(iv);
@@ -378,7 +435,7 @@ C01.customs = (function () {
     if (st.mail) { st.route = 's1_reply'; return; }
     var S = api().S, sh = S.customsS1 && S.customsS1.ivs && S.customsS1.ivs[st.iv];
     if (sh && sh.last) { st.route = 's1_shared'; st.sharedAll = sh; st.convI = convPicked(sh); st.shared = convView(sh, st.convI); return; }
-    var p = proposal(iv, st.buyer);
+    var p = proposal(iv, st.buyer, bcNow().brokers);
     if (p) {
       st.route = 'proposal'; st.prop = p;
       var me = String((S.me || {}).email || '').toLowerCase();
@@ -387,25 +444,46 @@ C01.customs = (function () {
       return;
     }
     st.route = '';
+    var b = bcNow();
+    if (b.brokers.length) st.noRouteWhy = '宛先が分かりません · 乙仲（COMPASS）: ' + b.name;
   }
   /* 「この港へ最近送った宛先」: ① TOOL の送付記録 (試験を除く) で 同じ POL · 同じバイヤー の一番新しいもの → ② 無ければ エンジンの by_pol (同じ POL の一番新しい ① · バイヤーは分からない = 赤) */
-  function proposal(iv, buyer) {
+  /* v0.3.84 (R12Y59 · #404): COMPASS の 乙仲 が表で分かる時 (brokers) = 宛先の通関業者が その乙仲 のものだけ —
+     ① 同じ POL · 同じバイヤー · 同じ乙仲 → ② 同じ POL · 同じ乙仲 (バイヤー問わず) → ③ by_pol (同じ乙仲 の時だけ) → ④ 通関業者の表 · COMPASS の 乙仲 アドレス → ⑤ 無い = null (止める) */
+  function proposal(iv, buyer, brokers) {
     var S = api().S, best = null, pol = String((iv && iv.pol) || '').toUpperCase();
     if (!pol) return null;
     var ad = function (xs) { return (xs || []).map(function (a) { return typeof a === 'string' ? { a: a.toLowerCase(), n: '' } : a; }); };
-    if (buyer) {
+    var B = brokers || [];
+    var fits = function (to, cc) {
+      if (!B.length) return true;
+      var q = reqOf({ to: ad(to), cc: ad(cc) });
+      return q.brokers.length > 0 && q.brokers.every(function (x) { return B.indexOf(x) >= 0; });
+    };
+    var scan = function (sameBuyer, src) {
+      var bs = null;
       ((S.jik && S.jik.ivs) || []).forEach(function (x) {
         if (String(x.pol || '').toUpperCase() !== pol || x.iv_no === iv.iv_no) return;
         records(x).forEach(function (r) {
           var v = r.value;
-          if (v.test || v.buyer_id !== buyer || !(v.to || []).length) return;
-          if (!best || String(r.at) > String(best.at)) best = { at: String(r.at), to: ad(v.to), cc: ad(v.cc), src: 'buyer', iv: x.iv_no };
+          if (v.test || (sameBuyer && v.buyer_id !== buyer) || !(v.to || []).length || !fits(v.to, v.cc)) return;
+          if (!bs || String(r.at) > String(bs.at)) bs = { at: String(r.at), to: ad(v.to), cc: ad(v.cc), src: src, iv: x.iv_no };
         });
       });
-    }
+      return bs;
+    };
+    if (buyer) best = scan(true, 'buyer');
     if (best) return best;
+    if (B.length) { best = scan(false, 'broker'); if (best) return best; }
     var bp = S.customsS1 && S.customsS1.by_pol && S.customsS1.by_pol[pol];
-    if (bp && (bp.to || []).length) return { at: bp.at, to: ad(bp.to), cc: ad(bp.cc), src: 'pol', n: bp.n };
+    if (bp && (bp.to || []).length && fits(bp.to, bp.cc)) return { at: bp.at, to: ad(bp.to), cc: ad(bp.cc), src: 'pol', n: bp.n };
+    if (B.length) {
+      var rq = S.customsReq || {}, seen = {}, tos = [];
+      var add = function (a) { a = String(a || '').toLowerCase(); if (a && !seen[a]) { seen[a] = 1; tos.push({ a: a, n: '' }); } };
+      Object.keys(rq.addrs || {}).forEach(function (a) { if (B.indexOf(rq.addrs[a].broker) >= 0) add(a); });
+      bcAddrs(st && st.bc).forEach(function (a) { var q = reqOf({ to: [{ a: a }], cc: [] }); if (!q.brokers.length || B.indexOf(q.brokers[0]) >= 0) add(a); });
+      if (tos.length) return { at: '', to: tos, cc: [], src: 'table' };
+    }
     return null;
   }
   /* 宛名さがし (brokerGuess) 用 — 道 2 · 3 でも ① と同じ形 */
@@ -593,6 +671,9 @@ C01.customs = (function () {
     if (st.route && !rc.to.length) out.push('宛先がありません');
     /* v0.3.78 (R12Y40 · #383 Part 2): 社外の宛先が会話から見つからない (To = 社内の人だけ) = 道 1 でも 「宛先を確認しました」 が要る */
     if (st.route === 's1_reply' && rc.how === 'ours_only' && !testMode() && !st.ackTo) out.push('宛先を確認して 「宛先を確認しました」 にチェックしてください');
+    /* v0.3.84 (R12Y59 · #404): 宛先の通関業者 ≠ COMPASS の 乙仲 = 「宛先を確認しました」 が要る (止めない · 乙仲の変更 · 書き間違いもある) */
+    var ACK = '宛先を確認して 「宛先を確認しました」 にチェックしてください';
+    if (st.route && bcCheck(rc).mismatch && !st.ackTo && out.indexOf(ACK) < 0) out.push(ACK);
     if (/（通関業者の会社名）|（担当者名）/.test(st.body || '')) out.push('本文の （通関業者の会社名） · （担当者名） を書き換えてください');
     if (/このメールは担当者確認後に送信してください/.test(st.body || '')) out.push('本文に 下書きの案内文 が残っています');
     if ((lastLive(a.ivById(st.iv)) || st.sent.some(function (x) { return !x.test; })) && !st.again) out.push('送付済みです — 再送付する時は 「もう一度送る」 にチェック');
@@ -630,6 +711,22 @@ C01.customs = (function () {
     if (am) return '<div class="c01-camb" data-camb="reply"><b>宛先を確認 — ① のメールが ' + (am.n_s1_conv || (am.convs || []).length) + ' 件あります</b>（会社のメールボックス · 会話ごとに宛先が違います · ここでは あなたのメールの一番新しい ① に返信します）</div>';
     return '';
   }
+  /* v0.3.84 (R12Y59 · #404): COMPASS の 乙仲 と 宛先 — 合う = 灰色 1 行 · 違う = 赤 · 表で分からない = 黄色 */
+  function bcHtml(rc, esc) {
+    var b = bcNow();
+    if (b.state === 'none') return '';
+    if (b.state === 'blank') return '<p class="c01-cy" data-cbc="blank">COMPASS の 乙仲 が空欄です — 宛先の通関業者を確認してください</p>';
+    if (b.state === 'noname' || b.state === 'error') return '<p class="c01-cy" data-cbc="' + b.state + '">COMPASS の 乙仲 を読めません' + (st.bc && st.bc.why ? '（' + esc(st.bc.why) + '）' : '') + ' — 宛先の通関業者を確認してください</p>';
+    if (!b.brokers.length) return '<p class="c01-cy" data-cbc="unknown">乙仲（COMPASS）: ' + esc(b.name) + ' — 通関業者の表に無い名前です（要確認）</p>';
+    var c = bcCheck(rc);
+    if (!c.mismatch) return '<p class="t2" data-cbc="ok">乙仲（COMPASS）: ' + esc(b.name) + ' = 宛先の通関業者 ' + esc(c.q.brokers.join(' · ')) + '</p>';
+    var to = c.noKnown ? (c.q.unknown.length ? '表に無いドメイン ' + c.q.unknown.join(' · ') : '通関業者が分かりません') : c.q.brokers.join(' · ');
+    return '<p class="c01-cr" data-cbc="mismatch"><b>COMPASS の乙仲（' + esc(b.name) + '）と宛先（' + esc(to) + '）が違います</b> — 宛先を確認して 「宛先を確認しました」 にチェックしてください（COMPASS の 乙仲 が違う · 変わった 時もあります）</p>';
+  }
+  function bcRec() {
+    var b = bcNow(), c = bcCheck();
+    return b.state === 'none' ? undefined : { state: b.state, name: b.name, brokers: b.brokers, mismatch: c.mismatch || undefined, to_brokers: c.q ? c.q.brokers : undefined };
+  }
   function draw() {
     var a = api(), esc = a.esc;
     if (!st || !a.S.modal || a.S.modal.kind !== 'customs') return;
@@ -664,14 +761,19 @@ C01.customs = (function () {
     var rc = recips();
     var RH = { s1_reply: '宛先（① 通関依頼 の会話の一番新しいメールに 全員に返信）', s1_shared: '宛先（① の会話と同じ宛先へ 新しいメール · ① を引用）', proposal: '宛先（この港へ最近送った宛先 · 直せます）' };
     h += '<section class="c01-csec" data-croute="' + esc(st.route || (ready ? 'none' : '')) + '"><h4>' + esc(RH[st.route] || '宛先') + '</h4>';
+    if (st.route) h += bcHtml(rc, esc);      /* v0.3.84 (R12Y59 · #404): 乙仲 と 宛先 — 宛先の表 · 確認チェックの前 */
     var addrs = function (xs) { return xs.map(function (x) { return esc(x.n ? x.n + ' <' + x.a + '>' : x.a); }).join('<br>') || '—'; };
     if (!ready && !st.route) {
       h += '<p class="t2">確認中…</p>';
     } else if (!st.route) {
-      h += '<p class="c01-warn2" data-cnoroute>宛先がありません — 送れません（① 通関依頼 が見つからず、この港 ' + esc(iv.pol || '') + ' へ最近送った宛先もありません）。</p>';
+      h += st.noRouteWhy ? '<p class="c01-warn2" data-cnoroute="broker">' + esc(st.noRouteWhy) + ' — 送れません（① 通関依頼 が無く、この港 ' + esc(iv.pol || '') + ' で この乙仲 へ送った宛先も 通関業者の表のアドレスもありません）。</p>'
+        : '<p class="c01-warn2" data-cnoroute>宛先がありません — 送れません（① 通関依頼 が見つからず、この港 ' + esc(iv.pol || '') + ' へ最近送った宛先もありません）。</p>';
     } else if (st.route === 'proposal') {
       var P = st.prop;
-      h += P.src === 'buyer' ? '<p class="c01-cy" data-cprop="buyer">①がありません — 宛先を確認してください（同じ港 · 同じバイヤーへ ' + esc(a.md(String(P.at).slice(0, 10))) + ' に送った宛先）</p>'
+      var bN = bcNow();
+      h += P.src === 'buyer' ? '<p class="c01-cy" data-cprop="buyer">①がありません — 宛先を確認してください（同じ港 · 同じバイヤー' + (bN.brokers.length ? ' · 同じ乙仲' : '') + 'へ ' + esc(a.md(String(P.at).slice(0, 10))) + ' に送った宛先）</p>'
+        : P.src === 'broker' ? '<p class="c01-cy" data-cprop="broker">①がありません — 宛先を確認してください（同じ港 · 同じ乙仲（' + esc(bN.name) + '）へ ' + esc(a.md(String(P.at).slice(0, 10))) + ' に送った宛先 · バイヤーは別）</p>'
+        : P.src === 'table' ? '<p class="c01-cr" data-cprop="table">①がありません — 宛先を必ず確認（乙仲（COMPASS）' + esc(bN.name) + ' の 通関業者の表のアドレス · この港で送った記録はありません）</p>'
         : '<p class="c01-cr" data-cprop="pol">①がありません — 宛先を必ず確認（同じ港 ' + esc(iv.pol || '') + ' の一番新しい ① 通関依頼 ' + esc(a.md(String(P.at).slice(0, 10))) + ' の宛先 · バイヤーは確かめていません）</p>';
       h += '<table class="c01-ctab"><tr><th>To</th><td><textarea class="c01-caddr" data-cedit="to" rows="2">' + esc(st.editTo) + '</textarea></td></tr>' +
         '<tr><th>CC</th><td><textarea class="c01-caddr" data-cedit="cc" rows="3">' + esc(st.editCc) + '</textarea></td></tr></table>' +
@@ -683,8 +785,8 @@ C01.customs = (function () {
         '<tr><th>' + (st.route === 's1_reply' ? '返信先' : '① の最新') + '</th><td class="t2">' + esc(String(L.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(L.from_name || L.from) + ' · 会話 ' + (st.route === 's1_reply' ? st.mail.n_conv : st.shared.n_conv) + ' 通</td></tr></table>';
       if (st.route === 's1_shared' && st.shared.staff) h += '<label class="t2"><input type="checkbox" data-cstaff' + (st.addStaff ? ' checked' : '') + '> 担当の ' + esc(st.shared.staff_name || st.shared.staff) + ' を CC に入れる</label>';
       if (st.route === 's1_shared' && !st.shared.last.body_ok) h += '<p class="c01-warn2">① の本文をまだ読めていません（エンジンの次の周期で読みます）</p>';
-      var needAck = st.route === 's1_shared' || (st.route === 's1_reply' && rc.how === 'ours_only');
-      if (needAck && (!testMode() || !testMode(true))) h += '<br><label class="c01-cack"><input type="checkbox" data-cackto' + (st.ackTo ? ' checked' : '') + '> 宛先を確認しました</label>';
+      var needAck = st.route === 's1_shared' || (st.route === 's1_reply' && rc.how === 'ours_only') || bcCheck(rc).mismatch;
+      if (needAck && (!testMode() || !testMode(true) || bcCheck(rc).mismatch)) h += '<br><label class="c01-cack"><input type="checkbox" data-cackto' + (st.ackTo ? ' checked' : '') + '> 宛先を確認しました</label>';
     }
     if (st.route) {
       /* v0.3.78 (R12Y40 · #383 Part 2): 会話の一番新しいメールが 社内の人から · To に 社内の人 */
@@ -896,7 +998,7 @@ C01.customs = (function () {
       var v = { test: res.test, route: st.route, subject: args.subject, to: res.to, cc: res.cc, to_n: res.to.length, cc_n: res.cc.length, draft_id: res.draft_id, web_link: res.web_link || '',
         internet_message_id: res.internet_message_id || '', file: r.file, pages: r.pages, pdf_sha256: r.sha256, extra: rq.extra, brokers: rq.brokers, req_unknown: rq.unknown,
         broker_dom: st.brokerDom || '', real_to_n: recips().to.length, real_cc_n: recips().cc.length, to_how: recips().how,
-        share: shareRec(share), share_error: shareErr ? shareErr.slice(0, 300) : undefined, share_test: st.shareTest ? true : undefined };
+        share: shareRec(share), share_error: shareErr ? shareErr.slice(0, 300) : undefined, share_test: st.shareTest ? true : undefined, broker_compass: bcRec() };
       return a.writeAction(a.mkAction('customs_draft', { iv: ivNo, ct: null, field: null, source: null, value: v })).then(function () { return res; });
     }).then(function (res) {
       if (!st || st.iv !== ivNo) return;
@@ -1002,7 +1104,7 @@ C01.customs = (function () {
           broker_person: personLine(st.body), name_src: st.nameSrc || null, route: route,
           s1_k: route === 's1_shared' ? st.shared.last.k : undefined, s1_amb: route === 's1_shared' && st.shared.ambiguous ? (st.shared.convs || []).length : undefined,
           s1_conv: route === 's1_shared' && st.shared.ambiguous && st.convI >= 0 ? st.shared.convs[st.convI].conv : undefined, s1_staff: route === 's1_shared' ? st.shared.staff : undefined,
-          prop_src: route === 'proposal' ? st.prop.src : undefined,
+          prop_src: route === 'proposal' ? st.prop.src : undefined, broker_compass: bcRec(),
           extra: rq.on ? rq.extra : undefined, extra_ack: rq.extra.length && !share ? !!st.extraAck : undefined,
           share_error: fb ? String(shareWhy()).slice(0, 300) : undefined, share: shareRec(share) } }));
     }).then(function () {
@@ -1063,5 +1165,5 @@ C01.customs = (function () {
   return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
     _greeting: greeting, _sigCompany: sigCompany, _shareCut: shareCut, _baseRecips: baseRecips, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
     _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
-    _draftBlockers: function () { return st ? draftBlockers() : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
+    _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
 })();

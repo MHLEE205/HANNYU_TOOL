@@ -2,6 +2,12 @@
 
 ✦ Powered by LEENAI Automation System
 
+## 0.3.84 (2026-11-26) — R12Y59 (#404): 通関書類送付 の 宛先 を COMPASS の 「乙仲」 と比べる
+- 確認窓を開いた時 COMPASS の booking の 乙仲 (cr49f_fowarder_id · 名前 · アドレス) を 押した職員のログインで読む (読むだけ) → 通関業者の表 (customs_broker_req.json) の名前に合わせる (同じ名前 · 片方が片方を含む · 「/」 の別名 · COMPASS の 乙仲 アドレス)。
+- 道 3 (① が無い時の提案) = 同じ港 + 同じ乙仲 の宛先だけ: 同じバイヤー → バイヤー問わず → 会社のメールボックスの 同じ港の ① (同じ乙仲の時だけ) → 通関業者の表のアドレス (赤 · 必ず確認) → 無い = 「宛先が分かりません · 乙仲（COMPASS）: ○○」 で止める。宛名 · 追加書類 (写真 · 搬入票) は 選んだ宛先のドメインで (今までどおり)。
+- 道 1 · 2 (① がある) も 宛先の通関業者 ≠ 乙仲 = 赤 「COMPASS の乙仲（○○）と宛先（△△）が違います」 + 「宛先を確認しました」 (止めない · 乙仲の変更 · 書き間違いもある)。乙仲 空欄 · 読めない · 表に無い名前 = 黄色 1 行 (今までどおり送れる)。
+- 送付 · 下書き の記録に broker_compass (state · 名前 · 表の名前 · 違い)。試験 tests/test_customs_r12y59.py。
+
 ## 0.3.83 (2026-11-26) — R12Y55 (決定 #401 · D-00 要請): 通関依頼済 の自動記録 (影 · エンジン meta.clearance が無い時は 何もしない)
 - 新しい js/clearance.js: 通関書類を送った IV (エンジン iv.customs_done = TOOL の送付 · 職員の 「通関書類送付_{IV}」 メール の早い方) を PORTAL clearance_status.json の records[{IV}] に 「tsukan_irai: true · tsukan_irai_at」 (欄単位 · 読み直し → eTag 条件 PUT · 412 = 読み直して最大 3 回 · updated_by C-01)。
 - 決まり (D-00 R3 回答): 人のチェック済 · 日付が空 = 日付だけ · 日付あり = そのまま · 人が外した (tsukan_irai_off_at) より前の送付 = 書かない · 11/24 前 · リブッキングの前の IV = 書かない。エンジン customs_done.py と同じ例 (tests/clearance_cases.json)。
