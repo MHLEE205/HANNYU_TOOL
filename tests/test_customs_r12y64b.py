@@ -116,7 +116,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.87", page.title() == "LEENAI C-01 搬入票 v0.3.87", page.title())
+            ok("탭 제목 v0.3.87", page.title() == "LEENAI C-01 搬入票 v0.3.88", page.title())
             page.evaluate(TGR.STUB, staff)
             page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; C01.CUSTOMS.shareLink = 'off'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; C01.app.start(new C01.sources.Graph())")

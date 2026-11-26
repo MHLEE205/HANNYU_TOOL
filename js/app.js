@@ -826,7 +826,7 @@ window.C01 = window.C01 || {};
 
   function buildGroups() {
     var ov = overlay();
-    var out = [], cnt = { check: 0, compass: 0, remind: 0, frozen: 0, auto: 0, human: 0 }, no = 0;
+    var out = [], cnt = { check: 0, compass: 0, remind: 0, frozen: 0, auto: 0, human: 0, pwait: 0, pcheck: 0 }, no = 0;
     var today = (S.info && S.info.today) || '';
     var ivs = ((S.jik && S.jik.ivs) || []).filter(function (iv) { return portOk(iv.pol) && ivLive(iv); })
       .slice().sort(function (a, b) { return (a.cy_cut || '') < (b.cy_cut || '') ? -1 : (a.cy_cut || '') > (b.cy_cut || '') ? 1 : (a.iv_no < b.iv_no ? -1 : 1); });
@@ -876,12 +876,19 @@ window.C01 = window.C01 || {};
       cnt.frozen += rows.filter(function (x) { return x.frozen; }).length;
       cnt.auto += rows.filter(function (x) { return x.dk === 'auto'; }).length;     /* v0.3.60 (R11R · #334): 入力済 を含む · エンジン判定で分ける */
       cnt.human += rows.filter(function (x) { return x.dk === 'human'; }).length;
+      /* v0.3.88 (R12Y67 · #411): 輸出許可書 — 許可待ち (送付済 · 未着 + CUT 過ぎ 許可なし) · 許可書 確認 (エンジンが決められない) */
+      var pst = C01.customs && C01.customs.permitState ? C01.customs.permitState(iv) : null;
+      var pWait = !!(pst && (pst.st === 'wait' || pst.st === 'none')), pChk = !!(pst && (pst.st === 'check' || pst.check));
+      if (pWait) cnt.pwait += 1;
+      if (pChk) cnt.pcheck += 1;
       var onlyUn = rows.length === 0 && unarr.length > 0;
       if (onlyUn && !S.showUnarrived) return;
       if (S.filter === 'check' && !hasCheck) return;
       if (S.filter === 'compass' && !(allOk && !compassDone)) return;
       if (S.filter === 'remind' && !remind) return;
       if (S.filter === 'frozen' && !rows.some(function (x) { return x.frozen; })) return;
+      if (S.filter === 'pwait' && !pWait) return;
+      if (S.filter === 'pcheck' && !pChk) return;
       /* v0.3.9 (R7E 형님 ②): 行の順 = COMPASS 枠の順 (slots[].seq · 無ければ slots の並び)。枠が決まった行はその枠の位置 · メール未着の枠も同じ位置 ·
          枠のない行 (未割当) はそのブッキングの一番下。台数 = 枠の数 (未割当の行を別に数えない · 二重に数えない)。No = ブッキングごとに 1 から (D-42) */
       var seqOf = slotSeq(iv);
@@ -1037,6 +1044,9 @@ window.C01 = window.C01 || {};
       '<button class="c01-f c01-f-remind' + (S.filter === 'remind' ? ' on' : '') + '" data-filter="remind">催促候補 ' + b.cnt.remind + '件</button>' +
       (b.cnt.frozen || S.filter === 'frozen' ? '<button class="c01-f c01-f-frozen' + (S.filter === 'frozen' ? ' on' : '') + '" data-filter="frozen" title="Compass入力 の時の値 · 枠で固定した行（自動OK · 確認済 の両方 · エンジンが後で値を変えても そのまま · 違いは 確認・入力 「入力後の差異」）">' +
         FROZEN_LABEL + ' ' + b.cnt.frozen + '台</button>' : '') +      /* v0.3.52 (R10W · #307): 固定の行がある時だけ · v0.3.60 (R11R): 名前 = 入力済 */
+      (C01.customs && C01.customs.permitOn && C01.customs.permitOn() ?                 /* v0.3.88 (R12Y67 · #411): エンジンが許可書を見ている時だけ */
+        '<button class="c01-f c01-f-pwait' + (S.filter === 'pwait' ? ' on' : '') + '" data-filter="pwait" title="通関書類は送付済 · 輸出許可書がまだ届いていない IV（CY CUT を過ぎた 「許可なし」 も含む）">許可待ち ' + b.cnt.pwait + '件</button>' +
+        '<button class="c01-f c01-f-pcheck' + (S.filter === 'pcheck' ? ' on' : '') + '" data-filter="pcheck" title="輸出許可書らしい書類をエンジンが決められない IV（zip のパスワード · IV が違う · 読み取り不確か）">許可書 確認 ' + b.cnt.pcheck + '件</button>' : '') +
       '<span class="c01-kcnt" id="kind-count" title="入力済 の行も含む · エンジンの判定で分けた数（緑 = エンジンの自動OK · 青 = 人が確認）">' +
         '<span class="st-ok">自動OK ' + b.cnt.auto + '</span> · <span class="st-hum">確認済 ' + b.cnt.human + '</span></span>' +      /* v0.3.60 (R11R · #334) */
       '<label class="c01-chk"><input type="checkbox" id="show-unarrived"' + (S.showUnarrived ? ' checked' : '') + '>メール未着も表示</label>' +
@@ -1070,6 +1080,7 @@ window.C01 = window.C01 || {};
           g.allOk ? '<button class="c01-btn-pri" data-compass="' + esc(iv.iv_no) + '">⬇ Compass入力</button>' :
             (!g.onlyUn ? '<button class="c01-blocked" data-compass="' + esc(iv.iv_no) + '" title="全台が 自動OK / 確認済 になると入力できます（比較表だけ見られます）">Compass入力（未完了あり）</button>' : '')) +
         (C01.customs && !g.onlyUn ? C01.customs.headerBtn(g) : '') +            /* v0.3.63 (決定 #359): 通関書類送付 (Compass入力 の横) */
+        (C01.customs && C01.customs.permitBadge && !g.onlyUn ? C01.customs.permitBadge(g) : '') +   /* v0.3.88 (R12Y67 · #411): 輸出許可書 (送付済 の横 · 表示だけ) */
         '</div></td></tr>';
       g.rows.forEach(function (x) {
         var cls = x.dk === 'human' ? 'ok hum' : x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';   /* v0.3.60 (R11R): 人の確認 = 青 (hum) */
@@ -1135,6 +1146,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-remind]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openRemind(el.getAttribute('data-remind')); }; });
     root.querySelectorAll('[data-csend]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); if (C01.customs) C01.customs.open(el.getAttribute('data-csend'), el.hasAttribute('data-csend-off')); }; });   /* v0.3.63 */
     root.querySelectorAll('[data-customs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCustoms(el.getAttribute('data-customs')); }; });
+    root.querySelectorAll('[data-permit]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); if (C01.customs) C01.customs.openPermit(el.getAttribute('data-permit')); }; });   /* v0.3.88 (R12Y67) */
     root.querySelectorAll('[data-otherct]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openOtherCts(el.getAttribute('data-otherct')); }; });
     root.querySelectorAll('[data-same]').forEach(function (el) {
       el.onclick = function (ev) { ev.stopPropagation(); S.view = 'input'; S.qkind = SAME; S.qiv = null; S.qsel = el.getAttribute('data-same'); render(); };
@@ -5398,7 +5410,7 @@ window.C01 = window.C01 || {};
   /* v0.3.63 (決定 #359): 通関書類送付 (js/customs.js) が使う内部の関数 — 画面の部品 · 記録の書き方は 他のボタンと同じ */
   function customsApi() {
     return { S: S, esc: esc, md: md, toast: toast, showModal: showModal, closeModal: closeModal, writeAction: writeAction, mkAction: mkAction,
-      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords };   /* compassRecords = v0.3.65 (#361) */
+      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords, todayJst: todayJst, openTab: openTab };   /* todayJst · openTab = v0.3.88 (R12Y67) */   /* compassRecords = v0.3.65 (#361) */
   }
   C01.app = { _api: customsApi, start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn, _compassInput: function (ivNo) { var iv = ivById(ivNo); return iv ? compassInput(iv) : null; } };
 })();

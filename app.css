@@ -659,6 +659,19 @@ tr.c01-row.c01-flash > td { animation: c01-flash 2.4s ease-out 1; }
 .c01-cstep { font-size: 13px; color: var(--text2); }
 .c01-ctest { color: var(--text2); font-size: 11px; margin-left: 4px; }
 .c01-csent { margin-left: 4px; }
+/* v0.3.88 (R12Y67 · #411): 輸出許可書 — 緑 ✓ 許可 · 橙 許可書 確認 · 灰 許可待ち · 赤 許可なし */
+.c01-permit { margin-left: 4px; font-size: 12px; font-weight: 600; font-family: inherit; border-radius: 6px; padding: 1px 6px; border: 1px solid transparent; background: none; }
+button.c01-permit { cursor: pointer; }
+.c01-permit-ok { color: var(--ok); }
+.c01-permit-ok:hover { border-color: var(--ok); }
+.c01-permit-chk { color: #8a4b00; background: #fff1de; border-color: #e08a00; }
+.c01-permit-wait { color: var(--text2); background: transparent; border: 1px dashed var(--border); font-weight: 500; cursor: help; }
+.c01-permit-none { color: #fff; background: #c62828; border-color: #c62828; cursor: help; }
+.c01-f-pwait.on { background: #e6e6e6; }
+.c01-f-pcheck.on { background: #fff1de; }
+.c01-permit-tbl { border-collapse: collapse; margin: 4px 0 10px; }
+.c01-permit-tbl th { text-align: left; font-weight: 600; padding: 3px 12px 3px 0; color: var(--text2); white-space: nowrap; }
+.c01-permit-tbl td { padding: 3px 0; }
 .c01-rbbadge { background: #e8f1ff; border-color: #7aa7e0; color: #1f4f8a; }   /* v0.3.82 (R12Y53 · D-223 (가)): IV変更 · Compass入力 再度必要 (情報) */
 .c01-rbhead { display: inline-block; padding: 1px 7px; border-radius: 4px; background: #e8f1ff; color: #1f4f8a; border: 1px solid #7aa7e0; font-size: 12px; font-weight: 700; cursor: help; }
 .c01-cprev { margin-left: 6px; padding: 1px 6px; font-size: 11px; background: #fff6d6; border: 1px solid #e0b400; border-radius: 4px; color: #6a4f00; }   /* v0.3.81 (R12Y52): 前の IV で送付済 */

@@ -56,6 +56,64 @@ C01.customs = (function () {
   function lastLive(iv) { return records(iv).filter(function (x) { return !x.value.test; })[0] || null; }
   function lastTest(iv) { return records(iv).filter(function (x) { return x.value.test; })[0] || null; }
 
+  /* ── v0.3.88 (R12Y67 · #411): 輸出許可書 (エンジン iv.permit · meta.permit) — 実況表 IV 見出しの 「通関書類 送付済」 の横 · 表示だけ (判定 · 送付 · 値 は変えない)
+     ok = 許可書あり (緑 「✓ 許可 MM/DD」 · 変更通知 = 「· 変更 MM/DD」) · check = 許可書らしい書類をエンジンが決められない (zip のパスワード · IV が違う · 読み取り不確か → 橙 「許可書 確認」) ·
+     wait = 送付済 · まだ届かない (灰 「許可待ち」) · none = CY CUT を過ぎても無い (赤 「許可なし」) · L インボイス · エンジンが許可書を見ていない時 (meta.permit 無し) = 出さない ── */
+  var PERMIT_WHY = { zip_password: 'zip のパスワード', text_iv_differs: '書類の IV が件名と違う', text_iv_missing: '書類に IV が無い', ai_unsure_or_iv: '読み取りが不確か',
+    scan_need_ai: 'まだ読めていない', name_permit_text_other: 'ファイル名は許可書 · 中身は別の書類', subject_iv_missing: '件名に IV が無い' };
+  var PERMIT_HOW = { text: 'PDF の文字', name: 'ファイル名', ai: '画像の読み取り (AI)', human: '人の確認待ち' };
+  function permitOn() { var m = api().S.meta; return !!(m && m.permit && m.permit.on); }
+  function permitState(iv) {
+    if (!iv || !permitOn() || domestic(iv)) return null;
+    var p = iv.permit || null, nh = (p && p.need_human) || [];
+    if (p && p.kind) return { st: 'ok', p: p, check: nh.length > 0 };
+    if (nh.length) return { st: 'check', p: p };
+    var cut = iv.cy_cut ? String(iv.cy_cut).slice(0, 10) : '';
+    if (cut && cut < api().todayJst()) return { st: 'none', p: p };
+    if (lastLive(iv) || mailSeen(iv)[0]) return { st: 'wait', p: p };
+    return null;
+  }
+  function permitNh(p) {
+    return ((p && p.need_human) || []).map(function (x) {
+      return (x.kind === 'CHANGE' ? '変更通知 — ' : '') + (PERMIT_WHY[x.why] || x.why) + ' (' + String(x.received_at || '').slice(0, 16).replace('T', ' ') + ' 受信)';
+    }).join(' · ');
+  }
+  function permitBadge(g) {
+    var a = api(), esc = a.esc, iv = g.iv, s = permitState(iv);
+    if (!s) return '';
+    var p = s.p || {}, md = function (x) { return a.md(String(x || '').slice(0, 10)); }, at = ' data-permit="' + esc(iv.iv_no) + '"';
+    var chk = function (lead) { return '<button class="c01-permit c01-permit-chk"' + at + ' data-permit-chk title="' + esc(lead + permitNh(p) + ' — 通関業者のメールを確認してください') + '">許可書 確認</button>'; };
+    if (s.st === 'ok') {
+      var t = (p.kind === 'PERMIT' ? '輸出許可書 ' : '許可内容変更通知 ') + String(p.received_at || '').slice(0, 16).replace('T', ' ') + ' 受信' + (p.decl_no ? ' · 申告番号 ' + p.decl_no : '') +
+        (p.permit_date ? ' · 許可年月日 ' + p.permit_date : '') + ' — 押すと許可書を開けます（表示だけ）';
+      var main = p.kind === 'PERMIT' ? '✓ 許可 ' + esc(md(p.received_at)) + (p.change || []).map(function (c) { return ' · 変更 ' + esc(md(c.received_at)); }).join('') :
+        '✓ 変更通知 ' + esc(md(p.received_at));
+      return '<button class="c01-permit c01-permit-ok"' + at + ' data-permit-ok title="' + esc(t) + '">' + main + '</button>' + (s.check ? chk('ほかに エンジンが決められない書類があります — ') : '');
+    }
+    if (s.st === 'check') return chk('輸出許可書らしい書類が届きましたが エンジンが決められません — ');
+    if (s.st === 'none') return '<span class="c01-permit c01-permit-none" data-permit-none title="CY CUT を過ぎても 輸出許可書 のメールが見つかりません（通関業者の返信 · エンジンの見落としの可能性 — 管理者へ）">許可なし</span>';
+    return '<span class="c01-permit c01-permit-wait" data-permit-wait title="通関書類は送付済 · 輸出許可書はまだ届いていません（通関業者の返信を待っています）">許可待ち</span>';
+  }
+  function openPermit(ivNo) {
+    var a = api(), esc = a.esc, iv = a.ivById(ivNo), p = (iv && iv.permit) || {}, fs = p.files || [];
+    var dt = function (x) { return String(x || '').slice(0, 16).replace('T', ' '); };
+    var row = function (k, v) { return v ? '<tr><th>' + esc(k) + '</th><td>' + esc(v) + '</td></tr>' : ''; };
+    var html = '<div class="c01-mh"><b>輸出許可書</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">BKG ' + esc(iv ? iv.bkg_no : '') + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      '<table class="c01-permit-tbl" data-permit-tbl>' +
+      row('受信', p.received_at ? dt(p.received_at) + (p.n > 1 ? '（許可書 ' + p.n + ' 通 · 開くのは最後のもの）' : '') : '') + row('申告番号', p.decl_no) + row('許可年月日', p.permit_date) +
+      row('見つけ方', PERMIT_HOW[p.how] || p.how) +
+      (p.change || []).map(function (c) { return row('変更通知', dt(c.received_at) + ' 受信'); }).join('') +
+      (p.need_human || []).map(function (x) { return row('要確認', (x.kind === 'CHANGE' ? '変更通知 — ' : '') + (PERMIT_WHY[x.why] || x.why) + ' · ' + dt(x.received_at) + ' 受信'); }).join('') +
+      '</table>' +
+      (fs.length ? '<ul class="c01-customs-list">' + fs.map(function (f, i) {
+        return '<li><button class="c01-btn-sub" data-permitopen="' + i + '">開く</button> <span>' + esc(f.name) + '</span></li>';
+      }).join('') + '</ul>' : '<p class="c01-note2">開けるファイルがありません（zip のパスワード · IV が違う などは 通関業者のメールで確認してください）</p>') +
+      '<p class="c01-note2">表示だけです（搬入票の値 · 判定には使いません）。許可書の中身（申告の内容）の確認はまだありません。</p></div>';
+    a.showModal(html);
+    document.getElementById('c01-modal').querySelectorAll('[data-permitopen]').forEach(function (b) { b.onclick = function () { a.openTab(fs[+b.getAttribute('data-permitopen')].path); }; });
+  }
+
   /* ── ボタンの条件 (実況表の値だけ · ① · S/I · COMPASS の値は押した後の確認窓で) ── */
   function lacks(g) {
     var out = [], iv = g.iv;
@@ -1168,7 +1226,7 @@ C01.customs = (function () {
     var sub = (bl.length ? 'B/L: ' + bl.join(' / ') : '') + (si.crcf9_port_of_discharge ? (bl.length ? ' · ' : '') + 'Port of Discharge: ' + si.crcf9_port_of_discharge : '');
     return '<div class="c01-cpods">' + h + '</div>' + (sub ? '<div class="t2 c01-cpodsub" data-cpodsub>' + esc(sub) + '</div>' : '');
   }
-  return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
+  return { headerBtn: headerBtn, permitBadge: permitBadge, permitState: permitState, permitOn: permitOn, openPermit: openPermit, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
     _greeting: greeting, _sigCompany: sigCompany, _shareCut: shareCut, _baseRecips: baseRecips, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
     _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
     _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _pickBl: pickBl, _siRec: siRec, _siWhyCode: siWhyCode, _siDef: function () { return st ? { iv: st.siDefIv || null, si: st.siDefSi || null } : null; }, _blState: function () { return st ? { bl: st.bl, why: st.blWhy, red: st.blRed || '', sc: st.sc, scNo: st.scNo } : null; }, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
