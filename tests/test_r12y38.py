@@ -130,7 +130,7 @@ def main():
             open_local(page, url)
             page.click("[data-port='all']") if page.locator("[data-port='all']").count() else None
             page.wait_for_timeout(300)
-            ok("판 표시 0.3.77", page.title().endswith("v0.3.84"), page.title())
+            ok("판 표시 0.3.77", page.title().endswith("v0.3.85"), page.title())
 
             # ── P1 표시 ──
             b3 = page.locator(f"tbody[data-iv='{IV}'] tr.c01-row:has-text('{r3['ct']}') [data-info='slot_from_human']")

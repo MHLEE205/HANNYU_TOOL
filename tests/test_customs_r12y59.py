@@ -1,13 +1,13 @@
 # ✦ Powered by LEENAI Automation System — v0.3.84 (R12Y59 · #404) 통관 송부 宛先 = COMPASS 乙仲 과 대조
 """Playwright · 가명 fixtures · 가짜 Graph · 가짜 D-03 · 가짜 COMPASS (실제 메일 · SharePoint · COMPASS 호출 0). 확인:
  U  matchBroker (이름 같음 · 株式会社 · 전각 · 「/」 별명 · 모르는 이름 · COMPASS 주소만)
- A  道 3 · 乙仲 ヴェリオス · 같은 港 최근 ① = LOTOS (NJJ 꼴) → LOTOS 안 고름 · 표 주소 (빨강 · 확인) · 추가 서류 PHOTO · 搬入票 · 본문 LOTOS 0
- A2 같은 港 · 같은 바이어 LOTOS 송부 기록 = 건너뜀 · 다른 바이어 ヴェリオス 기록 = 「同じ乙仲」 노랑
- B  道 3 · 乙仲 LOTOS → 같은 港 최근 ① (LOTOS) 그대로 · 회색 일치 줄
- C  道 3 · 乙仲 ヴェリオス · 표 주소 0 · 기록 0 → 막음 「宛先が分かりません · 乙仲（COMPASS）: ヴェリオス」
- D  乙仲 빈칸 · E 이름 못 읽음 (403) · F 표에 없는 이름 → 노랑 한 줄 · 예전 길 그대로
+ (v0.3.85 · R12Y60 · #407: 道 3 제안 없앰 — ① 없음 = 직접 입력 manual · 칸 비움)
+ A  乙仲 ヴェリオス · 같은 港 최근 ① = LOTOS (NJJ 꼴) → 제안 0 · 빨강 「新規通関依頼メールが見つかりません」 + 乙仲 이름만 · ヴェリオス 입력 → 추가 서류
+ A2 같은 港 송부 기록이 있어도 제안 0 · 다른 IV 기록의 宛名 안 씀
+ B  乙仲 LOTOS → 제안 0 · C 표 주소 0 → manual · 막힘
+ D  乙仲 빈칸 · E 이름 못 읽음 (403) · F 표에 없는 이름 → 노랑 한 줄 · manual
  G  道 1 · 宛先 テスト倉庫 · 乙仲 LOTOS → 빨강 「COMPASS の乙仲（LOTOS）と宛先（テスト倉庫）が違います」 + 확인 체크 전 막힘 · 체크 → 풀림 · 기록 broker_compass mismatch
- H  道 1 · 乙仲 = 宛先 → 회색 · 확인 체크 없음 · I 道 3 받는 사람을 LOTOS 로 고침 (乙仲 ヴェリオス) → 빨강
+ H  道 1 · 乙仲 = 宛先 → 회색 · 확인 체크 없음 · I 직접 입력 받는 사람 LOTOS (乙仲 ヴェリオス) → 빨강
 사용: python tests/test_customs_r12y59.py [--shots 폴더]"""
 import argparse
 import base64
@@ -134,7 +134,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.84", page.title() == "LEENAI C-01 搬入票 v0.3.84", page.title())
+            ok("탭 제목 v0.3.85", page.title() == "LEENAI C-01 搬入票 v0.3.85", page.title())
             page.evaluate(TGR.STUB, staff)
             page.evaluate(f"C01.CUSTOMS.d03Url = '/__d03fake.html'; C01.CUSTOMS.ourDomain = '{OURS}'; C01.CUSTOMS.shareLink = 'off'; localStorage.setItem('c01_ports', JSON.stringify({{port: 'all', ports: []}}));")
             page.evaluate("document.getElementById('ln-splash').style.display='none'; document.getElementById('app').style.display=''; C01.app.start(new C01.sources.Graph())")
@@ -176,58 +176,63 @@ def main():
             ACK = "宛先を確認しました"
             page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", BP)
 
-            # A NJJ 꼴
+            # A NJJ 꼴 (v0.3.85 · R12Y60 · #407): ① 없음 = 제안 0 → 빨강 「新規通関依頼メールが見つかりません」 + 칸 비움 · 乙仲 이름만
             BC["mode"] = "veri"
             openw()
             x = info()
             body = page.locator("[data-cbody]").input_value() if page.locator("[data-cbody]").count() else ""
             ok("A 乙仲 COMPASS GET = $expand cr49f_fowarder_id (crcf9_forwarder · crcf9_forwarder_to_email) · 1 번", len(BCQ) == 1 and "crcf9_forwarder,crcf9_forwarder_to_email" in BCQ[0], BCQ)
-            ok("A 乙仲 = ヴェリオス (表 이름)", x["now"]["state"] == "read" and x["now"]["brokers"] == ["ヴェリオス"], x["now"])
-            ok("A 같은 港 최근 ① (LOTOS) 안 고름 → 표 주소 (src table · To ヴェリオス 주소)", x["prop"] and x["prop"]["src"] == "table" and page.locator("[data-cedit='to']").input_value() == VERI,
-               [x["prop"], page.locator("[data-cedit='to']").input_value()])
-            ok("A 빨강 「通関業者の表のアドレス」 + 乙仲 이름", page.locator("[data-cprop='table'].c01-cr").count() == 1 and "ヴェリオス" in page.locator("[data-cprop]").inner_text())
-            rq = page.evaluate("C01.customs._req()")
-            ok("A 추가 서류 = 写真 · 搬入票 (ヴェリオス)", rq["extra"] == ["PHOTO", "搬入票"] and rq["brokers"] == ["ヴェリオス"], rq)
-            ok("A 일치 회색 줄 · 빨강 0", page.locator("[data-cbc='ok']").count() == 1 and page.locator("[data-cbc='mismatch']").count() == 0)
-            ok("A 본문 · 宛名 에 LOTOS 0", "LOTOS" not in body, body[:120])
+            ok("A 乙仲 = ヴェリオス (표 이름)", x["now"]["state"] == "read" and x["now"]["brokers"] == ["ヴェリオス"], x["now"])
+            ok("A 같은 港 최근 ① (LOTOS) · 표 주소 제안 0 → 길 manual · To · CC 비움", x["prop"] and x["prop"]["src"] == "manual" and page.locator("[data-cedit='to']").input_value() == ""
+               and page.locator("[data-cedit='cc']").input_value() == "", [x["prop"], page.locator("[data-cedit='to']").input_value()])
+            ok("A 빨강 「新規通関依頼メールが見つかりません — 担当（宛先）が分かりません。宛先と宛名を入力してください」 + 乙仲 이름만", page.locator("[data-cmanual].c01-cr").count() == 1
+               and "新規通関依頼メールが見つかりません — 担当（宛先）が分かりません。宛先と宛名を入力してください" in page.locator("[data-cmanual]").inner_text()
+               and "ヴェリオス" in page.locator("[data-cmanual]").inner_text() and "@" not in page.locator("[data-cmanual]").inner_text(), page.locator("[data-cmanual]").all_inner_texts())
+            ok("A 본문 · 宛名 에 LOTOS 0 · 宛名 = 입력 칸 표시 (（通関業者の会社名）)", "LOTOS" not in body and "（通関業者の会社名）" in body, body[:120])
             bl()
-            ok("A 확인 체크 전 막힘", any(ACK in w for w in why()), why())
-            page.screenshot(path=str(shots / "a_njj_table.png"), full_page=False)
-            # I 받는 사람을 LOTOS 로 고침 → 빨강
+            ok("A 칸 비움 = 막힘 「宛先がありません」", any(w == "宛先がありません" for w in why()), why())
+            page.screenshot(path=str(shots / "a_njj_manual.png"), full_page=False)
+            # I 받는 사람을 LOTOS 로 넣음 → 빨강
             page.fill("[data-cedit='to']", LOT)
             page.locator("[data-cedit='to']").dispatch_event("change")
-            ok("I 道 3 To 를 LOTOS 로 고침 → 빨강 「COMPASS の乙仲（株式会社ヴェリオス）と宛先（LOTOS）が違います」", page.locator("[data-cbc='mismatch'].c01-cr").count() == 1
+            ok("I 직접 입력 To 를 LOTOS 로 → 빨강 「COMPASS の乙仲（株式会社ヴェリオス）と宛先（LOTOS）が違います」", page.locator("[data-cbc='mismatch'].c01-cr").count() == 1
                and "COMPASS の乙仲（株式会社ヴェリオス）と宛先（LOTOS）が違います" in page.locator("[data-cbc]").inner_text(), page.locator("[data-cbc]").all_inner_texts())
+            page.fill("[data-cedit='to']", VERI)
+            page.locator("[data-cedit='to']").dispatch_event("change")
+            rq = page.evaluate("C01.customs._req()")
+            ok("A ヴェリオス 주소 입력 → 회색 일치 · 추가 서류 写真 · 搬入票", page.locator("[data-cbc='ok']").count() == 1 and rq["extra"] == ["PHOTO", "搬入票"] and rq["brokers"] == ["ヴェリオス"], rq)
+            ok("A 확인 체크 전 막힘", any(ACK in w for w in why()), why())
             close()
-            # A2 기록: 같은 바이어 LOTOS (건너뜀) · 다른 바이어 ヴェリオス (고름)
+            # A2 기록: 같은 港 · 같은 바이어 LOTOS · 다른 바이어 ヴェリオス 송부 기록이 있어도 제안 0
             page.evaluate('''([lot, veri]) => { const A = C01.app._api(); const o = A.S.jik.ivs.find(x => x.iv_no === 'TST2611-02'); o.pol = 'KOBE';
-                const r = (id, at, b, to) => ({ action: { action_id: id, action: 'customs_sent', iv: 'TST2611-02', by: 'staff_a@fake', at: at, value: { test: false, buyer_id: b, to: [to], cc: [] } } });
+                const r = (id, at, b, to) => ({ action: { action_id: id, action: 'customs_sent', iv: 'TST2611-02', by: 'staff_a@fake', at: at,
+                  value: { test: false, buyer_id: b, to: [to], cc: [], broker_dom: to.split('@')[1], broker_line: 'OTHER IV CO', broker_person: 'OTHERPERSON' } } });
                 A.S.mine = (A.S.mine || []).concat([r('cs-l', '2026-11-07T10:00:00+09:00', 'BUYER-T', lot), r('cs-v', '2026-11-06T10:00:00+09:00', 'BUYER-X', veri)]); }''', [LOT, VERI])
             openw()
             x = info()
-            ok("A2 같은 바이어 LOTOS 기록 건너뜀 · 다른 바이어 ヴェリオス 기록 = src broker (노랑 「同じ乙仲」)", x["prop"]["src"] == "broker" and page.locator("[data-cprop='broker'].c01-cy").count() == 1
-               and page.locator("[data-cedit='to']").input_value() == VERI, [x["prop"], page.locator(".c01-customs [data-cprop]").all_inner_texts()])
+            ok("A2 같은 港 송부 기록 (같은 바이어 · 다른 바이어) 이 있어도 제안 0 · 칸 비움", x["prop"]["src"] == "manual" and page.locator("[data-cprop]").count() == 0
+               and page.locator("[data-cedit='to']").input_value() == "", [x["prop"], page.locator("[data-cedit='to']").input_value()])
+            page.fill("[data-cedit='to']", VERI)
+            page.locator("[data-cedit='to']").dispatch_event("change")
+            page.wait_for_timeout(200)
+            body = page.locator("[data-cbody]").input_value() if page.locator("[data-cbody]").count() else ""
+            ok("A2 宛名 = 다른 IV 의 송부 기록 안 씀 (OTHER IV CO · OTHERPERSON 0)", "OTHER IV CO" not in body and "OTHERPERSON" not in body, body[:120])
             close()
-            # B 乙仲 LOTOS → 같은 바이어 LOTOS 기록 (buyer)
+            # B 乙仲 LOTOS → 그래도 제안 0
             BC["mode"] = "lotos"
             openw()
             x = info()
-            ok("B 乙仲 LOTOS (전각) → 같은 港 · 같은 바이어 LOTOS 기록 그대로 · 회색 일치", x["prop"]["src"] == "buyer" and page.locator("[data-cedit='to']").input_value() == LOT
-               and page.locator("[data-cbc='ok']").count() == 1, [x["prop"], page.locator("[data-cbc]").all_inner_texts()])
+            ok("B 乙仲 LOTOS (전각) · 같은 港 LOTOS 기록 있어도 제안 0 (manual · 칸 비움)", x["prop"]["src"] == "manual" and page.locator("[data-cedit='to']").input_value() == ""
+               and "ＬＯＴＯＳ" in page.locator("[data-cmanual]").inner_text(), [x["prop"], page.locator("[data-cmanual]").all_inner_texts()])
             close()
             page.evaluate("() => { const A = C01.app._api(); A.S.mine = (A.S.mine || []).filter(m => ['cs-l', 'cs-v'].indexOf(m.action.action_id) < 0); }")
-            openw()
-            x = info()
-            ok("B 기록 없음 → 같은 港 최근 ① (LOTOS · src pol)", x["prop"]["src"] == "pol" and page.locator("[data-cedit='to']").input_value() == LOT, x["prop"])
-            close()
-            # C 표 주소 0 → 막음
+            # C 표 주소 0 → 같은 manual (막음 = 칸 비움)
             BC["mode"] = "veri"
             page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", dict(REQ, addrs={}))
             openw()
             x = info()
-            ok("C 乙仲 ヴェリオス · 표 주소 0 · 기록 0 → 길 없음 · 「宛先が分かりません · 乙仲（COMPASS）: 株式会社ヴェリオス」", x["prop"] is None and page.locator("[data-cnoroute='broker']").count() == 1
-               and "宛先が分かりません · 乙仲（COMPASS）: 株式会社ヴェリオス" in page.locator("[data-cnoroute]").inner_text(), page.locator(".c01-customs").inner_text()[:200])
-            ok("C 送信 · 下書き 막힘", page.locator("[data-csendgo]").is_disabled() and any("宛先がありません" in w for w in why()), why())
+            ok("C 乙仲 ヴェリオス · 표 주소 0 → manual · 「新規通関依頼メールが見つかりません」", x["prop"]["src"] == "manual" and page.locator("[data-cmanual]").count() == 1, page.locator(".c01-customs").inner_text()[:200])
+            ok("C 送信 · 下書き 막힘 (宛先がありません)", page.locator("[data-csendgo]").is_disabled() and any("宛先がありません" in w for w in why()), why())
             close()
             page.evaluate("(x) => { C01.app._api().S.customsReq = x; }", REQ)
             # D · E · F
@@ -235,8 +240,9 @@ def main():
                 BC["mode"] = m
                 openw()
                 x = info()
-                ok(f"{ {'blank': 'D 乙仲 빈칸', 'fail': 'E 이름 못 읽음 (403 → 번호만)', 'unknown': 'F 표에 없는 이름'}[m]} → 노랑 한 줄 · 예전 길 (src pol · LOTOS) · 빨강 0",
-                   page.locator(f"[data-cbc='{sel}'].c01-cy").count() == 1 and x["prop"]["src"] == "pol" and page.locator("[data-cbc='mismatch']").count() == 0,
+                ok(f"{ {'blank': 'D 乙仲 빈칸', 'fail': 'E 이름 못 읽음 (403 → 번호만)', 'unknown': 'F 표에 없는 이름'}[m]} → 노랑 한 줄 · manual (칸 비움) · 빨강 0",
+                   page.locator(f"[data-cbc='{sel}'].c01-cy").count() == 1 and x["prop"]["src"] == "manual" and page.locator("[data-cbc='mismatch']").count() == 0
+                   and page.locator("[data-cedit='to']").input_value() == "",
                    [x["now"], x["prop"] and x["prop"]["src"], page.locator("[data-cbc]").all_inner_texts()])
                 if m == "fail":
                     ok("E 403 뒤 $expand 없이 다시 1 번", len(BCQ) == 2 and "$expand" not in BCQ[1], BCQ)

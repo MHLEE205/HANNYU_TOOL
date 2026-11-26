@@ -236,7 +236,7 @@ def main():
             page.route("https://orgde512c6f.crm7.dynamics.com/**", dvx)
             page.goto(f"http://127.0.0.1:{port}/")
             page.wait_for_selector("#ln-splash", timeout=20000)
-            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.84", page.title())
+            ok("탭 제목 v0.3.79", page.title() == "LEENAI C-01 搬入票 v0.3.85", page.title())
             ok("설정: 통관서류 송부 켜짐 · 실제 모드 (sendTest false · v0.3.74 #377) · D-03 주소 = 같은 출처 github.io",
                page.evaluate("C01.CUSTOMS.enabled === true && C01.CUSTOMS.sendTest === false && C01.CUSTOMS.d03Url.indexOf('https://mhlee205.github.io/Shipping_Document/') === 0"))
             page.evaluate("C01.CUSTOMS.sendTest = true")     # 아래 1~20 = 시험 모드 시험 (그대로) · 21 · 22 = 실제 모드
@@ -331,8 +331,11 @@ def main():
             page.locator(f'tbody[data-iv="{IV}"] [data-csend]').click()
             page.wait_for_function("() => document.querySelector('.c01-customs') && !document.querySelector('.c01-customs .c01-cstep')", timeout=20000)
             body = page.locator(".c01-customs").inner_text()
-            ok("6 ① 없음 · 회사 메일함 ① 없음 · 제안 없음 → 「宛先がありません」 · 送信 막힘 · createReplyAll 0 (v0.3.68 道 0)", "宛先がありません" in body and page.locator("[data-csendgo]").is_disabled()
-               and page.locator("[data-croute='none']").count() == 1 and not any("createReplyAll" in c for c in mail.calls), body[:200])
+            ok("6 ① 없음 · 회사 메일함 ① 없음 → 빨강 「新規通関依頼メールが見つかりません」 · 칸 비움 · 送信 막힘 (宛先がありません) · createReplyAll 0 (v0.3.85 · #407)",
+               "新規通関依頼メールが見つかりません" in body and page.locator("[data-csendgo]").is_disabled() and "宛先がありません" in page.evaluate("C01.customs._blockers()")
+               and page.locator("[data-croute='manual']").count() == 1 and page.locator("[data-cedit='to']").input_value() == "" and not any("createReplyAll" in c for c in mail.calls), body[:200])
+            ok("6 ① 없음 = 자기 메일함 검색 2 번 (BKG · IV 본문 I/V NO · v0.3.85)", sum(1 for u in mail.urls if "$search" in u and "通関書類送付_" not in u) == 2,
+               [u[:80] for u in mail.urls if "$search" in u])
             page.click(".c01-customs [data-close]")
             # 7 COMPASS ≠ 実況表
             mail.reset()
@@ -458,8 +461,8 @@ def main():
                 persons: [{ name: '新人', n: 1, last_at: '2026-11-07T10:00:00' }, { name: 'BROKER.B', n: 6, last_at: '2026-10-01T10:00:00' }] },
                 'other.invalid': { company: 'ちがう会社', company_n: 9, n: 9, persons: [{ name: 'X', n: 9, last_at: '2026-11-08T10:00:00' }] } } }; }""")
             bt, sl = open_iv()
-            ok("12 customs_broker.json (같은 도메인) → 회사명 · 담당자 = 지금 받는 사람 (CC 의 BROKER.B) 우선 · 출처 「過去の 通関書類送付（7 通）」",
-               bt.splitlines()[:2] == ["テスト通関株式会社", "BROKER.B 様"] and "過去の 通関書類送付（7 通）" in sl, [bt.splitlines()[:2], sl])
+            ok("12 customs_broker.json (같은 도메인 · 다른 IV 의 직원 송부) = 宛名 안 씀 (v0.3.85 · #405 · 같은 대화만) → 회사명 입력 칸 · 담당 = 같은 대화 통관업자 메일 송신자명",
+               bt.splitlines()[0] == "（通関業者の会社名）" and "テスト通関" not in bt and "過去の 通関書類送付" not in sl, [bt.splitlines()[:2], sl])
             page.click(".c01-customs [data-close]")
             page.evaluate("() => { C01.app._api().S.customsBroker = null; }")
             bt, sl = open_iv(sig="お世話になります。\r\n承知しました。\r\n\r\n--------\r\nテストシッピング株式会社\r\n通関課 BROKERA\r\nTEL 00-0000-0000")
@@ -551,6 +554,16 @@ def main():
                 t = page.locator("[data-cbody]").input_value().replace("（通関業者の会社名）", "TEST BROKER CORPORATION").replace("（担当者名）", "BROKERA")
                 page.fill("[data-cbody]", t)
                 page.wait_for_timeout(100)
+            # 16p (v0.3.85 · R12Y60 · #405) 道 2 宛名 = ① 원본 인사 줄 (엔진 s1.preview · 같은 대화)
+            S1p = json.loads(json.dumps(S1)); S1p["ivs"][IV]["s1"].update({"to": [{"a": "broker.a@broker.invalid", "n": "BROKERA"}], "cc": [],
+                "preview": "テスト海運株式会社\r\nBROKERA 様\r\n\r\nいつも大変お世話になっております。"}); S1p["ivs"][IV]["how"] = "b03"
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", S1p)
+            open2()
+            bt = page.locator("[data-cbody]").input_value()
+            ok("16p 道 2 宛名 = ① 원본 인사 줄 (s1.preview) · 출처 「① の会話」", bt.splitlines()[:2] == ["テスト海運株式会社", "BROKERA 様"]
+               and "① の会話" in (page.locator("[data-cnamesrc]").inner_text() if page.locator("[data-cnamesrc]").count() else ""), bt.splitlines()[:2])
+            page.click(".c01-customs [data-close]")
+            page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", S1)
             open2()
             body = page.locator(".c01-customs").inner_text()
             ok("16 道 2 표시 = 「① は STAFF C のメールにあります — 新しいメールとして同じ宛先に送ります」", page.locator("[data-croute='s1_shared']").count() == 1
@@ -594,15 +607,22 @@ def main():
             why = page.evaluate("C01.customs._blockers()")
             ok("17 ① 본문 못 읽음 → 막힘 「① の本文をまだ読めていません」", page.locator("[data-csendgo]").is_disabled() and any("① の本文をまだ読めていません" in x for x in why), why)
             page.click(".c01-customs [data-close]")
-            # 18 道 3 제안 (POL 만)
+            # 18 (v0.3.85 · R12Y60 · #407) ① 없음 = 제안 0 (by_pol 있어도) → 빨강 「新規通関依頼メールが見つかりません」 + 칸 비움 · 직원이 입력
             BP = {"kind": "customs_s1", "built_at": "2026-11-08T09:00:00+09:00", "ivs": {}, "by_pol": {"KOBE": {"at": "2026-11-04T10:00:00", "staff": "staff.c@" + OURS, "n": 4,
                   "to": [{"a": "broker.k@kobe.invalid", "n": "BROKERK"}], "cc": [{"a": "staff.c@" + OURS, "n": "STAFF C"}, {"a": ME, "n": "ME"}]}}}
             page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", BP)
             open2()
-            ok("18 道 3 = 붉은 「①がありません — 宛先を必ず確認」 (POL 만 · 바이어 모름)", page.locator("[data-croute='proposal']").count() == 1 and page.locator("[data-cprop='pol'].c01-cr").count() == 1
-               and "宛先を必ず確認" in page.locator("[data-cprop]").inner_text(), page.locator(".c01-customs").inner_text()[:300])
-            ok("18 미리 채움 = 그 POL 최신 ① 의 To · CC (나 빼기) · 고칠 수 있는 칸", page.locator("[data-cedit='to']").input_value() == "broker.k@kobe.invalid"
-               and page.locator("[data-cedit='cc']").input_value() == "staff.c@" + OURS, [page.locator("[data-cedit='to']").input_value(), page.locator("[data-cedit='cc']").input_value()])
+            ok("18 ① 없음 = 빨강 「新規通関依頼メールが見つかりません — 担当（宛先）が分かりません」 (by_pol 제안 0)", page.locator("[data-croute='manual']").count() == 1
+               and page.locator("[data-cmanual].c01-cr").count() == 1 and "新規通関依頼メールが見つかりません" in page.locator("[data-cmanual]").inner_text()
+               and page.locator("[data-cprop]").count() == 0, page.locator(".c01-customs").inner_text()[:300])
+            ok("18 宛先 · CC 칸 = 비움 (주소 제안 0)", page.locator("[data-cedit='to']").input_value() == "" and page.locator("[data-cedit='cc']").input_value() == "",
+               [page.locator("[data-cedit='to']").input_value(), page.locator("[data-cedit='cc']").input_value()])
+            why = page.evaluate("C01.customs._blockers()")
+            ok("18 칸 비움 = 막힘 「宛先がありません」", any(x == "宛先がありません" for x in why), why)
+            page.fill("[data-cedit='to']", "broker.k@kobe.invalid")
+            page.locator("[data-cedit='to']").dispatch_event("change")
+            page.fill("[data-cedit='cc']", "staff.c@" + OURS)
+            page.locator("[data-cedit='cc']").dispatch_event("change")
             ok("18 제목 = [test] 【通関書類送付_IV】BKG#… CUT m/d", page.locator(".c01-csubj").inner_text() == f"[test] 【通関書類送付_{IV}】BKG#{BKG} CUT 11/12", page.locator(".c01-csubj").inner_text())
             ready_send()
             why = page.evaluate("C01.customs._blockers()")
@@ -625,16 +645,20 @@ def main():
             page.wait_for_timeout(400)
             nd = mail.newdraft or {}
             cs = [json.loads(f.read_text(encoding="utf-8")) for f in (root / "_actions").rglob("*.json")]
-            cs = [x for x in cs if x.get("action") == "customs_sent" and (x.get("value") or {}).get("route") == "proposal"]
-            ok("18 새 下書き → send 1 · 기록 route proposal · prop_src pol", nd.get("subject", "").startswith("[test] 【通関書類送付_" + IV + "】BKG#") and mail.sends == 1
-               and len(cs) == 1 and cs[0]["value"].get("prop_src") == "pol", [nd.get("subject"), mail.sends, len(cs)])
+            cs = [x for x in cs if x.get("action") == "customs_sent" and (x.get("value") or {}).get("route") == "manual"]
+            ok("18 새 下書き → send 1 · 기록 route manual · prop_src manual", nd.get("subject", "").startswith("[test] 【通関書類送付_" + IV + "】BKG#") and mail.sends == 1
+               and len(cs) == 1 and cs[0]["value"].get("prop_src") == "manual", [nd.get("subject"), mail.sends, len(cs)])
             # 19 같은 POL · 같은 바이어 송부 기록 (실전) = 노란 제안 · 회사 밖 도메인 2+ = 노란 경고
             page.evaluate('''(iv) => { const A = C01.app._api(); const o = A.S.jik.ivs.find(x => x.iv_no === 'TST2611-02'); o.pol = 'KOBE';
                 A.S.mine = (A.S.mine || []).concat([{ action: { action_id: 'cs-other', action: 'customs_sent', iv: 'TST2611-02', by: 'staff_a@fake', at: '2026-11-07T10:00:00+09:00',
                 value: { test: false, buyer_id: 'BUYER-T', to: ['broker.y@yoko.invalid'], cc: ['broker.z@other.invalid'] } } }]); }''', IV)
             open2()
-            ok("19 같은 POL · 같은 바이어 실전 송부 기록 → 노란 「①がありません — 宛先を確認してください」 · 그 받는 사람", page.locator("[data-cprop='buyer'].c01-cy").count() == 1
-               and page.locator("[data-cedit='to']").input_value() == "broker.y@yoko.invalid", page.locator(".c01-customs").inner_text()[:300])
+            ok("19 같은 POL · 같은 바이어 실전 송부 기록이 있어도 제안 0 (칸 비움 · #407)", page.locator("[data-croute='manual']").count() == 1 and page.locator("[data-cprop]").count() == 0
+               and page.locator("[data-cedit='to']").input_value() == "", page.locator(".c01-customs").inner_text()[:300])
+            page.fill("[data-cedit='to']", "broker.y@yoko.invalid")
+            page.locator("[data-cedit='to']").dispatch_event("change")
+            page.fill("[data-cedit='cc']", "broker.z@other.invalid")
+            page.locator("[data-cedit='cc']").dispatch_event("change")
             ok("19 회사 밖 도메인 2개 → 노란 경고", page.locator("[data-cdoms]").count() == 1 and "2 つ" in page.locator("[data-cdoms]").inner_text(), page.locator("[data-cdoms]").all_inner_texts())
             page.click(".c01-customs [data-close]")
             page.evaluate('''() => { const A = C01.app._api(); A.S.customsS1 = null; A.S.mine = (A.S.mine || []).filter(m => m.action.action_id !== 'cs-other');
@@ -721,19 +745,23 @@ def main():
             page.evaluate("(x) => { C01.app._api().S.customsS1 = x; }", BP)
             open2()
             ready_send()
-            ok("21 道 3 (제안) 실제 = 체크 전 꺼짐", page.locator("[data-croute='proposal']").count() == 1 and page.locator("[data-csendgo]").is_disabled()
+            page.fill("[data-cedit='to']", "broker.k@kobe.invalid")
+            page.locator("[data-cedit='to']").dispatch_event("change")
+            page.fill("[data-cedit='cc']", "staff.c@" + OURS)
+            page.locator("[data-cedit='cc']").dispatch_event("change")
+            ok("21 ① 없음 (직접 입력) 실제 = 체크 전 꺼짐", page.locator("[data-croute='manual']").count() == 1 and page.locator("[data-csendgo]").is_disabled()
                and any("宛先を確認しました" in x for x in page.evaluate("C01.customs._blockers()")))
             page.check("[data-cackto]")
             rc = page.evaluate("C01.customs._recips()")
-            ok("21 道 3 체크 → 켜짐", page.locator("[data-csendgo]").is_enabled(), page.locator("[data-cwhy]").inner_text())
+            ok("21 직접 입력 체크 → 켜짐", page.locator("[data-csendgo]").is_enabled(), page.locator("[data-cwhy]").inner_text())
             page.click("[data-csendgo]")
             page.wait_for_function("() => !document.querySelector('.c01-customs')", timeout=15000)
             page.wait_for_timeout(400)
             nd = mail.newdraft or {}
-            ok("21 道 3 가짜 Graph 받는 사람 = 확인 창 그대로 · send 1", [x["emailAddress"]["address"] for x in nd.get("toRecipients", [])] == [x["a"] for x in rc["to"]]
+            ok("21 직접 입력 가짜 Graph 받는 사람 = 확인 창 그대로 · send 1", [x["emailAddress"]["address"] for x in nd.get("toRecipients", [])] == [x["a"] for x in rc["to"]]
                and [x["emailAddress"]["address"] for x in nd.get("ccRecipients", [])] == [x["a"] for x in rc["cc"]] and mail.sends == 1, [nd.get("toRecipients"), rc])
             cs = [json.loads(f.read_text(encoding="utf-8")) for f in (root / "_actions").rglob("*.json")]
-            cs = [x for x in cs if x.get("action") == "customs_sent" and (x.get("value") or {}).get("test") is False and (x.get("value") or {}).get("route") in ("s1_shared", "proposal")]
+            cs = [x for x in cs if x.get("action") == "customs_sent" and (x.get("value") or {}).get("test") is False and (x.get("value") or {}).get("route") in ("s1_shared", "manual")]
             ok("21 기록 test false (道 2 · 3)", len(cs) == 2, len(cs))
             # 22 (v0.3.74 · R12Y18 Part 1) 아래 칸 (B/L · S/I) 고름 → PDF 다시 만들어도 창 스크롤 그대로 · 포커스 그 칸
             page.evaluate("() => { C01.app._api().S.customsS1 = null; }")

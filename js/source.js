@@ -400,13 +400,31 @@ C01.sources = (function () {
      (本船変更 · 本数追加 · 通関書類 · 許可書 などが先にあれば ① ではない = 別の会話に返信しない) */
   var KW_ORDER = [['④', /本登録/], ['ACL訂正', /ACL\s*訂正|ACL\s*確認/], ['DR訂正', /DR\s*訂正|D\/R\s*訂正/],
     ['変更', /本船変更|CUT\s*変更|OPEN-CUT|本数(変更|追加)|VOYA/], ['②', /通関書類/], ['③', /許可書|仮\s*ACL|E\/D\s*添付|D\/R\s*添付|D\/R,\s*E\/D/],
-    ['①', /通関\s*[＆&、・]?\s*(ドレージ)?(の)?(ご)?依頼|ドレージ\s*[、・＆&]?\s*通関|新規ドレージ(の)?(ご)?依頼/],
+    ['①', /通関\s*[＆&、・]?\s*(ドレージ)?(の)?(ご)?依頼|通関\s*[+＋]\s*ドレージ\s*(申請|依頼)|ドレージ\s*[、・＆&]?\s*通関|新規ドレージ(の)?(ご)?依頼/],
     ['業者', /ブッキング情報のご案内/]];   /* ブッキング情報のご案内 = 圧縮業者あて (① ではない · 実メール 2 週 21 件で確認) */
+  /* v0.3.85 (R12Y60 · #405): 新規通関依頼 = B-03 P/O 発注ツール の決まった件名 「新規(輸出)通関依頼 · 新規通関+ドレージ申請 … : BKG#{BKG}」 (本文 「I/V NO {IV}」)。
+     エンジン customs_s1.B03_HEAD · b03 · b03_orig · iv_line と同じ決まり (変える時は両方) */
+  var B03_HEAD = /新規\s*(輸出)?\s*通関\s*((の)?(ご)?依頼|[+＋＆&]\s*ドレージ\s*(申請|依頼))/;
+  var REPLY_ANY = /(^|[^A-Za-z])(re|fw|fwd)\s*[:：]|返信\s*[:：]|転送\s*[:：]/i;
+  function normAN(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+  function b03(s, bkg) {
+    var b = normAN(bkg), re = /BKG\s*(NO\.?)?\s*[#＃:：]?\s*([A-Za-z0-9\-]+)/gi, m;
+    if (!B03_HEAD.test(String(s || '')) || b.length < 6) return false;
+    while ((m = re.exec(String(s || '')))) if (normAN(m[2]) === b) return true;
+    return false;
+  }
+  function b03Orig(s, bkg) { return b03(s, bkg) && !REPLY_ANY.test(String(s || '')); }
+  function ivLine(t, iv) {
+    if (!iv || !t) return false;
+    var e = String(iv).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('I\\s*/\\s*V\\s*NO\\.?\\s*[:：]?\\s*' + e + '(?![0-9A-Za-z]|-[0-9])', 'i').test(String(t));
+  }
   function isS1Subject(s) {
     var h = stripRe(s), best = null;
     KW_ORDER.forEach(function (k) { var m = k[1].exec(h); if (m && (best === null || m.index < best[0])) best = [m.index, k[0]]; });
     return !!best && best[1] === '①';
   }
+  Graph.prototype._b03 = { b03: b03, b03Orig: b03Orig, ivLine: ivLine, isS1Subject: function (s) { return isS1Subject(s); } };   /* 試験用 */
   Graph.prototype._mailGet = function (path) {
     return this._fetch(GRAPH + path).then(function (r) {
       if (r.status === 403) throw new Error('メールを読む権限がありません (403)');
@@ -415,7 +433,9 @@ C01.sources = (function () {
     });
   };
   /* ① = 件名に BKG があり ① の件名の、自社から送ったメール (一番新しいもの) → その会話の一番新しいメール (下書き除く) */
-  Graph.prototype.customsFindS1 = function (bkg) {
+  /* v0.3.85 (R12Y60 · #405): 自社の ① のうち B-03 の件名の元のメール (RE · FW なし) があれば それだけ (後の [P/O送付] Re: などは会話のメールとして) ·
+     件名に BKG が無い = IV 番号で探して 本文の先頭 「I/V NO {IV}」 の B-03 の元のメール (how = b03 | old | iv_body) */
+  Graph.prototype.customsFindS1 = function (bkg, ivNo) {
     var self = this;
     var raw = String(bkg || '').trim().toUpperCase();
     var b = raw.replace(/[^A-Z0-9]/g, '');
@@ -426,10 +446,22 @@ C01.sources = (function () {
       while (i >= 0) { if (!/[0-9]/.test(ns.charAt(i + b.length))) return true; i = ns.indexOf(b, i + 1); }
       return false;
     };
+    var byNew = function (x, y) { return String(y.sentDateTime || '').localeCompare(String(x.sentDateTime || '')); };
+    var how = 'old';
     return self._mailGet('me/messages?$search=' + encodeURIComponent('"' + raw.replace(/"/g, '') + '"') + '&$top=50&' + MSG_SEL).then(function (j) {
       var xs = (j.value || []).filter(function (m) {
         return !m.isDraft && addrOf(m.from).split('@')[1] === oursDom() && isS1Subject(m.subject) && hasBkg(m.subject);
-      }).sort(function (x, y) { return String(y.sentDateTime || '').localeCompare(String(x.sentDateTime || '')); });
+      }).sort(byNew);
+      var b3 = xs.filter(function (m) { return b03Orig(m.subject, raw); });
+      if (b3.length) { xs = b3; how = 'b03'; }
+      if (xs.length || !ivNo) return xs;
+      return self._mailGet('me/messages?$search=' + encodeURIComponent('"' + String(ivNo).replace(/"/g, '') + '"') + '&$top=50&' + MSG_SEL + ',bodyPreview').then(function (k) {
+        how = 'iv_body';
+        return (k.value || []).filter(function (m) {
+          return !m.isDraft && addrOf(m.from).split('@')[1] === oursDom() && B03_HEAD.test(String(m.subject || '')) && !REPLY_ANY.test(String(m.subject || '')) && ivLine(m.bodyPreview, ivNo);
+        }).sort(byNew);
+      });
+    }).then(function (xs) {
       if (!xs.length) return null;
       var s1 = xs[0];
       return self._mailGet('me/messages?$filter=' + encodeURIComponent("conversationId eq '" + s1.conversationId.replace(/'/g, "''") + "'") + '&$top=100&' + MSG_SEL + ',bodyPreview').then(function (c) {
@@ -441,7 +473,7 @@ C01.sources = (function () {
           to: (m.toRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }), cc: (m.ccRecipients || []).map(function (r) { return { a: addrOf(r), n: nameOf(r) }; }),
           preview: String(m.bodyPreview || '') }; };
         /* v0.3.66 (R12Y3 · #366 ②): conv = 会話の全メール (古い順 · 本文の先頭 bodyPreview 付き) — 宛名 (会社名 · 担当者) を ① の会話から探す */
-        return { s1: pack(s1), last: pack(last), n_conv: L.length, s1_count: xs.length, conv: L.map(pack) };
+        return { s1: pack(s1), last: pack(last), n_conv: L.length, s1_count: xs.length, conv: L.map(pack), how: how };
       });
     });
   };
