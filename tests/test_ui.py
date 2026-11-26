@@ -4456,7 +4456,7 @@ def r12x_checks(page, root, shots, engine_r12x):
     page.wait_for_timeout(800)
     open_help()
     t2 = page.locator("#man-lead").inner_text() if page.locator("#man-lead").count() else ""
-    ok("R12X lead 없는 엔진 = TOOL 같은 문", "にそのまま聞いてください" in t2 and "インドネシア語" in t2 and page.locator(".c01-man-sec").count() == len(man["sections"]), t2[:30])
+    ok("R12X lead 없는 엔진 = TOOL 같은 문", "にそのまま聞いてください" in t2 and "インドネシア語" in t2 and page.locator(".c01-man-sec").count() == len([s for s in man["sections"] if not s.get("admin") or page.evaluate("() => C01.app._api().isAdmin()")]), t2[:30])   # v0.3.90: admin 장 = 관리자만
     close()
     # ③ 매뉴얼 없음 (예전 使い方) 에도 맨 위
     mp.write_text(mt0, encoding="utf-8")
@@ -4527,7 +4527,9 @@ def r11g_checks(page, root, shots, engine):
     page.wait_for_timeout(800)
     nsec = page.locator(".c01-man-sec").count()
     toc = page.locator(".c01-man-toc a").count()
-    ok("R11G 使い方 = 매뉴얼 전체 (장 " + str(nsec) + " = manual.json · 목차 링크 · 판 · ✦)", nsec == len(man["sections"]) and toc == len(man["sections"])
+    adm = bool(page.evaluate("() => C01.app._api().isAdmin()"))
+    nvis = len([s for s in man["sections"] if adm or not s.get("admin")])        # v0.3.90 (R12Y71): admin 장 = 관리자만
+    ok("R11G 使い方 = 매뉴얼 전체 (장 " + str(nsec) + " = manual.json (관리자 장 빼고 · admin " + str(adm) + ") · 목차 링크 · 판 · ✦)", nsec == nvis and toc == nvis
        and man["version"] in page.locator(".c01-modal-help .c01-mh").inner_text() and "✦ Powered by LEENAI Automation System" in page.locator("#help-body").inner_text(),
        (nsec, toc))
     ok("R11G 3 장 안 = 버튼 표 (tool_guide 와 같은 원본 · 「他社のコンテナ」 場所)", "この行の操作" in page.locator("#man-3-5").inner_text()
@@ -4699,11 +4701,11 @@ def main():
             page.goto(url)
             page.wait_for_selector("#ln-splash", timeout=20000)
             ok("LEENAI_COMMON 로그인 카드 + ローカルプレビュー 버튼", page.locator("#c01-open-server").count() == 1 and page.locator(".ln-logo").count() >= 1)
-            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.89", page.title() == "LEENAI C-01 搬入票 v0.3.89", page.title())
+            ok("탭 제목 = LEENAI C-01 搬入票 v0.3.90", page.title() == "LEENAI C-01 搬入票 v0.3.90", page.title())
             ok("로그인 버튼 활성 (R7A graph)", page.locator("#ln-login-btn").is_enabled())
             page.click("#c01-open-server")
             page.wait_for_selector("body[data-c01-ready='1']", timeout=20000)
-            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.89" in page.locator(".ln-hdr-ver").inner_text())
+            ok("헤더 C-01 · 버전 1곳", page.locator(".ln-header .ln-sys").inner_text() == "C-01" and "v0.3.90" in page.locator(".ln-hdr-ver").inner_text())
             # v0.3.10 #143: 장수 색 = 업체별 범위 (PACKER_A 8장 = 범위 밖 · 9장 = 안) · 범위 없는 업체 = ≤5·≥15
             page.wait_for_timeout(300)
             pa = page.evaluate("""() => [...document.querySelectorAll('tr.c01-row')].map(t => [t.innerText.includes('PACKER_A'),

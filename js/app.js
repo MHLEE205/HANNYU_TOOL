@@ -2506,7 +2506,9 @@ window.C01 = window.C01 || {};
   var MANQ_KIND = { '値の違い': '3-2', '値の確認': '3-2', '手入力': '3-3', '写真のCT': '3-8', '写真不足': '2-3', '未分類FAX': '3-7', '業者・IV未定': '3-7',
     '他社搬入票候補': '3-6', '同一候補': '3-4', '確認済の見直し': '2-3', '入力後の差異': '3-11' };
   function manRefs(r) {
-    var xs = ((r && r.manual_refs) || []).filter(function (x) { return x && MAN_ID.test(String(x.id || '')); });
+    var hid = {};
+    ((S.manual && S.manual.sections) || []).forEach(function (s) { if (!manVis(s)) hid[s.id] = 1; });
+    var xs = ((r && r.manual_refs) || []).filter(function (x) { return x && MAN_ID.test(String(x.id || '')) && !hid[x.id]; });
     if (!xs.length) return '';
     return '<div class="c01-ask-ref">' + xs.map(function (x) {
       return '<button type="button" class="c01-linkbtn" data-man="' + esc(x.id) + '">参考: 使い方 ' + esc(x.id) + ' ' + esc(x.title || '') + '</button>';
@@ -2517,8 +2519,10 @@ window.C01 = window.C01 || {};
     return ((r && r.manual_refs) || []).length ? t.replace(/\n?参考: 使い方 [^\n]*/g, '') : t;
   }
   function manNorm(s) { return String(s || '').normalize('NFKC').toLowerCase(); }
+  /* v0.3.90 (R12Y71): エンジン manual.json の admin 章 (8. 許可書の内容確認 · 試行中) = 管理者ログインだけ */
+  function manVis(s) { return !(s && s.admin) || isAdmin(); }
   function openManual(sid) {
-    var M = S.manual, secs = M.sections || [];
+    var M = S.manual, secs = (M.sections || []).filter(manVis);
     S.modal = { kind: 'help', man: true };
     var toc = secs.filter(function (s) { return s.level === 2; }).map(function (c) {
       var subs = secs.filter(function (s) { return s.level === 3 && s.chapter === c.id; });
@@ -5413,7 +5417,7 @@ window.C01 = window.C01 || {};
   function customsApi() {
     return { S: S, esc: esc, md: md, toast: toast, showModal: showModal, closeModal: closeModal, writeAction: writeAction, mkAction: mkAction,
       ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords, todayJst: todayJst, openTab: openTab,
-      isAdmin: isAdmin, nowHm: function () { return C01.PERMIT && C01.PERMIT.nowHm ? C01.PERMIT.nowHm() : jstNow().slice(11, 16); } };   /* isAdmin · nowHm = v0.3.89 (R12Y68) */   /* todayJst · openTab = v0.3.88 (R12Y67) */   /* compassRecords = v0.3.65 (#361) */
+      isAdmin: isAdmin, manRefs: manRefs, nowHm: function () { return C01.PERMIT && C01.PERMIT.nowHm ? C01.PERMIT.nowHm() : jstNow().slice(11, 16); } };   /* isAdmin · nowHm = v0.3.89 (R12Y68) */   /* todayJst · openTab = v0.3.88 (R12Y67) */   /* compassRecords = v0.3.65 (#361) */
   }
   C01.app = { _api: customsApi, start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn, _compassInput: function (ivNo) { var iv = ivById(ivNo); return iv ? compassInput(iv) : null; } };
 })();
