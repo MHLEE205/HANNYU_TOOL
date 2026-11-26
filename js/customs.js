@@ -1,4 +1,4 @@
-/* ✦ Powered by LEENAI Automation System — 通関書類送付 (v0.3.63 · 決定 #359 · #302 · #303 · #306 · #338 · #343 · #352 · v0.3.66 #366 · v0.3.86 #408)
+/* ✦ Powered by LEENAI Automation System — 通関書類送付 (v0.3.63 · 決定 #359 · #302 · #303 · #306 · #338 · #343 · #352 · v0.3.66 #366 · v0.3.86 #408 · v0.3.87 送付記録 S/I)
    - 実況表 IV 見出しの 「通関書類送付」 (Compass入力 の横) → 確認窓 → 担当者が 「送信」 を押した時だけ 1 通
    - PDF = D-03 自動モード (同じ出所 · ?auto=1 · 押した担当者のログイン · COMPASS は読むだけ)
    - メール = ① 通関依頼 の会話の一番新しいメールに 全員に返信 (押した担当者のメール · js/source.js customsSend)
@@ -248,6 +248,31 @@ C01.customs = (function () {
     return frameP;
   }
   function runD03(o) { return d03().then(function (w) { return w.run(o); }); }
+  /* v0.3.87 (R12Y64B): 送付記録だけ — D-03 の 既定の S/I (担当者が選ぶ前) · 候補の数 · 既定の出処 · 変えたか を残す。
+     画面 · 既定の決め方 · メール · 宛先 · 添付 は 変えない。手元に無い値は null (作らない)。 */
+  function siDefKeep(r) {
+    var P = r.picks || {};
+    if (st.over.ivSino == null && P.ivSino) st.siDefIv = { v: P.ivSino.v == null ? null : P.ivSino.v, why: String(P.ivSino.why || '') };
+    if (st.over.siSino == null && P.siSino) st.siDefSi = { v: P.siSino.v == null ? null : P.siSino.v, why: String(P.siSino.why || '') };
+  }
+  /* 既定 (IV·PL) の出処 → 短いコード (SI 側は D-03 がいつも S/I①) */
+  function siWhyCode(why, n) {
+    why = String(why || '');
+    if (why.indexOf('三国間') >= 0) return 'three_party';
+    if (why.indexOf('残る S/I') >= 0) return 'no_rest';
+    if (!why || why.indexOf('S/I がありません') >= 0) return 'none';
+    if (n === 1) return 'only_one';
+    if (why.indexOf('最終番号') === 0) return 'last_no';
+    return 'other';
+  }
+  function siRec(r, s) {
+    var P = (r && r.picks) || {}, dI = s && s.siDefIv, dS = s && s.siDefSi;
+    var n = r && Array.isArray(r.si_avail) ? r.si_avail.length : null;
+    var fI = P.ivSino ? P.ivSino.v : null, fS = P.siSino ? P.siSino.v : null;
+    var ch = dI && dS ? (fI !== dI.v || fS !== dS.v) : null;
+    return { si_default_iv: dI ? dI.v : null, si_default_si: dS ? dS.v : null, si_avail_n: n,
+      si_why: ch === true ? 'staff_changed' : dI ? siWhyCode(dI.why, n) : null, si_changed: ch };
+  }
 
   /* ── COMPASS (D-03 が読んだ値) = 実況表の値 ── */
   function normCt(s) { return String(s || '').replace(/[\s-]/g, '').toUpperCase(); }
@@ -431,6 +456,7 @@ C01.customs = (function () {
     return runD03(o).then(function (r) {
       if (!st || st.iv !== ivNo) return;
       st.d03 = r; st.step = '完了'; st.prevD03 = null;
+      if (r && r.ok) siDefKeep(r);
       if (st.pdfUrl) URL.revokeObjectURL(st.pdfUrl);
       st.pdfUrl = null;
       if (r && r.ok) {
@@ -1053,7 +1079,7 @@ C01.customs = (function () {
     var a = api();
     if (sendBlockers().length) return;
     var useShare = shareOn(), fb = shareFallback(), days = shareDays();
-    var r = st.d03, rc = recips(), iv = a.ivById(st.iv), test = testMode();
+    var r = st.d03, rc = recips(), iv = a.ivById(st.iv), test = testMode(), sr = siRec(st.d03, st);
     var again = !!(lastLive(iv) || st.sent.some(function (x) { return !x.test; }));
     var subj = subject();
     var RW = { s1_reply: '① に 全員に返信', s1_shared: '① と同じ宛先へ 新しいメール（① は ' + ((st.shared && (st.shared.staff_name || st.shared.staff)) || '') + ' のメール）', manual: '入力した宛先（確認済み）' };
@@ -1077,7 +1103,8 @@ C01.customs = (function () {
         value: { test: res.test, again: again, subject: subj, to: res.to, cc: res.cc, to_n: res.to.length, cc_n: res.cc.length,
           internet_message_id: res.internet_message_id, file: r.file, pages: r.pages, pdf_sha256: r.sha256, d03: r.version,
           picks: { ivSino: r.picks.ivSino.v, siSino: r.picks.siSino.v, pod: r.picks.pod.v, freight: r.picks.freight.v },
-          bl: r.picks.bl.v, bl_why: st.blWhy || '', sc_id: st.sc || '', sc_no: st.scNo || '', buyer_id: (r.info || {}).buyer_id || st.buyer || '', consignee: (r.info || {}).consignee || '',
+          bl: r.picks.bl.v, bl_why: st.blWhy || '', sc_id: st.sc || '', sc_no: st.scNo || '', si_default_iv: sr.si_default_iv, si_default_si: sr.si_default_si,
+          si_avail_n: sr.si_avail_n, si_why: sr.si_why, si_changed: sr.si_changed, buyer_id: (r.info || {}).buyer_id || st.buyer || '', consignee: (r.info || {}).consignee || '',
           red: (r.warnings || []).filter(function (w) { return w.red; }).map(function (w) { return w.item; }),
           real_to_n: rc.to.length, real_cc_n: rc.cc.length, to_how: rc.how, broker_dom: st.brokerDom || '', broker_line: String(st.body || '').split(/\r?\n/)[0].trim(),
           broker_person: personLine(st.body), name_src: st.nameSrc || null, route: route,
@@ -1144,5 +1171,5 @@ C01.customs = (function () {
   return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
     _greeting: greeting, _sigCompany: sigCompany, _shareCut: shareCut, _baseRecips: baseRecips, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
     _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
-    _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _pickBl: pickBl, _blState: function () { return st ? { bl: st.bl, why: st.blWhy, red: st.blRed || '', sc: st.sc, scNo: st.scNo } : null; }, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
+    _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _pickBl: pickBl, _siRec: siRec, _siWhyCode: siWhyCode, _siDef: function () { return st ? { iv: st.siDefIv || null, si: st.siDefSi || null } : null; }, _blState: function () { return st ? { bl: st.bl, why: st.blWhy, red: st.blRed || '', sc: st.sc, scNo: st.scNo } : null; }, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
 })();
