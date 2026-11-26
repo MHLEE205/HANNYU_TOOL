@@ -63,15 +63,20 @@ C01.customs = (function () {
     scan_need_ai: 'まだ読めていない', name_permit_text_other: 'ファイル名は許可書 · 中身は別の書類', subject_iv_missing: '件名に IV が無い' };
   var PERMIT_HOW = { text: 'PDF の文字', name: 'ファイル名', ai: '画像の読み取り (AI)', human: '人の確認待ち' };
   function permitOn() { var m = api().S.meta; return !!(m && m.permit && m.permit.on); }
+  /* v0.3.89 (R12Y68 · #413 형님 「CUT 당일 오전부터 주황 · 17시까지 없으면 빨강」): CUT 당일 = 「許可待ち（本日CUT）」 橙 → 17:00 (meta.permit.none_hour) から 「許可なし」 赤 ·
+     許可書 確認 (エンジンが決められない) は CUT 当日 17:00 から 赤い枠 · 対象 = 送付済 IV (送付前 · L インボイス = 出さない) */
+  function noneHour() { var m = api().S.meta; return (m && m.permit && m.permit.none_hour) || (C01.PERMIT && C01.PERMIT.noneHour) || '17:00'; }
   function permitState(iv) {
     if (!iv || !permitOn() || domestic(iv)) return null;
     var p = iv.permit || null, nh = (p && p.need_human) || [];
     if (p && p.kind) return { st: 'ok', p: p, check: nh.length > 0 };
-    if (nh.length) return { st: 'check', p: p };
-    var cut = iv.cy_cut ? String(iv.cy_cut).slice(0, 10) : '';
-    if (cut && cut < api().todayJst()) return { st: 'none', p: p };
-    if (lastLive(iv) || mailSeen(iv)[0]) return { st: 'wait', p: p };
-    return null;
+    var cut = iv.cy_cut ? String(iv.cy_cut).slice(0, 10) : '', today = api().todayJst();
+    var sent = !!(lastLive(iv) || mailSeen(iv)[0]), late = !!cut && cut === today && api().nowHm() >= noneHour();
+    if (nh.length) return { st: 'check', p: p, late: late && sent };
+    if (cut && cut < today) return { st: 'none', p: p };
+    if (!sent) return null;
+    if (cut === today) return late ? { st: 'none', p: p, today: true } : { st: 'wait_cut', p: p };
+    return { st: 'wait', p: p };
   }
   function permitNh(p) {
     return ((p && p.need_human) || []).map(function (x) {
@@ -90,8 +95,12 @@ C01.customs = (function () {
         '✓ 変更通知 ' + esc(md(p.received_at));
       return '<button class="c01-permit c01-permit-ok"' + at + ' data-permit-ok title="' + esc(t) + '">' + main + '</button>' + (s.check ? chk('ほかに エンジンが決められない書類があります — ') : '');
     }
-    if (s.st === 'check') return chk('輸出許可書らしい書類が届きましたが エンジンが決められません — ');
-    if (s.st === 'none') return '<span class="c01-permit c01-permit-none" data-permit-none title="CY CUT を過ぎても 輸出許可書 のメールが見つかりません（通関業者の返信 · エンジンの見落としの可能性 — 管理者へ）">許可なし</span>';
+    if (s.st === 'check') return s.late ? chk('本日 CY CUT · ' + noneHour() + ' を過ぎました — ').replace('c01-permit c01-permit-chk"', 'c01-permit c01-permit-chk c01-permit-late"') :
+      chk('輸出許可書らしい書類が届きましたが エンジンが決められません — ');
+    if (s.st === 'none') return s.today ?
+      '<span class="c01-permit c01-permit-none" data-permit-none data-permit-today title="本日 CY CUT · ' + esc(noneHour()) + ' を過ぎても 輸出許可書 が届いていません（通関業者に確認 · エンジンの見落としの可能性 — 管理者へ）">許可なし</span>' :
+      '<span class="c01-permit c01-permit-none" data-permit-none title="CY CUT を過ぎても 輸出許可書 のメールが見つかりません（通関業者の返信 · エンジンの見落としの可能性 — 管理者へ）">許可なし</span>';
+    if (s.st === 'wait_cut') return '<span class="c01-permit c01-permit-cut" data-permit-wait-cut title="本日 CY CUT · 輸出許可書 はまだ届いていません — ' + esc(noneHour()) + ' までに届かなければ 「許可なし」（赤）">許可待ち（本日CUT）</span>';
     return '<span class="c01-permit c01-permit-wait" data-permit-wait title="通関書類は送付済 · 輸出許可書はまだ届いていません（通関業者の返信を待っています）">許可待ち</span>';
   }
   function openPermit(ivNo) {
@@ -112,6 +121,106 @@ C01.customs = (function () {
       '<p class="c01-note2">表示だけです（搬入票の値 · 判定には使いません）。許可書の中身（申告の内容）の確認はまだありません。</p></div>';
     a.showModal(html);
     document.getElementById('c01-modal').querySelectorAll('[data-permitopen]').forEach(function (b) { b.onclick = function () { a.openTab(fs[+b.getAttribute('data-permitopen')].path); }; });
+  }
+
+  /* ── v0.3.89 (R12Y68 · #412 · #414): 許可書の内容 (エンジン iv.permit.check · meta.permit.check) — 12/03 まで 管理者だけ (meta.permit.staff = 職員にも)
+     closed = ✓ 終結 (緑) · kubun = 許可済（区分2/3）— 確認 (橙 · 1 クリック) · diff = 許可書 相違 (赤 · 項目の表 + PDF) · hyoki = 表記確認 (橙 · 同じ意味 / 違う) ·
+     unread · no_ours · reopened = 内容 確認できず (橙) · 区分 メール (許可書の前) = 区分2 橙 / 区分3 赤 · 写真未送付 赤 · 記録 = _actions permit_ok (元に戻す = undo) ── */
+  var CK_FIELD_JA = { '仕向人住所': '仕向人住所', '品目数量の合計': '品目の数量の合計' };
+  var CK_R = { '相違': '相違', '처음보는다름': '表記確認', '読めず': '読めず', '相違?': '相違' };
+  var CK_WHY = { no_ours: '当社の書類 (IV · PL · S/I) が見つかりません', unread: '許可書の項目を読めません', reopened: '輸出取止め の後の許可書がまだありません' };
+  function checkOn() {
+    var m = api().S.meta, p = m && m.permit;
+    return !!(p && p.on && p.check && (p.staff || p.check === 'live' && p.staff || (api().isAdmin && api().isAdmin())));
+  }
+  function ckActs(ivNo) {
+    /* エンジンの記録 (iv.permit.check.acts) + 自分 · 他の人の _actions (permit_ok) − 元に戻した (undo) */
+    var S = api().S, iv = api().ivById(ivNo), c = (iv && iv.permit && iv.permit.check) || {}, xs = [], seen = {}, undone = {};
+    (S.actions || []).concat(S.mine || []).forEach(function (x) { var a = x.action || x; if (a.action === 'undo' && a.value && a.value.action_id) undone[a.value.action_id] = 1; });
+    (c.acts || []).forEach(function (a) { seen[a.action_id] = 1; if (!undone[a.action_id]) xs.push({ action_id: a.action_id, kind: a.kind, field: a.field || null, by: a.by, at: a.at }); });
+    (S.actions || []).concat(S.mine || []).forEach(function (x) {
+      var a = x.action || x;
+      if (a.action === 'permit_ok' && a.iv === ivNo && !seen[a.action_id] && !undone[a.action_id]) { seen[a.action_id] = 1; xs.push({ action_id: a.action_id, kind: (a.value || {}).kind, field: (a.value || {}).field || null, by: a.by, at: a.at }); }
+    });
+    return xs;
+  }
+  function ckState(iv) {
+    if (!iv || !checkOn() || domestic(iv)) return null;
+    var c = iv.permit && iv.permit.check;
+    if (!c || c.past_cut) return null;
+    var acts = ckActs(iv.iv_no), st = c.st;
+    var has = function (k, f) { return acts.some(function (a) { return a.kind === k && (f === undefined || a.field === f); }); };
+    if (st === 'kubun' && has('kubun')) st = 'closed_kubun';
+    if (st === 'hyoki') {
+      var left = (c.fields || []).filter(function (f) { return f.r === '처음보는다름'; }).map(function (f) { return f.f; });
+      if (left.some(function (f) { return has('diff', f); })) st = 'diff';
+      else if (left.length && left.every(function (f) { return has('same', f); })) st = 'closed';
+    }
+    return { st: st, c: c, acts: acts };
+  }
+  function permitCheckBadge(g) {
+    var a = api(), esc = a.esc, iv = g.iv, s = ckState(iv);
+    if (!s) return '';
+    var c = s.c, at = ' data-permitck="' + esc(iv.iv_no) + '"', out = '', km = c.kubun_mail;
+    if (km && s.st !== 'closed' && s.st !== 'closed_kubun') {
+      out += '<button class="c01-permit ' + (km.level === 3 ? 'c01-permit-none' : 'c01-permit-chk') + '"' + at + ' data-permit-kubun-mail title="通関業者のメール ' + esc(String(km.at || '').slice(0, 16).replace('T', ' ')) +
+        ' — 区分' + km.level + (km.level === 3 ? '（検査）。検査指定票 · 検査日 · 費用 · CUT に間に合うか確認' : '（税関審査）。バンニング写真の送付を確認') + '">区分' + km.level + '</button>';
+      if (km.photo === 'missing') out += '<button class="c01-permit c01-permit-none"' + at + ' data-permit-photo-missing title="区分のメールから ' + 30 + ' 分 · 当社の写真の送付が見つかりません">区分' + km.level + ' の写真未送付</button>';
+    }
+    if (s.st === 'closed' || s.st === 'closed_kubun') out += '<button class="c01-permit c01-permit-ok"' + at + ' data-permit-closed title="許可書の内容 = 当社の書類と一致' + (s.st === 'closed_kubun' ? ' · 区分' + esc(c.kubun) + ' 確認済' : '') + ' — 押すと項目の表">✓ 終結</button>';
+    else if (s.st === 'kubun') out += '<button class="c01-permit c01-permit-chk"' + at + ' data-permit-kubun title="許可済ですが 区分' + esc(c.kubun) + '（審査 · 検査あり）— 担当が確認すると 終結">許可済（区分' + esc(String(c.kubun || '').slice(0, 1)) + '）— 確認</button>';
+    else if (s.st === 'diff') out += '<button class="c01-permit c01-permit-none"' + at + ' data-permit-diff title="許可書の内容が違います — 押すと項目の表 · 通関業者に訂正を依頼">許可書 相違</button>';
+    else if (s.st === 'hyoki') out += '<button class="c01-permit c01-permit-chk"' + at + ' data-permit-hyoki title="初めて見る表記 — 同じ意味か 違うか を選んでください">表記確認</button>';
+    else if (CK_WHY[s.st]) out += '<button class="c01-permit c01-permit-chk"' + at + ' data-permit-unread title="' + esc(CK_WHY[s.st] + (c.why ? ' (' + c.why + ')' : '')) + '">内容 確認できず</button>';
+    return out;
+  }
+  function ckWrite(ivNo, v) {
+    var a = api();
+    return a.writeAction(a.mkAction('permit_ok', { iv: ivNo, ct: null, field: null, source: null, value: v })).then(function () { a.toast('記録しました（反映は数分以内）'); openPermitCheck(ivNo); });
+  }
+  function ckUndo(ivNo, aid) {
+    var a = api();
+    return a.writeAction(a.mkAction('undo', { iv: ivNo, ct: null, field: null, source: null, value: { action_id: aid } })).then(function () { a.toast('元に戻しました'); openPermitCheck(ivNo); });
+  }
+  function openPermitCheck(ivNo) {
+    var a = api(), esc = a.esc, iv = a.ivById(ivNo), s = ckState(iv);
+    if (!s) return;
+    var c = s.c, fs = (iv.permit && iv.permit.files) || [], dt = function (x) { return String(x || '').slice(0, 16).replace('T', ' '); };
+    var by = function (k, f) { return s.acts.filter(function (x) { return x.kind === k && (f === undefined || x.field === f); }).slice(-1)[0]; };
+    var undoBtn = function (x) { return x ? ' <span class="c01-note2">' + esc(a.staffName ? a.staffName(x.by) : x.by) + ' ' + esc(dt(x.at)) + '</span> <button class="c01-btn-ghost2" data-ckundo="' + esc(x.action_id) + '">元に戻す</button>' : ''; };
+    var head = { closed: '✓ 終結 — 許可書の内容 = 当社の書類', closed_kubun: '✓ 終結 — 区分' + (c.kubun || '') + ' 確認済', kubun: '許可済（区分' + (c.kubun || '') + '）— 担当の確認で 終結',
+      diff: '許可書の内容が違います — 通関業者に訂正を依頼してください', hyoki: '初めて見る表記があります — 同じ意味か 違うか', unread: CK_WHY.unread, no_ours: CK_WHY.no_ours, reopened: CK_WHY.reopened, before: '許可書はまだです' }[s.st] || '';
+    var rows = (c.fields || []).map(function (f) {
+      var lab = CK_R[f.r] || f.r, btn = '';
+      if (f.r === '처음보는다름') {
+        var sm = by('same', f.f), df = by('diff', f.f);
+        btn = sm ? '同じ意味' + undoBtn(sm) : df ? '違う' + undoBtn(df) :
+          '<button class="c01-btn-sub" data-cksame="' + esc(f.f) + '">同じ意味（登録）</button> <button class="c01-btn-sub" data-ckdiff="' + esc(f.f) + '">違う（相違）</button>';
+      }
+      return '<tr><th>' + esc(CK_FIELD_JA[f.f] || f.f) + '</th><td>' + esc(f.p || '—') + '</td><td>' + esc(f.o || '—') + '</td><td class="' + (f.r === '相違' ? 'c01-ck-red' : 'c01-ck-or') + '">' + esc(lab) + '</td><td>' + btn + '</td></tr>';
+    }).join('');
+    var km = c.kubun_mail, kub = by('kubun');
+    var html = '<div class="c01-mh"><b>許可書の内容</b><span class="mono">' + esc(ivNo) + '</span><span class="t2">' + esc(head) + '</span>' +
+      '<span class="c01-flex"></span><button class="c01-btn-ghost2" data-close>閉じる</button></div><div class="c01-mb">' +
+      (km ? '<p class="c01-note2" data-ck-kubun-mail>区分' + km.level + ' のメール ' + esc(dt(km.at)) + ' · 写真 ' + (km.photo === 'sent' ? '送付済 ' + esc(dt(km.photo_at)) : km.photo === 'missing' ? '<b class="c01-ck-red">未送付</b>' : '待ち') + '</p>' : '') +
+      (s.st === 'kubun' ? '<p><button class="c01-btn-pri" data-ckkubun>区分' + esc(c.kubun || '') + ' を確認しました（終結）</button></p>' : '') +
+      (s.st === 'closed_kubun' && kub ? '<p class="c01-note2">区分' + esc(c.kubun || '') + ' 確認' + undoBtn(kub) + '</p>' : '') +
+      (rows ? '<table class="c01-permit-tbl c01-ck-tbl" data-ck-tbl><tr><th>項目</th><th>許可書</th><th>当社 (IV · PL · S/I · COMPASS)</th><th>判定</th><th></th></tr>' + rows + '</table>' :
+        '<p class="c01-note2">主な項目 ' + (c.main_ok || 0) + ' / 10 一致（表記の違いを含む）</p>') +
+      (c.n_change ? '<p class="c01-note2">許可内容変更通知 ' + c.n_change + ' 通 — 本船 · 仕向地 は変更後の値で確認</p>' : '') +
+      (c.vessel_src === 'compass' ? '<p class="c01-note2">本船 = COMPASS の最新と確認</p>' : '') +
+      (s.st === 'diff' ? '<p class="c01-note2">相違 = 通関業者に訂正（内容変更）を依頼してください。理由がわかっている時は そのままで構いません（記録だけ）。</p>' : '') +
+      (fs.length ? '<ul class="c01-customs-list">' + fs.map(function (f, i) { return '<li><button class="c01-btn-sub" data-ckopen="' + i + '">開く</button> <span>' + esc(f.name) + '</span></li>'; }).join('') + '</ul>' : '') +
+      '<p class="c01-note2">表示だけです（搬入票の値 · 判定には使いません）。12/03 までは 管理者だけに表示しています。</p></div>';
+    a.showModal(html);
+    var m = document.getElementById('c01-modal');
+    m.querySelectorAll('[data-ckopen]').forEach(function (b) { b.onclick = function () { a.openTab(fs[+b.getAttribute('data-ckopen')].path); }; });
+    m.querySelectorAll('[data-ckundo]').forEach(function (b) { b.onclick = function () { ckUndo(ivNo, b.getAttribute('data-ckundo')); }; });
+    var fld = function (n) { return (c.fields || []).filter(function (f) { return f.f === n; })[0] || {}; };
+    m.querySelectorAll('[data-cksame]').forEach(function (b) { b.onclick = function () { var f = fld(b.getAttribute('data-cksame')); ckWrite(ivNo, { kind: 'same', field: f.f, p: f.p || null, o: f.o || null }); }; });
+    m.querySelectorAll('[data-ckdiff]').forEach(function (b) { b.onclick = function () { var f = fld(b.getAttribute('data-ckdiff')); ckWrite(ivNo, { kind: 'diff', field: f.f, p: f.p || null, o: f.o || null }); }; });
+    var kb = m.querySelector('[data-ckkubun]');
+    if (kb) kb.onclick = function () { ckWrite(ivNo, { kind: 'kubun', kubun: c.kubun || null }); };
   }
 
   /* ── ボタンの条件 (実況表の値だけ · ① · S/I · COMPASS の値は押した後の確認窓で) ── */
@@ -1226,7 +1335,8 @@ C01.customs = (function () {
     var sub = (bl.length ? 'B/L: ' + bl.join(' / ') : '') + (si.crcf9_port_of_discharge ? (bl.length ? ' · ' : '') + 'Port of Discharge: ' + si.crcf9_port_of_discharge : '');
     return '<div class="c01-cpods">' + h + '</div>' + (sub ? '<div class="t2 c01-cpodsub" data-cpodsub>' + esc(sub) + '</div>' : '');
   }
-  return { headerBtn: headerBtn, permitBadge: permitBadge, permitState: permitState, permitOn: permitOn, openPermit: openPermit, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
+  return { headerBtn: headerBtn, permitBadge: permitBadge, permitState: permitState, permitOn: permitOn, openPermit: openPermit, open: open,
+    permitCheckBadge: permitCheckBadge, openPermitCheck: openPermitCheck, ckState: ckState, checkOn: checkOn, noneHour: noneHour,   /* v0.3.89 (R12Y68) */ lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
     _greeting: greeting, _sigCompany: sigCompany, _shareCut: shareCut, _baseRecips: baseRecips, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
     _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
     _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _pickBl: pickBl, _siRec: siRec, _siWhyCode: siWhyCode, _siDef: function () { return st ? { iv: st.siDefIv || null, si: st.siDefSi || null } : null; }, _blState: function () { return st ? { bl: st.bl, why: st.blWhy, red: st.blRed || '', sc: st.sc, scNo: st.scNo } : null; }, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };

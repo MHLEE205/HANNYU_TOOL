@@ -667,6 +667,11 @@ button.c01-permit { cursor: pointer; }
 .c01-permit-chk { color: #8a4b00; background: #fff1de; border-color: #e08a00; }
 .c01-permit-wait { color: var(--text2); background: transparent; border: 1px dashed var(--border); font-weight: 500; cursor: help; }
 .c01-permit-none { color: #fff; background: #c62828; border-color: #c62828; cursor: help; }
+.c01-permit-cut { color: #8a4b00; background: #fff1de; border: 1px solid #e08a00; cursor: help; }   /* v0.3.89 (R12Y68 · #413): 許可待ち（本日CUT） */
+.c01-permit-late { border: 2px solid #c62828; }   /* v0.3.89: 許可書 確認 · CUT 当日 17:00 から 赤い枠 */
+.c01-ck-red { color: #c62828; font-weight: 700; }
+.c01-ck-or { color: #8a4b00; font-weight: 600; }
+.c01-permit-tbl.c01-ck-tbl td, .c01-permit-tbl.c01-ck-tbl th { padding: 3px 14px 3px 0; vertical-align: top; max-width: 320px; word-break: break-word; }
 .c01-f-pwait.on { background: #e6e6e6; }
 .c01-f-pcheck.on { background: #fff1de; }
 .c01-permit-tbl { border-collapse: collapse; margin: 4px 0 10px; }

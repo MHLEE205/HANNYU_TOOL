@@ -878,7 +878,7 @@ window.C01 = window.C01 || {};
       cnt.human += rows.filter(function (x) { return x.dk === 'human'; }).length;
       /* v0.3.88 (R12Y67 · #411): 輸出許可書 — 許可待ち (送付済 · 未着 + CUT 過ぎ 許可なし) · 許可書 確認 (エンジンが決められない) */
       var pst = C01.customs && C01.customs.permitState ? C01.customs.permitState(iv) : null;
-      var pWait = !!(pst && (pst.st === 'wait' || pst.st === 'none')), pChk = !!(pst && (pst.st === 'check' || pst.check));
+      var pWait = !!(pst && (pst.st === 'wait' || pst.st === 'wait_cut' || pst.st === 'none')), pChk = !!(pst && (pst.st === 'check' || pst.check));   /* wait_cut = v0.3.89 (R12Y68 · #413) */
       if (pWait) cnt.pwait += 1;
       if (pChk) cnt.pcheck += 1;
       var onlyUn = rows.length === 0 && unarr.length > 0;
@@ -1081,6 +1081,7 @@ window.C01 = window.C01 || {};
             (!g.onlyUn ? '<button class="c01-blocked" data-compass="' + esc(iv.iv_no) + '" title="全台が 自動OK / 確認済 になると入力できます（比較表だけ見られます）">Compass入力（未完了あり）</button>' : '')) +
         (C01.customs && !g.onlyUn ? C01.customs.headerBtn(g) : '') +            /* v0.3.63 (決定 #359): 通関書類送付 (Compass入力 の横) */
         (C01.customs && C01.customs.permitBadge && !g.onlyUn ? C01.customs.permitBadge(g) : '') +   /* v0.3.88 (R12Y67 · #411): 輸出許可書 (送付済 の横 · 表示だけ) */
+        (C01.customs && C01.customs.permitCheckBadge && !g.onlyUn ? C01.customs.permitCheckBadge(g) : '') +   /* v0.3.89 (R12Y68 · #412): 許可書の内容 · 区分 (12/03 まで 管理者だけ) */
         '</div></td></tr>';
       g.rows.forEach(function (x) {
         var cls = x.dk === 'human' ? 'ok hum' : x.st === '自動OK' || x.st === '確認済' ? 'ok' : x.st === '再確認' ? 'check' : 'wait';   /* v0.3.60 (R11R): 人の確認 = 青 (hum) */
@@ -1147,6 +1148,7 @@ window.C01 = window.C01 || {};
     root.querySelectorAll('[data-csend]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); if (C01.customs) C01.customs.open(el.getAttribute('data-csend'), el.hasAttribute('data-csend-off')); }; });   /* v0.3.63 */
     root.querySelectorAll('[data-customs]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openCustoms(el.getAttribute('data-customs')); }; });
     root.querySelectorAll('[data-permit]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); if (C01.customs) C01.customs.openPermit(el.getAttribute('data-permit')); }; });   /* v0.3.88 (R12Y67) */
+    root.querySelectorAll('[data-permitck]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); if (C01.customs) C01.customs.openPermitCheck(el.getAttribute('data-permitck')); }; });   /* v0.3.89 (R12Y68) */
     root.querySelectorAll('[data-otherct]').forEach(function (el) { el.onclick = function (ev) { ev.stopPropagation(); openOtherCts(el.getAttribute('data-otherct')); }; });
     root.querySelectorAll('[data-same]').forEach(function (el) {
       el.onclick = function (ev) { ev.stopPropagation(); S.view = 'input'; S.qkind = SAME; S.qiv = null; S.qsel = el.getAttribute('data-same'); render(); };
@@ -5410,7 +5412,8 @@ window.C01 = window.C01 || {};
   /* v0.3.63 (決定 #359): 通関書類送付 (js/customs.js) が使う内部の関数 — 画面の部品 · 記録の書き方は 他のボタンと同じ */
   function customsApi() {
     return { S: S, esc: esc, md: md, toast: toast, showModal: showModal, closeModal: closeModal, writeAction: writeAction, mkAction: mkAction,
-      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords, todayJst: todayJst, openTab: openTab };   /* todayJst · openTab = v0.3.88 (R12Y67) */   /* compassRecords = v0.3.65 (#361) */
+      ivById: ivById, jstNow: jstNow, render: render, staffName: staffName, graphMode: graphMode, compassRecords: compassRecords, todayJst: todayJst, openTab: openTab,
+      isAdmin: isAdmin, nowHm: function () { return C01.PERMIT && C01.PERMIT.nowHm ? C01.PERMIT.nowHm() : jstNow().slice(11, 16); } };   /* isAdmin · nowHm = v0.3.89 (R12Y68) */   /* todayJst · openTab = v0.3.88 (R12Y67) */   /* compassRecords = v0.3.65 (#361) */
   }
   C01.app = { _api: customsApi, start: start, render: render, tick: tick, poll: poll, photoTabName: photoTabName, busy: busy, _rot: rotMap, ctDupWarn: ctDupWarn, _compassInput: function (ivNo) { var iv = ivById(ivNo); return iv ? compassInput(iv) : null; } };
 })();

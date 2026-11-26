@@ -133,7 +133,7 @@ def main():
                        okPast: (f({ iv_no: 'TST2611-80', cy_cut: '2026-11-01', permit: { kind: 'PERMIT', received_at: '2026-11-01T09:00:00+09:00', need_human: [], change: [] } }) || {}).st,
                        lPast: f({ iv_no: 'LTST2611-81', cy_cut: '2026-11-01' }) }; }""")
             ok("S4 許可なし = CUT 지남 · 허가서 없음 (送付 기록 없어도)", st["none"] == "none" and st["noneNoSend"] == "none", st)
-            ok("S4 CUT 당일 = 許可待ち (빨강 아님)", st["cutToday"] == "wait", st)
+            ok("S4 CUT 당일 = 許可待ち（本日CUT） 또는 17:00 뒤 許可なし (v0.3.89 #413)", st["cutToday"] in ("wait_cut", "none"), st)
             ok("S4 CUT 지남 + 허가서 = ✓ · L = 없음", st["okPast"] == "ok" and st["lPast"] is None, st)
             # 화면 캡처: 4가지 상태 (S4 = CUT 지난 IV 는 実況表 에 없으므로 D 머리줄에 그린 것)
             page.evaluate("""(iv) => { const h = document.querySelector("tbody[data-iv='" + iv + "'] .c01-ivhead");
