@@ -1,4 +1,4 @@
-/* ✦ Powered by LEENAI Automation System — 通関書類送付 (v0.3.63 · 決定 #359 · #302 · #303 · #306 · #338 · #343 · #352 · v0.3.66 #366)
+/* ✦ Powered by LEENAI Automation System — 通関書類送付 (v0.3.63 · 決定 #359 · #302 · #303 · #306 · #338 · #343 · #352 · v0.3.66 #366 · v0.3.86 #408)
    - 実況表 IV 見出しの 「通関書類送付」 (Compass入力 の横) → 確認窓 → 担当者が 「送信」 を押した時だけ 1 通
    - PDF = D-03 自動モード (同じ出所 · ?auto=1 · 押した担当者のログイン · COMPASS は読むだけ)
    - メール = ① 通関依頼 の会話の一番新しいメールに 全員に返信 (押した担当者のメール · js/source.js customsSend)
@@ -170,30 +170,57 @@ C01.customs = (function () {
   function contractOf(ivNo) {
     return dvGet("cr49f_bookings?$filter=cr49f_invoice_no eq '" + String(ivNo).replace(/'/g, "''") + "'&$select=_cr49f_sale_contract_id_value").then(function (j) {
       var b = (j.value || [])[0], sc = b && b._cr49f_sale_contract_id_value;
-      if (!sc) return { buyer: '', si: null };
-      var pB = dvGet('cr49f_sale_contracts(' + sc + ')?$select=_cr49f_buyer_id_value').then(function (s) { return s._cr49f_buyer_id_value || ''; }, function () { return ''; });
+      if (!sc) return { buyer: '', si: null, sc: '', scNo: '', scIvs: null };
+      var pB = dvGet('cr49f_sale_contracts(' + sc + ')?$select=_cr49f_buyer_id_value,cr49f_sale_contract_no').then(function (s) { return { buyer: s._cr49f_buyer_id_value || '', no: s.cr49f_sale_contract_no || '' }; }, function () { return { buyer: '', no: '' }; });
       var pS = dvGet('cr49f_s_is?$filter=_cr49f_sale_contract_id_value eq ' + sc + '&$select=' + SI_SEL).then(function (r) { return r.value || []; }, function () { return null; });
-      return Promise.all([pB, pS]).then(function (r) { return { buyer: r[0], si: r[1] }; });
-    }).catch(function () { return { buyer: '', si: null }; });
+      /* v0.3.86 (R12Y63 · #408): 同じ販売契約の IV (ブッキング) — 読めない = null (B/L は空欄 · 赤) */
+      var pI = dvGet('cr49f_bookings?$filter=_cr49f_sale_contract_id_value eq ' + sc + '&$select=cr49f_invoice_no').then(function (r) {
+        return (r.value || []).map(function (b) { return String(b.cr49f_invoice_no || '').trim(); }).filter(Boolean);
+      }, function () { return null; });
+      return Promise.all([pB, pS, pI]).then(function (r) { return { buyer: r[0].buyer, si: r[1], sc: sc, scNo: r[0].no, scIvs: r[2] }; });
+    }).catch(function () { return { buyer: '', si: null, sc: '', scNo: '', scIvs: null }; });
   }
-  /* #338: バイヤーの 6 か月の B/L 実績 = エンジン customs_bl.json (あれば) + 送付記録 (customs_sent · 試験は除く) */
-  function blHistory(buyer, ivNo) {
-    var S = api().S, out = [], since = new Date(Date.now() - 183 * 864e5).toISOString().slice(0, 10);
-    var seed = (S.customsBl && S.customsBl.buyers && S.customsBl.buyers[buyer]) || [];
-    seed.forEach(function (x) { if (String(x.at || '') >= since && x.iv !== ivNo && BL_CLS[x.bl]) out.push({ at: x.at, bl: BL_CLS[x.bl], cons: x.cons || '' }); });
+  /* Consignee の前回 (D-03 prevCons · 同じバイヤー) = TOOL の送付記録 (customs_sent · 試験は除く) だけ — v0.3.86 (R12Y63 · #408): 6 か月の customs_bl.json は使わない (B/L にも使わない) */
+  function consHistory(buyer, ivNo) {
+    var S = api().S, out = [];
     ((S.jik && S.jik.ivs) || []).forEach(function (iv) {
-      records(iv).forEach(function (r) { var v = r.value; if (!v.test && v.buyer_id === buyer && iv.iv_no !== ivNo && BL_CLS[v.bl]) out.push({ at: r.at, bl: BL_CLS[v.bl], cons: v.consignee || '' }); });
+      records(iv).forEach(function (r) { var v = r.value; if (!v.test && v.buyer_id === buyer && iv.iv_no !== ivNo) out.push({ at: r.at, cons: v.consignee || '' }); });
     });
     return out.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
   }
-  function pickBl(h) {
-    if (!h.length) return { v: '', why: '新しいバイヤー（6 か月の実績なし）' };
-    var c = { original: 0, waybill: 0, surrender: 0 };
-    h.forEach(function (x) { c[x.bl] += 1; });
-    if (c.surrender) return { v: '', why: 'SURRENDER の実績あり' };
-    if (c.original && c.waybill) return { v: '', why: '混在（WAY BILL ' + c.waybill + ' / Original ' + c.original + '）' };
-    var v = c.waybill ? 'waybill' : 'original';
-    return { v: v, why: '6 か月の実績 = ' + BL_LABEL[v] + '（' + (c[v]) + ' 件）' };
+  /* v0.3.86 (R12Y63 · #408): B/L 形態の既定 = 同じ販売契約の 前に送った IV (TOOL の送付記録 customs_sent · 試験は除く · picks.bl) — 同じ契約 = 条件は同じ (#408)。
+     バイヤーの 6 か月の実績 (#338 · customs_bl.json) は使わない (会社ごとに違う · #369 · #408)。エンジンの 手で送った 送付済 (#380) は B/L が分からないので使わない。
+     IV ごとに 一番新しい記録 1 つ · 契約の中で 2 つ以上違う = 空欄 + 赤 · 無い = 空欄 + 赤。 */
+  function contractBlHistory(scIvs, ivNo) {
+    var a = api(), out = [];
+    (scIvs || []).forEach(function (no) {
+      if (!no || no === ivNo) return;
+      var iv = a.ivById(no) || { iv_no: no };
+      var r = records(iv).filter(function (x) { return !x.value.test && BL_CLS[x.value.bl]; })[0];
+      if (r) out.push({ iv: no, at: r.at, bl: BL_CLS[r.value.bl] });
+    });
+    return out.sort(function (x, y) { return String(x.at).localeCompare(String(y.at)); });
+  }
+  /* v0.3.86 (R12Y63 · #408 Part 2): D-00 書類ツール の 契約ごとの B/L 形態 (共用ファイル) — エンジン meta.customs_contract_bl がある時だけ読む (今は無い = Part 1 だけ)。
+     形 (仮 · D-00 の回答で決める): { contracts: { "{販売CO}": { bl: "WAY" | "ORIG" | "SUR" | "waybill" ... } } } */
+  function d00Bl(scNo) {
+    var x = api().S.customsContractBl, c = scNo && x && x.contracts && x.contracts[scNo];
+    var v = c && BL_CLS[c.bl];
+    return v ? { v: v, why: 'D-00 の契約の値（' + scNo + '）' } : null;
+  }
+  var BL_ASK = 'B/L 形態を選んでください';
+  function pickBl(ct, ivNo) {
+    ct = ct || {};
+    var d = d00Bl(ct.scNo);
+    if (d) return d;
+    if (!ct.sc || !ct.scIvs) { var w0 = '販売契約を読めません'; return { v: '', why: w0, red: BL_ASK + '（' + w0 + '）' }; }
+    var h = contractBlHistory(ct.scIvs, ivNo);
+    if (!h.length) { var w1 = '同じ契約の送付記録がありません'; return { v: '', why: w1, red: BL_ASK + '（' + w1 + '）' }; }
+    var kinds = {};
+    h.forEach(function (x) { kinds[x.bl] = 1; });
+    if (Object.keys(kinds).length > 1) { var w2 = '同じ契約で B/L 形態が違います'; return { v: '', why: w2, red: w2 }; }
+    var last = h[h.length - 1];
+    return { v: last.bl, why: '同じ販売契約（' + (ct.scNo || '—') + '）の前回 ' + last.iv + ' と同じ' };
   }
 
   /* ── D-03 自動モード (同じ出所の画面の中) ── */
@@ -358,8 +385,9 @@ C01.customs = (function () {
     var pMail = graphOk ? src.customsFindS1(iv.bkg_no, ivNo).catch(function (e) { st.err.push('① の検索: ' + e.message); return null; }) : Promise.resolve(null);
     var pSent = graphOk ? src.customsFindSent(ivNo).catch(function () { return []; }) : Promise.resolve([]);
     /* customs_bl.json = エンジンの meta.customs_bl がある時だけ読む (無いエンジンに 404 を出さない) */
-    var pBl = (a.S.customsBl === undefined && a.S.meta && a.S.meta.customs_bl ? src.getJson(String(a.S.meta.customs_bl)).then(function (x) { a.S.customsBl = x; }, function () { a.S.customsBl = null; }) : Promise.resolve())
-      .then(function () { return graphOk ? contractOf(ivNo) : { buyer: '', si: null }; });
+    /* v0.3.86 (R12Y63 · #408): customs_bl.json (6 か月) は読まない · D-00 の契約ごとの値 = エンジンの meta.customs_contract_bl がある時だけ (今は無い) */
+    var pBl = (a.S.customsContractBl === undefined && a.S.meta && a.S.meta.customs_contract_bl ? src.getJson(String(a.S.meta.customs_contract_bl)).then(function (x) { a.S.customsContractBl = x; }, function () { a.S.customsContractBl = null; }) : Promise.resolve())
+      .then(function () { return graphOk ? contractOf(ivNo) : { buyer: '', si: null, sc: '', scNo: '', scIvs: null }; });
     /* v0.3.66 (R12Y3 · #366 ②): customs_broker.json = エンジンの meta.customs_broker がある時だけ読む */
     var pCb = a.S.customsBroker === undefined && a.S.meta && a.S.meta.customs_broker ? src.getJson(String(a.S.meta.customs_broker)).then(function (x) { a.S.customsBroker = x; }, function () { a.S.customsBroker = null; }) : Promise.resolve();
     /* v0.3.65 (R12Y · #361): 形態 · タイプ 空欄の枠 (CT が入った枠だけ · COMPASS GET だけ) — 読めない = null (送信を止める) */
@@ -378,10 +406,11 @@ C01.customs = (function () {
     Promise.all([pMail, pSent, pBl, pFt, pCb, pS1, pReq, pPh, pBc]).then(function (r) {
       if (!st || st.iv !== ivNo) return;
       st.mail = r[0]; st.sent = r[1] || []; st.buyer = (r[2] || {}).buyer || ''; st.si = (r[2] || {}).si; st.ftBlank = r[3];
+      st.sc = (r[2] || {}).sc || ''; st.scNo = (r[2] || {}).scNo || '';
       pickRoute(iv);
-      var h = st.buyer ? blHistory(st.buyer, ivNo) : [];
-      var pb = pickBl(h);
-      st.bl = pb.v; st.blWhy = pb.why;
+      var pb = pickBl(r[2], ivNo);
+      st.bl = pb.v; st.blWhy = pb.why; st.blRed = pb.red || '';
+      var h = st.buyer ? consHistory(st.buyer, ivNo) : [];
       st.prevCons = h.length ? (h[h.length - 1].cons || '') : null;
       return brokerSig(mailLike(), brokerGuess(mailLike())).then(function (gs) {
         if (!st || st.iv !== ivNo) return;
@@ -768,7 +797,7 @@ C01.customs = (function () {
         '<tr><th>POD</th><td>' + podCell(P) + '</td><td class="t2' + (P.pod.red ? ' c01-cr' : '') + '">' + esc(P.pod.why) + '</td></tr>' +
         '<tr><th>FOB 運賃</th><td><label><input type="checkbox" data-cfreight' + (P.freight.v ? ' checked' : '') + dis + '> 表示</label></td><td class="t2' + (P.freight.red ? ' c01-cr' : '') + '">' + esc(P.freight.why) + '</td></tr>' +
         '<tr><th>B/L 形態</th><td><select data-cbl' + dis + '><option value=""' + (!P.bl.v ? ' selected' : '') + '>（選んでください）</option>' +
-        ['original', 'waybill', 'surrender'].map(function (k) { return '<option value="' + k + '"' + (P.bl.v === k ? ' selected' : '') + '>' + BL_LABEL[k] + '</option>'; }).join('') + '</select></td><td class="t2' + (!P.bl.v ? ' c01-cr' : '') + '">' + esc(st.blWhy) + '</td></tr></table>';
+        ['original', 'waybill', 'surrender'].map(function (k) { return '<option value="' + k + '"' + (P.bl.v === k ? ' selected' : '') + '>' + BL_LABEL[k] + '</option>'; }).join('') + '</select></td><td class="t2' + (!P.bl.v ? ' c01-cr' : '') + '" data-cblwhy>' + esc(!P.bl.v && st.blRed && st.blWhy !== '担当者が選択' ? st.blRed : st.blWhy) + '</td></tr></table>';
       // 警告
       var W = rv.warnings || [];
       var cmp = cmpCompass(st.g, rv.info);
@@ -1048,7 +1077,7 @@ C01.customs = (function () {
         value: { test: res.test, again: again, subject: subj, to: res.to, cc: res.cc, to_n: res.to.length, cc_n: res.cc.length,
           internet_message_id: res.internet_message_id, file: r.file, pages: r.pages, pdf_sha256: r.sha256, d03: r.version,
           picks: { ivSino: r.picks.ivSino.v, siSino: r.picks.siSino.v, pod: r.picks.pod.v, freight: r.picks.freight.v },
-          bl: r.picks.bl.v, buyer_id: (r.info || {}).buyer_id || st.buyer || '', consignee: (r.info || {}).consignee || '',
+          bl: r.picks.bl.v, bl_why: st.blWhy || '', sc_id: st.sc || '', sc_no: st.scNo || '', buyer_id: (r.info || {}).buyer_id || st.buyer || '', consignee: (r.info || {}).consignee || '',
           red: (r.warnings || []).filter(function (w) { return w.red; }).map(function (w) { return w.item; }),
           real_to_n: rc.to.length, real_cc_n: rc.cc.length, to_how: rc.how, broker_dom: st.brokerDom || '', broker_line: String(st.body || '').split(/\r?\n/)[0].trim(),
           broker_person: personLine(st.body), name_src: st.nameSrc || null, route: route,
@@ -1115,5 +1144,5 @@ C01.customs = (function () {
   return { headerBtn: headerBtn, open: open, lacks: lacks, records: records, _pickBl: pickBl, _cmp: cmpCompass, _blockers: function () { return st ? blockers() : null; },
     _greeting: greeting, _sigCompany: sigCompany, _shareCut: shareCut, _baseRecips: baseRecips, _domestic: domestic, _route: function () { return st ? st.route : null; }, _recips: function () { return st ? recips() : null; },
     _subject: function () { return st ? subject() : null; }, _req: function () { return st ? reqNow() : null; }, _sendBlockers: function () { return st ? sendBlockers() : null; },
-    _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
+    _draftBlockers: function () { return st ? draftBlockers() : null; }, _matchBroker: matchBroker, _normCo: normCo, _pickBl: pickBl, _blState: function () { return st ? { bl: st.bl, why: st.blWhy, red: st.blRed || '', sc: st.sc, scNo: st.scNo } : null; }, _bc: function () { return st ? { now: bcNow(), check: bcCheck(), prop: st.prop, noRouteWhy: st.noRouteWhy } : null; }, _shareFiles: function () { return st ? shareFiles() : null; }, _shareOn: function () { return st ? shareOn() : null; } };
 })();
