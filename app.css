@@ -1,5 +1,6 @@
 /* ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL 画面 (試案のレイアウト · 色は LEENAI_COMMON テーマ トークン) */
 :root, [data-theme="dark"] {
+  --ivhead-strong: #2f3644; --ivsep: var(--accent, #5b9bff);   /* v0.3.92 (R12Y74 · #419): IV 見出し 一段 濃く (区切り A) */
   --cy-urgent: #ff5a6a;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: rgba(230, 40, 60, .55); --row-over-b: #ff4d5e; --row-over-t: #ffffff; --over-chip: #d91a2e;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: rgba(34, 160, 90, .16); --row-ok-b: rgba(34, 160, 90, .35);
@@ -10,6 +11,7 @@
   --row-hum: rgba(70, 130, 235, .18); --row-hum-b: rgba(110, 160, 255, .45);   /* v0.3.60 (R11R · #334): 人が確認 = 青 */
 }
 [data-theme="light"] {
+  --ivhead-strong: #dde4ef; --ivsep: var(--accent, #2f5fb3);   /* v0.3.92 (R12Y74 · #419): IV 見出し 一段 濃く (区切り A) */
   --cy-urgent: #C8102E;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: #F8B4BC; --row-over-b: #C8102E; --row-over-t: #7A0010; --over-chip: #C8102E;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #E8F4EC; --row-ok-b: #C8E3D2; --row-check: #FDF1E2; --row-check-b: #F0D3AC; --row-wait: #F1F1EE; --row-wait-b: #E0E0DA;
@@ -17,6 +19,7 @@
   --row-hum: #E3ECFA; --row-hum-b: #B9CDEE;
 }
 [data-theme="leenai"] {
+  --ivhead-strong: #c6dcc1; --ivsep: var(--accent, #2f5fb3);   /* v0.3.92 (R12Y74 · #419): IV 見出し 一段 濃く (区切り A) */
   --cy-urgent: #B3001B;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: #F4A9B2; --row-over-b: #B3001B; --row-over-t: #6E000E; --over-chip: #B3001B;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #DCEFD9; --row-ok-b: #B6D8B0; --row-check: #F6E6CC; --row-check-b: #E2C291; --row-wait: #E3EBE1; --row-wait-b: #C8D5C5;
@@ -24,6 +27,7 @@
   --row-hum: #D8E4F5; --row-hum-b: #A9C0E2;
 }
 [data-theme="focus"] {
+  --ivhead-strong: #bfc7d6; --ivsep: var(--accent, #2f5fb3);   /* v0.3.92 (R12Y74 · #419): IV 見出し 一段 濃く (区切り A) */
   --cy-urgent: #A8001A;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: #F2A6B0; --row-over-b: #A8001A; --row-over-t: #64000D; --over-chip: #A8001A;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #D9ECDF; --row-ok-b: #AFCFB9; --row-check: #F3E3CC; --row-check-b: #DDBF92; --row-wait: #DDE2EA; --row-wait-b: #BEC8D6;
@@ -83,6 +87,9 @@
 .c01-table .r { text-align: right; } .c01-table .num { font-variant-numeric: tabular-nums; }
 .c01-table .c-no { width: 28px; font-size: 11px; color: var(--text3); text-align: center; }
 .c01-ivrow td { background: var(--ivhead); border-bottom: 1px solid var(--ivhead-b); padding: 8px 12px; white-space: normal; }
+/* v0.3.92 (R12Y74 · #419 区切り A): IV 見出し = 一段 濃い 背景 + 上 2px 線 + 左 4px 帯 (強調色) · IV と IV の間 10px (最初の IV の上は なし) · 行の色 · 文字 は 変えない */
+.c01-table tbody[data-iv] > tr.c01-ivrow > td { background: var(--ivhead-strong, var(--ivhead)); box-shadow: inset 4px 0 0 var(--ivsep), inset 0 2px 0 var(--ivsep); padding-left: 14px; }
+.c01-table tbody[data-iv] + tbody[data-iv] > tr.c01-ivrow > td { border-top: 10px solid var(--read, var(--bg)); }
 .c01-ivhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .c01-ivhead .b { font-weight: 700; } .c01-ivhead .b .c01-cyurgent { color: var(--cy-urgent); font-weight: 800; } .c01-ivhead .pol { font-weight: 600; color: var(--accent); }
 .c01-row.ok td { background: var(--row-ok); } .c01-row.check td { background: var(--row-check); } .c01-row.wait td { background: var(--row-wait); }
