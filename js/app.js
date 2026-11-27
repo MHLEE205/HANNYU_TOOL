@@ -1061,7 +1061,7 @@ window.C01 = window.C01 || {};
     b.groups.forEach(function (g) {
       var iv = g.iv;
       html += '<tbody data-iv="' + esc(iv.iv_no) + '"><tr class="c01-ivrow"><td colspan="15"><div class="c01-ivhead">' +
-        '<span class="b">▼ CY ' + esc(md(iv.cy_cut)) + '</span>' +
+        '<span class="b">▼ CY ' + cyDate(iv.cy_cut) + '</span>' +      /* v0.3.91 (R12Y73 · #417) */
         '<span class="pol">' + esc(iv.pol || '') + '</span>' +
         '<span class="mono">' + esc(iv.iv_no) + '</span>' +
         '<span class="t2">BKG ' + esc(iv.bkg_no || '') + '</span>' +
@@ -2972,6 +2972,31 @@ window.C01 = window.C01 || {};
     var c = iv && iv.cy_cut ? String(iv.cy_cut).slice(0, 10) : '';
     return !c || c >= todayJst();
   }
+  /* v0.3.91 (R12Y73 · #417): 実況表 IV 見出しの 「CY MM/DD」 — CY CUT ≤ 次の営業日 (今日 CUT を含む) = 急ぎ (日付の文字だけ 色 + 太字 · 表示だけ)。
+     営業日 = 土 · 日 · 日本の祝日 (C01.JP_HOLIDAYS = エンジン 催促 is_biz と同じ) 以外。今日 = エンジンの日 と この端末の JST 日付 の 遅い方 (0 時を過ぎたらすぐ 次の日)。
+     通関書類の 送付 · 許可 とは関係なく 同じ基準。 */
+  function ymdAdd(d, n) { var t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }
+  function isBizDay(d) {
+    var w = new Date(d + 'T00:00:00Z').getUTCDay();
+    if (w === 0 || w === 6) return false;
+    var h = C01.JP_HOLIDAYS;
+    return !(h && h.days && h.days.indexOf(d) >= 0);
+  }
+  function nextBizDay(d) { var r = ymdAdd(d, 1); while (!isBizDay(r)) r = ymdAdd(r, 1); return r; }
+  function urgentToday() {
+    var dev = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10), t = todayJst();
+    return dev > t ? dev : t;
+  }
+  function cyUrgent(cut, today) {
+    var c = cut ? String(cut).slice(0, 10) : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(c)) return false;
+    return c <= nextBizDay(today || urgentToday());
+  }
+  function cyDate(cut) {
+    var t = esc(md(cut));
+    return cyUrgent(cut) ? '<span class="c01-cyurgent" title="次の営業日までの CUT">' + t + '</span>' : t;
+  }
+  C01.bizday = { isBizDay: isBizDay, nextBizDay: nextBizDay, cyUrgent: cyUrgent, urgentToday: urgentToday };
   /* 写真枚数の色 (v0.3.10 · 決定 #143 · 表示だけ): 業者ごとの通常範囲 (エンジン meta.photo_range = 10〜90% の 下 −2 · 上 +3 · 週 1 回計算) の外。
      範囲のない業者 (台数 10 未満) · meta がない時 = 旧 実況表 (phase4_report.py · photo_count < 6 or >= 15) と同じ基準 */
   function photoRange(pk) {

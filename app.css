@@ -1,5 +1,6 @@
 /* ✦ Powered by LEENAI Automation System — C-01 搬入票 TOOL 画面 (試案のレイアウト · 色は LEENAI_COMMON テーマ トークン) */
 :root, [data-theme="dark"] {
+  --cy-urgent: #ff5a6a;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: rgba(230, 40, 60, .55); --row-over-b: #ff4d5e; --row-over-t: #ffffff; --over-chip: #d91a2e;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: rgba(34, 160, 90, .16); --row-ok-b: rgba(34, 160, 90, .35);
   --row-check: rgba(224, 140, 30, .18); --row-check-b: rgba(224, 160, 88, .55);
@@ -9,18 +10,21 @@
   --row-hum: rgba(70, 130, 235, .18); --row-hum-b: rgba(110, 160, 255, .45);   /* v0.3.60 (R11R · #334): 人が確認 = 青 */
 }
 [data-theme="light"] {
+  --cy-urgent: #C8102E;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: #F8B4BC; --row-over-b: #C8102E; --row-over-t: #7A0010; --over-chip: #C8102E;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #E8F4EC; --row-ok-b: #C8E3D2; --row-check: #FDF1E2; --row-check-b: #F0D3AC; --row-wait: #F1F1EE; --row-wait-b: #E0E0DA;
   --row-sel: #FBE6CB; --ivhead: #E9EFF7; --ivhead-b: #D5DEEA; --c-diff: #8A4D00; --c-manual: #1E5AA8; --c-photo: #5B4A9E; --c-fax: #8A3B2E; --ph-alert: #FFC7CE;
   --row-hum: #E3ECFA; --row-hum-b: #B9CDEE;
 }
 [data-theme="leenai"] {
+  --cy-urgent: #B3001B;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: #F4A9B2; --row-over-b: #B3001B; --row-over-t: #6E000E; --over-chip: #B3001B;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #DCEFD9; --row-ok-b: #B6D8B0; --row-check: #F6E6CC; --row-check-b: #E2C291; --row-wait: #E3EBE1; --row-wait-b: #C8D5C5;
   --row-sel: #F0D9B0; --ivhead: #D4E8D0; --ivhead-b: #A8C8A3; --c-diff: #7c3f00; --c-manual: #1f4f86; --c-photo: #4a3c86; --c-fax: #7a2e22; --ph-alert: #F6C3CA;
   --row-hum: #D8E4F5; --row-hum-b: #A9C0E2;
 }
 [data-theme="focus"] {
+  --cy-urgent: #A8001A;   /* v0.3.91 (R12Y73 · #417): 次の営業日までの CY CUT (日付の文字だけ) */
   --row-over: #F2A6B0; --row-over-b: #A8001A; --row-over-t: #64000D; --over-chip: #A8001A;   /* v0.3.15 R7N H-4: COMPASS 枠外 (赤) */
   --row-ok: #D9ECDF; --row-ok-b: #AFCFB9; --row-check: #F3E3CC; --row-check-b: #DDBF92; --row-wait: #DDE2EA; --row-wait-b: #BEC8D6;
   --row-sel: #EBD5B0; --ivhead: #CDD4E0; --ivhead-b: #9DAABE; --c-diff: #7c2d12; --c-manual: #1f3f70; --c-photo: #40357a; --c-fax: #7a2618; --ph-alert: #F2C2C8;
@@ -80,7 +84,7 @@
 .c01-table .c-no { width: 28px; font-size: 11px; color: var(--text3); text-align: center; }
 .c01-ivrow td { background: var(--ivhead); border-bottom: 1px solid var(--ivhead-b); padding: 8px 12px; white-space: normal; }
 .c01-ivhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.c01-ivhead .b { font-weight: 700; } .c01-ivhead .pol { font-weight: 600; color: var(--accent); }
+.c01-ivhead .b { font-weight: 700; } .c01-ivhead .b .c01-cyurgent { color: var(--cy-urgent); font-weight: 800; } .c01-ivhead .pol { font-weight: 600; color: var(--accent); }
 .c01-row.ok td { background: var(--row-ok); } .c01-row.check td { background: var(--row-check); } .c01-row.wait td { background: var(--row-wait); }
 .c01-row.hum td { background: var(--row-hum); }   /* v0.3.60 (R11R · #334): 人が確認 = 青 (.ok の後 · .sel · .over より前) */
 .c01-row.sel td { background: var(--row-sel); }
